@@ -134,6 +134,15 @@ int main(void)
 	CHECK(loc >= 0, "uniform location");
 	glUniform4f(loc, 0.f, 1.f, 0.f, 1.f);
 
+	{
+		/* size known only to the server: reply carries the length */
+		GLfloat back[4] = { -1, -1, -1, -1 };
+		glGetUniformfv(prog, loc, back);
+		CHECK(back[0] == 0.f && back[1] == 1.f && back[2] == 0.f &&
+		      back[3] == 1.f, "glGetUniformfv %g %g %g %g", back[0],
+		      back[1], back[2], back[3]);
+	}
+
 	static const GLfloat tri[] = { -1.f, -1.f, 3.f, -1.f, -1.f, 3.f };
 	glClearColor(0.f, 0.f, 0.f, 1.f);
 	glClear(GL_COLOR_BUFFER_BIT);
@@ -263,8 +272,10 @@ int main(void)
 	/* The bridge must not hand out entry points it does not implement
 	 * (a driver may legally return non-NULL for anything). */
 	CHECK(eglGetProcAddress("glNotARealFunction") == NULL, "proc unknown");
-	CHECK(eglGetProcAddress("glGetUniformfv") == NULL,
+	CHECK(eglGetProcAddress("glMapBufferRange") == NULL,
 	      "unsupported entry point must be hidden");
+	CHECK(eglGetProcAddress("glGetUniformfv") != NULL,
+	      "server-sized query must be advertised");
 #endif
 
 	eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);

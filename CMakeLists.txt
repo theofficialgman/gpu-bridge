@@ -45,43 +45,67 @@ endif()
 set(GB_GEN_DIR ${CMAKE_BINARY_DIR}/gen)
 set(GB_GEN_OUT
     ${GB_GEN_DIR}/gb_ops.h ${GB_GEN_DIR}/gb_handle_kinds.h
-    ${GB_GEN_DIR}/gb_client_gen.c ${GB_GEN_DIR}/gb_client_gen.h
+    ${GB_GEN_DIR}/gb_pname_classes.h
+    ${GB_GEN_DIR}/gb_client_gles_gen.c ${GB_GEN_DIR}/gb_client_gles_gen.h
+    ${GB_GEN_DIR}/gb_client_gl_gen.c ${GB_GEN_DIR}/gb_client_gl_gen.h
     ${GB_GEN_DIR}/gb_server_gen.c)
 add_custom_command(
   OUTPUT ${GB_GEN_OUT}
   COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/gb-gen/gb_gen.py
           ${CMAKE_SOURCE_DIR}/registry ${GB_GEN_DIR}
   DEPENDS tools/gb-gen/gb_gen.py tools/gb-gen/gen_config.py
-          registry/gl.xml registry/egl.xml
-  COMMENT "gb-gen: generating EGL/GLES encoders and decoders")
+          registry/gl.xml registry/egl.xml registry/glx.xml
+  COMMENT "gb-gen: generating EGL/GLES/GLX/GL encoders and decoders")
 add_custom_target(gb_generated DEPENDS ${GB_GEN_OUT})
 
 # --- server (always the native 64-bit ABI) -----------------------------------
 add_executable(gbd src/server/gbd.c src/server/gb_handle.c
-                   src/server/gb_server_manual.c ${GB_GEN_DIR}/gb_server_gen.c)
+                   src/server/gb_server_manual.c src/server/gb_server_x11.c
+                   src/server/gb_server_sizes.c ${GB_GEN_DIR}/gb_server_gen.c)
 add_dependencies(gbd gb_generated)
 target_include_directories(gbd PRIVATE src/server ${GB_GEN_DIR})
 target_link_libraries(gbd gb_proto Threads::Threads ${CMAKE_DL_LIBS})
 set_source_files_properties(${GB_GEN_DIR}/gb_server_gen.c PROPERTIES
-                            COMPILE_FLAGS -Wno-unused-label)
+                            COMPILE_FLAGS "-Wno-unused-label -Wno-unused-variable")
 
 # --- client libraries ----------------------------------------------------------
-# One library exporting EGL + GLESv2/3 (a GLVND-vendor split comes later).
-set(GB_CLIENT_SRC src/client/gb_client.c src/client/gb_client_gl.c
-                  ${GB_GEN_DIR}/gb_client_gen.c)
-function(gb_add_client name proto_target)
-  add_library(${name} SHARED ${GB_CLIENT_SRC})
+# gles: EGL + GLES2/3        (libgb{32,64}_gl.so)
+# glx : GLX + desktop GL     (built as libGL.so.1 in shim{32,64}/ so an app
+#       linked against libGL.so.1 picks it up via LD_LIBRARY_PATH/RUNPATH)
+set(GB_CLIENT_COMMON src/client/gb_client.c src/client/gb_client_arrays.c
+                     src/client/gb_client_strings.c)
+function(gb_add_gles name proto_target)
+  add_library(${name} SHARED ${GB_CLIENT_COMMON} src/client/gb_client_gl.c
+              ${GB_GEN_DIR}/gb_client_gles_gen.c)
   add_dependencies(${name} gb_generated)
   target_include_directories(${name} PRIVATE src/client ${GB_GEN_DIR})
   target_link_libraries(${name} ${proto_target} Threads::Threads
                         ${CMAKE_DL_LIBS})
   set_target_properties(${name} PROPERTIES C_VISIBILITY_PRESET hidden)
 endfunction()
-gb_add_client(gb64_gl gb_proto)
+function(gb_add_glx name proto_target shimdir)
+  add_library(${name} SHARED ${GB_CLIENT_COMMON} src/client/gb_client_glx.c
+              ${GB_GEN_DIR}/gb_client_gl_gen.c)
+  add_dependencies(${name} gb_generated)
+  target_include_directories(${name} PRIVATE src/client ${GB_GEN_DIR})
+  target_compile_definitions(${name} PRIVATE GB_LIB_GL=1)
+  target_link_libraries(${name} ${proto_target} Threads::Threads
+                        ${CMAKE_DL_LIBS})
+  set_target_properties(${name} PROPERTIES
+    C_VISIBILITY_PRESET hidden OUTPUT_NAME GL VERSION 1.7.0 SOVERSION 1
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${shimdir})
+endfunction()
+gb_add_gles(gb64_gl gb_proto)
+gb_add_glx(gb64_glx gb_proto shim64)
+set_source_files_properties(${GB_GEN_DIR}/gb_client_gl_gen.c PROPERTIES
+                            COMPILE_FLAGS "-Wno-unused-variable")
 if(GB_HOST_CAN_M32)
-  gb_add_client(gb32_gl gb_proto32)
+  gb_add_gles(gb32_gl gb_proto32)
   target_compile_options(gb32_gl PRIVATE -m32)
   target_link_options(gb32_gl PRIVATE -m32)
+  gb_add_glx(gb32_glx gb_proto32 shim32)
+  target_compile_options(gb32_glx PRIVATE -m32)
+  target_link_options(gb32_glx PRIVATE -m32)
 endif()
 
 # --- tests -------------------------------------------------------------------

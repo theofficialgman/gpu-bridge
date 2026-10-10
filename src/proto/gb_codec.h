@@ -18,6 +18,12 @@
 
 /* Sentinel byte-length meaning "this pointer argument was NULL". */
 #define GB_NULL_LEN 0xFFFFFFFFu
+/* Pointer argument is a buffer-object offset (a pixel pack/unpack buffer is
+ * bound): the blob is 8 bytes holding the offset, not data. */
+#define GB_PBO_LEN 0xFFFFFFFEu
+/* Out-array whose length only the server knows (it holds the GL state); the
+ * reply carries the byte count. */
+#define GB_SRV_LEN 0xFFFFFFFDu
 /* Upper bound for any single array argument (sanity / DoS guard). */
 #define GB_MAX_ARRAY_BYTES (256u << 20)
 

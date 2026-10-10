@@ -1,0 +1,216 @@
+/*
+ * gb_server_sizes.c - size rules that need native GL state.
+ *
+ * The client sizes what it *sends* from its shadow state; the server sizes
+ * the same thing from the real driver state and rejects any mismatch. Out
+ * arrays whose length only the server can know are sized here.
+ *
+ * Queries must not raise GL errors the application would later see, so
+ * state that only exists in some API flavors is queried only there.
+ */
+#define _GNU_SOURCE
+#include <string.h>
+
+#include "gb_server_impl.h"
+
+enum { FL_ES2 = 1, FL_ES3, FL_DESKTOP };
+
+static int geti(uint32_t pname)
+{
+	return gb_sv_geti(NULL, pname);
+}
+
+/* Which GL flavor is current on this thread (cached per context pair). */
+static int flavor(void)
+{
+	static __thread void *e_key, *g_key;
+	static __thread int fl;
+	GB_NATIVE(eglGetCurrentContext, EGLContext, (void));
+	GB_NATIVE(glXGetCurrentContext, GLXContext, (void));
+	GB_NATIVE(glGetString, const GLubyte *, (GLenum));
+	void *e = fn_eglGetCurrentContext ? (void *)fn_eglGetCurrentContext()
+					  : NULL;
+	void *g = fn_glXGetCurrentContext ? (void *)fn_glXGetCurrentContext()
+					  : NULL;
+
+	if (fl && e == e_key && g == g_key)
+		return fl;
+	e_key = e;
+	g_key = g;
+	if (e) {
+		const char *v = fn_glGetString ?
+			(const char *)fn_glGetString(GL_VERSION) : NULL;
+		fl = (v && !strncmp(v, "OpenGL ES 2", 11)) ? FL_ES2 : FL_ES3;
+	} else {
+		fl = FL_DESKTOP;
+	}
+	return fl;
+}
+
+static void pixstore(int mode, struct gb_pixstore *ps)
+{
+	int pack = mode == GB_PM_PACK, fl = flavor();
+
+	memset(ps, 0, sizeof(*ps));
+	ps->alignment = geti(pack ? 0x0D05 : 0x0CF5);
+	if (fl == FL_ES2)
+		return;
+	ps->row_length = geti(pack ? 0x0D02 : 0x0CF2);
+	ps->skip_pixels = geti(pack ? 0x0D04 : 0x0CF4);
+	ps->skip_rows = geti(pack ? 0x0D03 : 0x0CF3);
+	if (!pack || fl == FL_DESKTOP) {
+		ps->image_height = geti(pack ? 0x806C : 0x806E);
+		ps->skip_images = geti(pack ? 0x806B : 0x806D);
+	}
+}
+
+int64_t gb_sv_pixel_bytes(int mode, uint32_t format, uint32_t type, int64_t w,
+			  int64_t h, int64_t d)
+{
+	struct gb_pixstore ps;
+
+	pixstore(mode, &ps);
+	return gb_pixel_bytes3(format, type, w, h, d, &ps);
+}
+
+int64_t gb_sv_bitmap_bytes(int mode, int64_t w, int64_t h)
+{
+	struct gb_pixstore ps;
+
+	pixstore(mode, &ps);
+	return gb_bitmap_bytes(w, h, &ps);
+}
+
+/* ---- server-sized out arrays ------------------------------------------------ */
+
+static int uniform_components(uint32_t type)
+{
+	switch (type) {
+	case 0x8B51: case 0x8B54: case 0x8B58: case 0x8DC7: case 0x8FFD:
+		return 3; /* VEC3 variants */
+	case 0x8B52: case 0x8B55: case 0x8B59: case 0x8DC8: case 0x8FFE:
+	case 0x8B5A: case 0x8F46:
+		return 4; /* VEC4, MAT2 */
+	case 0x8B50: case 0x8B53: case 0x8B57: case 0x8DC6: case 0x8FFC:
+		return 2; /* VEC2 */
+	case 0x8B5B: case 0x8F47:
+		return 9; /* MAT3 */
+	case 0x8B5C: case 0x8F48:
+		return 16; /* MAT4 */
+	case 0x8B65: case 0x8B67: case 0x8F49: case 0x8F4B:
+		return 6; /* MAT2x3, MAT3x2 */
+	case 0x8B66: case 0x8B69: case 0x8F4A: case 0x8F4D:
+		return 8; /* MAT2x4, MAT4x2 */
+	case 0x8B68: case 0x8B6A: case 0x8F4C: case 0x8F4E:
+		return 12; /* MAT3x4, MAT4x3 */
+	default:
+		return 1; /* scalars, bool, samplers, images */
+	}
+}
+
+int64_t gb_sv_sz_uniform(struct gb_sth *t, int wsz, uint32_t program,
+			 int32_t location)
+{
+	GB_NATIVE(glGetProgramiv, void, (GLuint, GLenum, GLint *));
+	GB_NATIVE(glGetActiveUniform, void,
+		  (GLuint, GLuint, GLsizei, GLsizei *, GLint *, GLenum *,
+		   GLchar *));
+	GB_NATIVE(glGetUniformLocation, GLint, (GLuint, const GLchar *));
+	GLint nu = 0, maxlen = 0;
+
+	if (!fn_glGetProgramiv || !fn_glGetActiveUniform ||
+	    !fn_glGetUniformLocation || location < 0)
+		return -1;
+	fn_glGetProgramiv(program, 0x8B86 /* ACTIVE_UNIFORMS */, &nu);
+	fn_glGetProgramiv(program, 0x8B87 /* ACTIVE_UNIFORM_MAX_LENGTH */,
+			  &maxlen);
+	if (nu <= 0 || maxlen <= 0 || maxlen > 4096)
+		return -1;
+	char *name = gb_tmp(t, (size_t)maxlen + 16);
+	char *elem = gb_tmp(t, (size_t)maxlen + 32);
+	if (!name || !elem)
+		return -1;
+
+	for (GLint i = 0; i < nu; i++) {
+		GLsizei len = 0;
+		GLint size = 0;
+		GLenum type = 0;
+		fn_glGetActiveUniform(program, (GLuint)i, maxlen, &len, &size,
+				      &type, name);
+		if (len <= 0)
+			continue;
+		int comps = uniform_components(type);
+		int is_arr = len > 3 && !strcmp(name + len - 3, "[0]");
+		if (!is_arr) {
+			if (fn_glGetUniformLocation(program, name) == location)
+				return (int64_t)comps * wsz;
+			continue;
+		}
+		name[len - 3] = 0;
+		for (GLint k = 0; k < size; k++) {
+			snprintf(elem, (size_t)maxlen + 32, "%s[%d]", name, k);
+			if (fn_glGetUniformLocation(program, elem) == location)
+				return (int64_t)comps * wsz;
+		}
+	}
+	return -1;
+}
+
+int64_t gb_sv_sz_pixels_tex(struct gb_sth *t, uint32_t target, int32_t level,
+			    uint32_t format, uint32_t type)
+{
+	GB_NATIVE(glGetTexLevelParameteriv, void, (GLenum, GLint, GLenum, GLint *));
+	GLint w = 0, h = 1, d = 1;
+
+	if (!fn_glGetTexLevelParameteriv || flavor() != FL_DESKTOP)
+		return -1;
+	fn_glGetTexLevelParameteriv(target, level, 0x1000 /* WIDTH */, &w);
+	fn_glGetTexLevelParameteriv(target, level, 0x1001 /* HEIGHT */, &h);
+	fn_glGetTexLevelParameteriv(target, level, 0x8071 /* DEPTH */, &d);
+	return gb_sv_pixel_bytes(GB_PM_PACK, format, type, w, h, d);
+}
+
+int64_t gb_sv_sz_ctex(struct gb_sth *t, uint32_t target, int32_t level)
+{
+	GB_NATIVE(glGetTexLevelParameteriv, void, (GLenum, GLint, GLenum, GLint *));
+	GLint sz = 0;
+
+	if (!fn_glGetTexLevelParameteriv)
+		return -1;
+	fn_glGetTexLevelParameteriv(target, level,
+				    0x86A0 /* COMPRESSED_IMAGE_SIZE */, &sz);
+	return sz;
+}
+
+int64_t gb_sv_sz_pixelmap(struct gb_sth *t, int wsz, uint32_t map)
+{
+	if (map < 0x0C70 || map > 0x0C79)
+		return -1;
+	return (int64_t)geti(map - 0x0C70 + 0x0CB0) * wsz;
+}
+
+int64_t gb_sv_sz_uniformblock(struct gb_sth *t, int wsz, uint32_t program,
+			      uint32_t block, uint32_t pname)
+{
+	GB_NATIVE(glGetActiveUniformBlockiv, void,
+		  (GLuint, GLuint, GLenum, GLint *));
+	GLint n = 0;
+
+	if (pname != 0x8A43 /* ACTIVE_UNIFORM_INDICES */)
+		return wsz;
+	if (!fn_glGetActiveUniformBlockiv)
+		return -1;
+	fn_glGetActiveUniformBlockiv(program, block, 0x8A42, &n);
+	return n < 0 ? -1 : (int64_t)n * wsz;
+}
+
+int64_t gb_sv_sz_progstring(struct gb_sth *t, uint32_t target, uint32_t pname)
+{
+	GB_NATIVE(glGetProgramivARB, void, (GLenum, GLenum, GLint *));
+	GLint n = 0;
+
+	if (!fn_glGetProgramivARB)
+		return -1;
+	fn_glGetProgramivARB(target, 0x8627 /* PROGRAM_LENGTH_ARB */, &n);
+	return n < 0 ? -1 : n;
+}

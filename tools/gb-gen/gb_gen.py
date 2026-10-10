@@ -5,11 +5,14 @@ Khronos registries.
 
 Usage: gb_gen.py <registry-dir> <out-dir> [--report]
 
-Principles (see ARCHITECTURE.md section 5.3):
+One server and one opcode space serve several client libraries (see LIBS in
+gen_config.py): `gles` (EGL + GLES) and `gl` (GLX + desktop GL).
+
+Principles (ARCHITECTURE.md section 5.3):
   * Never guess a length. A pointer parameter whose size we cannot derive
-    from the registry (or from a rule in gen_config.py) is classified
-    UNSUPPORTED and gets a stub that logs + returns an error; it is listed in
-    the report so a human decides.
+    from the registry (or from a rule in gen_config.py) makes the command
+    UNSUPPORTED; it gets a stub that logs + returns an error and is listed by
+    --report so a human decides.
   * Wire types are fixed width. Pointer-width quantities travel as 64-bit.
   * The server never trusts a client length: it recomputes the expected byte
     count from the already-decoded scalar parameters and rejects mismatches.
@@ -45,38 +48,37 @@ def split_type(ctype):
     depth = toks.count("*")
     words = [w for w in toks if w not in ("*", "const", "struct")]
     base = " ".join(words)
-    # const on the pointee: 'const T *' -> first token is const.
-    const_base = toks and toks[0] == "const"
+    const_base = bool(toks) and toks[0] == "const"
     return base, depth, const_base
 
 
 class Cmd:
     def __init__(self, name, ret, params, api):
         self.name = name
-        self.ret = ret            # C type text
-        self.params = params      # list of dict(name, ctype, len)
-        self.api = api            # 'gl' or 'egl'
-        self.status = None        # generated|wrapped|manual|unsupported
+        self.ret = ret
+        self.params = params
+        self.api = api            # 'gl' | 'egl' | 'glx' (which registry)
+        self.gen = False          # server decoder + client encoder possible
         self.reason = ""
         self.sync = False
+        self.rk = ("void",)
+        self.status = {}          # lib -> generated|wrapped|manual|unsupported
 
 
-def load_commands(regdir):
-    out = {}
-    gl = ET.parse(regdir / "gl.xml").getroot()
-    egl = ET.parse(regdir / "egl.xml").getroot()
-    for root, api in ((gl, "gl"), (egl, "egl")):
-        cmds = root.find("commands")
-        for c in cmds.findall("command"):
+def load_registries(regdir):
+    cmds, roots = {}, {}
+    for key, fname in (("gl", "gl.xml"), ("egl", "egl.xml"),
+                       ("glx", "glx.xml")):
+        root = ET.parse(regdir / fname).getroot()
+        roots[key] = root
+        for c in root.find("commands").findall("command"):
             p = c.find("proto")
             name = p.find("name").text
-            params = []
-            for pe in c.findall("param"):
-                params.append(dict(name=pe.find("name").text,
-                                   ctype=c_type_of(pe),
-                                   len=pe.get("len")))
-            out[name] = Cmd(name, c_type_of(p), params, api)
-    return out, gl, egl
+            params = [dict(name=pe.find("name").text, ctype=c_type_of(pe),
+                           len=pe.get("len"), group=pe.get("group"))
+                      for pe in c.findall("param")]
+            cmds[name] = Cmd(name, c_type_of(p), params, key)
+    return cmds, roots
 
 
 def feature_commands(root, api, versions):
@@ -92,47 +94,53 @@ def feature_commands(root, api, versions):
     return names
 
 
-def extension_commands(root, ext_names, api_ok):
-    names = []
+def extension_table(root, apis):
+    """name -> [commands] for extensions supported on any of `apis`."""
+    out = {}
     for e in root.find("extensions").findall("extension"):
-        if e.get("name") not in ext_names:
+        sup = (e.get("supported") or "").split("|")
+        if not any(a in sup for a in apis):
             continue
-        if api_ok and e.get("supported") and not any(
-                a in e.get("supported").split("|") for a in api_ok):
-            continue
+        cl = []
         for r in e.findall("require"):
-            if r.get("api") and r.get("api") not in api_ok:
+            if r.get("api") and r.get("api") not in apis:
                 continue
-            for c in r.findall("command"):
-                names.append(c.get("name"))
-    return names
+            cl += [c.get("name") for c in r.findall("command")]
+        out[e.get("name")] = cl
+    return out
+
+
+def select_ext(name, sel):
+    names, prefixes = sel
+    return name in names or any(name.startswith(p) for p in prefixes)
 
 
 # --------------------------------------------------------------------------
 # Classification
 # --------------------------------------------------------------------------
 
-# C type -> (wire kind, wire bytes)
 VAL = {}
 for t in ("GLenum", "GLbitfield", "GLuint", "GLubyte", "GLushort", "GLboolean",
           "GLhalf", "GLhalfNV", "GLchar", "GLcharARB", "EGLBoolean", "EGLenum",
-          "EGLuint64KHR_lo"):
+          "unsigned int", "uint32_t", "GLhandleARB",
+          # X11 / GLX XIDs: 32-bit on the wire (client long may be 32-bit)
+          "XID", "Window", "Pixmap", "Font", "Colormap", "GLXDrawable",
+          "GLXWindow", "GLXPixmap", "GLXPbuffer", "GLXContextID",
+          "GLXPbufferSGIX", "GLXVideoSourceSGIX", "GLXVideoDeviceNV"):
     VAL[t] = ("u32", 4)
 for t in ("GLint", "GLsizei", "GLbyte", "GLshort", "GLfixed", "GLclampx",
-          "EGLint"):
+          "EGLint", "int", "Bool", "Status", "int32_t"):
     VAL[t] = ("i32", 4)
 for t in ("GLfloat", "GLclampf"):
     VAL[t] = ("f32", 4)
 for t in ("GLdouble", "GLclampd"):
     VAL[t] = ("f64", 8)
 for t in ("GLint64", "GLint64EXT", "GLintptr", "GLsizeiptr", "GLintptrARB",
-          "GLsizeiptrARB", "EGLAttrib", "EGLnsecsANDROID", "EGLTime",
-          "EGLTimeKHR"):
+          "GLsizeiptrARB", "EGLAttrib", "EGLnsecsANDROID", "int64_t"):
     VAL[t] = ("i64", 8)
-for t in ("GLuint64", "GLuint64EXT", "EGLuint64KHR"):
+for t in ("GLuint64", "GLuint64EXT", "EGLuint64KHR", "EGLTime", "EGLTimeKHR",
+          "uint64_t", "unsigned long"):
     VAL[t] = ("u64", 8)
-# EGLTime is khronos_utime_nanoseconds_t (unsigned); fix up:
-VAL["EGLTime"] = VAL["EGLTimeKHR"] = ("u64", 8)
 
 HANDLES = {
     "EGLDisplay": "DISPLAY", "EGLConfig": "CONFIG", "EGLSurface": "SURFACE",
@@ -140,9 +148,10 @@ HANDLES = {
     "EGLSync": "SYNC", "EGLSyncKHR": "SYNC", "EGLStreamKHR": "STREAM",
     "EGLDeviceEXT": "DEVICE", "GLsync": "GLSYNC",
     "GLeglImageOES": "IMAGE",
+    "GLXContext": "GLXCTX", "GLXFBConfig": "GLXFBC",
+    "GLXFBConfigSGIX": "GLXFBC",
 }
 
-# element types usable inside arrays: base -> (mode, wire bytes)
 ELEM = {}
 for t in ("GLchar", "GLcharARB", "GLbyte", "GLubyte", "GLboolean", "char",
           "void", "GLvoid"):
@@ -150,73 +159,107 @@ for t in ("GLchar", "GLcharARB", "GLbyte", "GLubyte", "GLboolean", "char",
 for t in ("GLshort", "GLushort", "GLhalf"):
     ELEM[t] = ("raw", 2)
 for t in ("GLint", "GLuint", "GLenum", "GLfloat", "GLsizei", "GLfixed",
-          "GLbitfield", "EGLint", "EGLBoolean", "EGLenum"):
+          "GLbitfield", "EGLint", "EGLBoolean", "EGLenum", "int",
+          "unsigned int", "int32_t", "uint32_t", "GLhandleARB", "GLclampf"):
     ELEM[t] = ("raw", 4)
-for t in ("GLint64", "GLuint64", "GLdouble", "GLint64EXT", "GLuint64EXT"):
+for t in ("GLint64", "GLuint64", "GLdouble", "GLint64EXT", "GLuint64EXT",
+          "int64_t", "uint64_t", "GLclampd"):
     ELEM[t] = ("raw", 8)
 for t in ("GLintptr", "GLsizeiptr", "EGLAttrib", "GLintptrARB",
-          "GLsizeiptrARB"):
+          "GLsizeiptrARB", "unsigned long"):
     ELEM[t] = ("widen", 8)
-for t, _ in HANDLES.items():
+for t in HANDLES:
     ELEM[t] = ("handle", 4)
 
-NUM_RE = re.compile(r"^\d+$")
 ID_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+PBO_UNPACK_RE = re.compile(cfg.PBO_UNPACK_REGEX)
+PBO_PACK_RE = re.compile(cfg.PBO_PACK_REGEX)
+
+
+def pbo_kind(cmd, base, pname):
+    """'pack' | 'unpack' | None for a pointer parameter."""
+    n = cmd
+    kind = None
+    if PBO_PACK_RE.match(n) or n in cfg.PBO_PACK_EXTRA:
+        kind = "pack"
+    elif PBO_UNPACK_RE.match(n) or n in cfg.PBO_UNPACK_EXTRA:
+        kind = "unpack"
+    if not kind:
+        return None
+    if base in ("void", "GLvoid") or (n, pname) in cfg.PBO_TYPED_PARAMS:
+        return kind
+    return None
+
+
+def pname_class(name):
+    for rx, cls in cfg.PNAME_CLASSES:
+        if re.match(rx, name):
+            return cls
+    return "generic"
 
 
 def parse_len(cmd, pname, expr, params):
-    """Return a (kind, payload) describing how to size an array.
-
-    ('expr', 'count*4')            plain expression of scalar params
-    ('compsize', 'pname'|'pixels') a helper-defined size
-    None                           unknown -> unsupported
-    """
     override = cfg.LEN_OVERRIDES.get((cmd, pname))
     if override:
         expr = override
     if expr is None:
         return None
     pnames = {p["name"] for p in params}
+    for rx, key, cands in cfg.SERVER_SIZED:
+        if re.match(rx, cmd):
+            for cand in cands:
+                if all(a in pnames for a in cand) and (
+                        key not in ("pixels_tex", "ctex")
+                        or "texture" not in pnames):
+                    return ("server", key, tuple(cand))
     m = re.match(r"^COMPSIZE\((.*)\)$", expr)
     if m:
-        args = tuple(a.strip() for a in m.group(1).split(","))
+        args = tuple(a.strip() for a in m.group(1).split(",") if a.strip())
         key = cfg.COMPSIZE.get((cmd, pname)) or cfg.COMPSIZE.get(args)
+        # these depend on server-held texture state: server-sized or nothing
+        if key in ("pixels_tex", "ctex"):
+            return None
         if key and all(a in pnames for a in args):
             return ("compsize", key, args)
         return None
-    # arithmetic over identifiers and integers only
     ids = ID_RE.findall(expr)
     if any(i not in pnames for i in ids):
         return None
-    if not re.match(r"^[A-Za-z0-9_\s\*\+\-\(\)]+$", expr):
+    if not re.match(r"^[A-Za-z0-9_\s\*\+\-\(\)/]+$", expr):
         return None
+    # division only by integer literals (never by a parameter)
+    for m in re.finditer(r"/\s*([A-Za-z0-9_]+)", expr):
+        if not m.group(1).isdigit() or int(m.group(1)) == 0:
+            return None
     return ("expr", expr)
 
 
-def classify(cmd, params_by_type):
-    """Fill cmd.status/reason and annotate each param with 'k'."""
+def classify(cmd):
+    """Lib-independent: can this command be marshalled automatically?"""
     name = cmd.name
-    if name in cfg.MANUAL:
-        cmd.status = "manual"
-        return
     if name in cfg.UNSUPPORTED:
-        cmd.status = "unsupported"
         cmd.reason = cfg.UNSUPPORTED[name]
         return
+    if name in cfg.ALL_MANUAL:
+        cmd.reason = "hand-written"
+        return
 
-    # return type
     rb, rd, _ = split_type(cmd.ret)
     if rd:
-        cmd.status, cmd.reason = "unsupported", f"pointer return '{cmd.ret}'"
-        return
-    if rb == "void":
+        if rb == "XVisualInfo" and rd == 1:
+            cmd.rk = ("xvis",)
+        else:
+            cmd.reason = f"pointer return '{cmd.ret}'"
+            return
+    elif rb == "void":
         cmd.rk = ("void",)
     elif rb in HANDLES:
         cmd.rk = ("handle", HANDLES[rb])
     elif rb in VAL:
         cmd.rk = ("val",) + VAL[rb]
     else:
-        cmd.status, cmd.reason = "unsupported", f"return type '{cmd.ret}'"
+        cmd.reason = f"return type '{cmd.ret}'"
         return
 
     for p in cmd.params:
@@ -229,22 +272,38 @@ def classify(cmd, params_by_type):
             elif base in VAL:
                 p["k"] = ("val",) + VAL[base]
             else:
-                cmd.status = "unsupported"
                 cmd.reason = f"param {n}: type '{p['ctype']}'"
                 return
             continue
+        if depth == 2 and base in ("GLchar", "GLcharARB", "char") and const:
+            ln = parse_len(name, n, p["len"], cmd.params)
+            if ln and ln[0] == "expr":
+                p["k"] = ("strarr", ln)
+                continue
         if depth > 1:
-            cmd.status = "unsupported"
             cmd.reason = f"param {n}: '{p['ctype']}'"
             return
 
-        # one level of pointer
+        # --- one level of pointer ---
+        if base == "Display":
+            p["k"] = ("xdpy",)
+            continue
+        if base == "XVisualInfo":
+            p["k"] = ("xvis",)
+            continue
+        if (name, n) in cfg.OFFSET_ONLY:
+            p["k"] = ("offset",)
+            continue
         is_in = const
-        if (name, n) in cfg.ATTRIB_LISTS or (
-                cmd.api == "egl" and n in ("attrib_list", "attribs")
-                and base in ("EGLint", "EGLAttrib") and const):
+        if cmd.api == "egl" and n in ("attrib_list", "attribs") and \
+                base in ("EGLint", "EGLAttrib") and const:
             mode, wsz = ELEM[base]
-            p["k"] = ("attrib", base, mode, wsz)
+            p["k"] = ("attrib", base, mode, wsz, "egl", "pairs")
+            continue
+        if cmd.api == "glx" and n in ("attribList", "attrib_list") and \
+                base == "int":
+            style = "visual" if name == "glXChooseVisual" else "pairs"
+            p["k"] = ("attrib", "int", "raw", 4, "glx", style)
             continue
         if base in ("GLchar", "GLcharARB", "char") and is_in and \
                 (name, n) not in cfg.LEN_OVERRIDES and \
@@ -254,27 +313,28 @@ def classify(cmd, params_by_type):
             p["k"] = ("str",)
             continue
         if base not in ELEM:
-            cmd.status = "unsupported"
             cmd.reason = f"param {n}: element type '{p['ctype']}'"
             return
         mode, wsz = ELEM[base]
         ln = parse_len(name, n, p["len"], cmd.params)
         if ln is None:
             if p["len"] is None and base != "void":
-                ln = ("expr", "1")     # single element (no len attr)
+                ln = ("expr", "1")
             else:
-                cmd.status = "unsupported"
-                cmd.reason = f"param {n}: cannot size '{p['ctype']}' " \
-                             f"(len={p['len']})"
+                cmd.reason = (f"param {n}: cannot size '{p['ctype']}' "
+                              f"(len={p['len']})")
                 return
-        p["k"] = ("arr_in" if is_in else "arr_out", base, mode, wsz, ln)
+        pbo = pbo_kind(name, base, n) if mode == "raw" else None
+        p["k"] = ("arr_in" if is_in else "arr_out", base, mode, wsz, ln, pbo)
 
-    cmd.status = "generated"
+    if any(p["k"][0] == "xvis" for p in cmd.params) or cmd.rk[0] == "xvis":
+        if not any(p["k"][0] == "xdpy" for p in cmd.params):
+            cmd.reason = "XVisualInfo without a Display parameter"
+            return
+    cmd.gen = True
     cmd.sync = (cmd.rk[0] != "void" or
                 any(p["k"][0] == "arr_out" for p in cmd.params) or
                 name in cfg.FORCE_SYNC)
-    if name in cfg.WRAPPED:
-        cmd.status = "wrapped"
 
 
 # --------------------------------------------------------------------------
@@ -285,6 +345,8 @@ WIRE_W = {"u32": "gb_w_u32", "i32": "gb_w_u32", "f32": "gb_w_f32",
           "u64": "gb_w_u64", "i64": "gb_w_u64", "f64": "gb_w_f64"}
 WIRE_R = {"u32": "gb_r_u32", "i32": "gb_r_u32", "f32": "gb_r_f32",
           "u64": "gb_r_u64", "i64": "gb_r_u64", "f64": "gb_r_f64"}
+CTYPE = {"u32": "uint32_t", "i32": "int32_t", "f32": "float",
+         "u64": "uint64_t", "i64": "int64_t", "f64": "double"}
 
 
 def w_expr(kind, e):
@@ -312,8 +374,6 @@ def align8(n):
 
 
 class Layout:
-    """Simulate codec alignment to get the constant end of the fixed part."""
-
     def __init__(self, start=16):
         self.off = start
 
@@ -326,22 +386,32 @@ class Layout:
         self.off += 8
 
 
-def count_c(ln, names):
-    """C expression yielding the element count as int64_t (>=0 clamped)."""
+def count_c(cmd, ln, names):
+    """C expression for the element count (int64; may be negative=unsized)."""
     kind = ln[0]
     if kind == "expr":
-        # widen every operand first so GLsizei*N cannot overflow in int
         e = ID_RE.sub(
             lambda m: f"((int64_t){names[m.group(0)]})"
             if m.group(0) in names else m.group(0), ln[1])
         return f"gb_capcount({e})"
     key, args = ln[1], ln[2]
-    a = ", ".join(names[x] for x in args)
+    a = ", ".join(f"(int64_t){names[x]}" if key.startswith("map") else
+                  names[x] for x in args)
     if key == "pname":
-        return f"gb_capcount(GB_COUNT_PNAME(__op, {a}))"
-    if key == "pixels":
-        return f"gb_capcount(GB_BYTES_PIXELS(__op, {a}))"
-    raise SystemExit(f"unknown compsize key {key}")
+        cls = pname_class(cmd.name)
+        return f"gb_capcount(GB_COUNT_PNAME(__op, GB_PNC_{cls}, {a}))"
+    if key.startswith("pixel") or key == "bitmap":
+        mode = "PACK" if (PBO_PACK_RE.match(cmd.name) or
+                          cmd.name in cfg.PBO_PACK_EXTRA) else "UNPACK"
+        return f"gb_capcount(GB_BYTES_{key}(GB_PM_{mode}, {a}))"
+    return f"gb_capcount(GB_BYTES_{key}(__op, {a}))"
+
+
+def dpy_param(cmd):
+    for p in cmd.params:
+        if p["k"][0] == "xdpy":
+            return p["name"]
+    return None
 
 
 # --------------------------------------------------------------------------
@@ -355,13 +425,11 @@ def emit_client(cmd, public, opname):
     ret_t = cmd.ret
     plist = ", ".join(f"{p['ctype']} {p['name']}" for p in P) or "void"
     L = []
-    api = cmd.api
     vis = '__attribute__((visibility("default"))) ' if public else ""
     L.append(f"{vis}{ret_t} {fn}({plist})")
     L.append("{")
     L.append(f"\tconst uint32_t __op = {opname};")
     L.append("\tstruct gb_cl *__cx = gb_cl_get();")
-    zero = {"void": "", }.get(cmd.rk[0], "")
     if cmd.rk[0] == "void":
         L.append("\tif (!__cx) return;")
     else:
@@ -370,49 +438,116 @@ def emit_client(cmd, public, opname):
     retstmt = "return;" if cmd.rk[0] == "void" else "return __ret;"
 
     names = {p["name"]: p["name"] for p in P}
+    # The server uses its own X connection: make this app's pending X
+    # requests (e.g. window creation) visible before naming the resource.
+    xid_types = ("GLXDrawable", "GLXWindow", "GLXPixmap", "GLXPbuffer",
+                 "Window", "Pixmap", "Font", "Colormap", "GLXContextID")
+    xdpy = dpy_param(cmd)
+    if xdpy and (any(p["base"] in xid_types for p in P if p["depth"] == 0)
+                 or any(p["k"][0] == "xvis" for p in P)):
+        L.append(f"\tgb_cl_xsync({xdpy});")
     lay = Layout()
-    # pass 1: blob byte lengths
     for p in P:
         k = p["k"]
-        n = p["name"]
-        if k[0] in ("val",):
+        if k[0] == "val":
             (lay.u64 if k[2] == 8 else lay.u32)()
-        elif k[0] == "handle":
+        elif k[0] == "offset":
+            lay.u64()
+        elif k[0] == "xvis":
             lay.u32()
-        elif k[0] in ("str", "arr_in", "arr_out", "attrib"):
+            lay.u32()
+        elif k[0] in ("handle", "xdpy", "str", "arr_in", "arr_out", "attrib",
+                      "strarr"):
             lay.u32()
     fixed_end = lay.off
 
     for p in P:
         k = p["k"]
         n = p["name"]
-        if k[0] == "str":
+        if k[0] == "xdpy":
+            L.append(f"\tuint32_t __xd_{n} = gb_cl_xdpy_id({n});")
+            L.append(f"\tif (!__xd_{n}) {{ gb_cl_set_error(__cx, __op); "
+                     f"{retstmt} }}")
+        elif k[0] == "xvis":
+            L.append(f"\tuint32_t __xv_{n} = {n} ? (uint32_t){n}->visualid "
+                     f": 0;")
+            L.append(f"\tuint32_t __xs_{n} = {n} ? (uint32_t){n}->screen "
+                     f": 0;")
+        elif k[0] == "str":
             L.append(f"\tuint32_t __l_{n} = {n} ? (uint32_t)strlen({n}) + 1 "
                      f": GB_NULL_LEN;")
+        elif k[0] == "strarr":
+            cexp = count_c(cmd, k[1], names)
+            L.append(f"\tint64_t __n_{n} = {cexp};")
+            L.append(f"\tif (__n_{n} < 0) __n_{n} = 0;")
+            L.append(f"\tuint32_t __l_{n} = GB_NULL_LEN;")
+            L.append(f"\tif ({n}) {{ uint64_t __sum = 0;")
+            L.append(f"\t  for (int64_t __i = 0; __i < __n_{n}; __i++) "
+                     f"{{ if (!{n}[__i]) {{ gb_cl_set_error(__cx, __op); "
+                     f"{retstmt} }} __sum += strlen({n}[__i]) + 1; }}")
+            L.append(f"\t  if (__sum > GB_MAX_ARRAY_BYTES) "
+                     f"{{ gb_cl_set_error(__cx, __op); {retstmt} }}")
+            L.append(f"\t  __l_{n} = (uint32_t)__sum; }}")
+        elif k[0] in ("arr_in", "arr_out") and k[4][0] == "server":
+            pbo = k[5]
+            if pbo:
+                bound = "GB_BUF_PACK" if pbo == "pack" else "GB_BUF_UNPACK"
+                L.append(f"\tint __pbo_{n} = gb_cl_buf_bound(__cx, {bound});")
+                L.append(f"\tuint32_t __l_{n} = __pbo_{n} ? GB_PBO_LEN : "
+                         f"({n} ? GB_SRV_LEN : GB_NULL_LEN);")
+            else:
+                L.append(f"\tuint32_t __l_{n} = {n} ? GB_SRV_LEN : "
+                         f"GB_NULL_LEN;")
         elif k[0] in ("arr_in", "arr_out"):
-            cexp = count_c(k[4], names)
+            pbo = k[5]
+            cexp = count_c(cmd, k[4], names)
             L.append(f"\tint64_t __n_{n} = {cexp};")
             L.append(f"\tif (__n_{n} < 0) __n_{n} = 0; /* unsized */")
-            L.append(f"\tuint32_t __l_{n} = {n} ? (uint32_t)(__n_{n} * "
-                     f"{k[3]}) : GB_NULL_LEN;")
-            L.append(f"\tif ({n} && __n_{n} * {k[3]} > GB_MAX_ARRAY_BYTES) "
-                     f"{{ gb_cl_set_error(__cx, __op); {retstmt} }}")
+            if pbo:
+                bound = "GB_BUF_PACK" if pbo == "pack" else "GB_BUF_UNPACK"
+                L.append(f"\tint __pbo_{n} = gb_cl_buf_bound(__cx, {bound});")
+                L.append(f"\tuint32_t __l_{n} = __pbo_{n} ? GB_PBO_LEN : "
+                         f"({n} ? (uint32_t)(__n_{n} * {k[3]}) : "
+                         f"GB_NULL_LEN);")
+                L.append(f"\tif (!__pbo_{n} && {n} && __n_{n} * {k[3]} > "
+                         f"GB_MAX_ARRAY_BYTES) "
+                         f"{{ gb_cl_set_error(__cx, __op); {retstmt} }}")
+            else:
+                L.append(f"\tuint32_t __l_{n} = {n} ? (uint32_t)(__n_{n} * "
+                         f"{k[3]}) : GB_NULL_LEN;")
+                L.append(f"\tif ({n} && __n_{n} * {k[3]} > "
+                         f"GB_MAX_ARRAY_BYTES) "
+                         f"{{ gb_cl_set_error(__cx, __op); {retstmt} }}")
         elif k[0] == "attrib":
-            L.append(f"\tint64_t __n_{n} = {n} ? gb_attrib_count_{k[1]}({n}) "
-                     f": -1;")
+            if k[4] == "egl":
+                scan = f"gb_attrib_count_{k[1]}({n})"
+            else:
+                scan = f"gb_glx_attrib_count({n}, {1 if k[5] == 'visual' else 0})"
+            L.append(f"\tint64_t __n_{n} = {n} ? {scan} : -1;")
             L.append(f"\tif ({n} && __n_{n} < 0) {{ gb_cl_set_error(__cx, "
                      f"__op); {retstmt} }}")
             L.append(f"\tuint32_t __l_{n} = {n} ? (uint32_t)(__n_{n} * "
                      f"{k[3]}) : GB_NULL_LEN;")
 
-    # total size
     L.append(f"\tuint32_t __t = {fixed_end}u;")
     for p in P:
         k = p["k"]
         n = p["name"]
-        if k[0] in ("str", "arr_in", "attrib"):
+        if k[0] in ("str", "attrib", "strarr"):
             L.append(f"\tif (__l_{n} != GB_NULL_LEN) __t = "
                      f"GB_ALIGN_UP(__t, 8u) + __l_{n};")
+        elif k[0] == "arr_in":
+            if k[5]:
+                L.append(f"\tif (__l_{n} == GB_PBO_LEN) __t = "
+                         f"GB_ALIGN_UP(__t, 8u) + 8u;")
+                L.append(f"\telse if (__l_{n} != GB_NULL_LEN) __t = "
+                         f"GB_ALIGN_UP(__t, 8u) + __l_{n};")
+            else:
+                L.append(f"\tif (__l_{n} != GB_NULL_LEN) __t = "
+                         f"GB_ALIGN_UP(__t, 8u) + __l_{n};")
+        elif k[0] == "arr_out" and k[5]:
+            L.append(f"\tif (__l_{n} == GB_PBO_LEN) __t = "
+                     f"GB_ALIGN_UP(__t, 8u) + 8u;")
     L.append("\t__t = GB_ALIGN_UP(__t, 8u);")
 
     flags = "GB_CMD_F_WANT_REPLY" if cmd.sync else "0"
@@ -427,8 +562,15 @@ def emit_client(cmd, public, opname):
         n = p["name"]
         if k[0] == "val":
             L.append(f"\t{WIRE_W[k[1]]}(&__w, {w_expr(k[1], n)});")
+        elif k[0] == "offset":
+            L.append(f"\tgb_w_u64(&__w, (uint64_t)(uintptr_t)({n}));")
         elif k[0] == "handle":
             L.append(f"\tgb_w_u32(&__w, (uint32_t)(uintptr_t)({n}));")
+        elif k[0] == "xdpy":
+            L.append(f"\tgb_w_u32(&__w, __xd_{n});")
+        elif k[0] == "xvis":
+            L.append(f"\tgb_w_u32(&__w, __xv_{n});")
+            L.append(f"\tgb_w_u32(&__w, __xs_{n});")
         else:
             L.append(f"\tgb_w_u32(&__w, __l_{n});")
     for p in P:
@@ -437,19 +579,37 @@ def emit_client(cmd, public, opname):
         if k[0] == "str":
             L.append(f"\tif (__l_{n} != GB_NULL_LEN) memcpy(gb_w_blob(&__w, "
                      f"__l_{n}), {n}, __l_{n});")
-        elif k[0] in ("arr_in", "attrib"):
+        elif k[0] == "strarr":
+            L.append(f"\tif (__l_{n} != GB_NULL_LEN) {{ char *__d = "
+                     f"gb_w_blob(&__w, __l_{n});")
+            L.append(f"\t  for (int64_t __i = 0; __i < __n_{n}; __i++) {{ "
+                     f"size_t __k = strlen({n}[__i]) + 1; "
+                     f"memcpy(__d, {n}[__i], __k); __d += __k; }} }}")
+        elif k[0] in ("arr_in", "attrib", "arr_out"):
+            pbo = k[5] if k[0] != "attrib" else None
+            if k[0] == "arr_out":
+                if pbo:
+                    L.append(f"\tif (__l_{n} == GB_PBO_LEN) {{ uint64_t "
+                             f"__off = (uint64_t)(uintptr_t){n}; "
+                             f"memcpy(gb_w_blob(&__w, 8), &__off, 8); }}")
+                continue
             mode, wsz = (k[2], k[3])
-            L.append(f"\tif (__l_{n} != GB_NULL_LEN) {{")
+            if pbo:
+                L.append(f"\tif (__l_{n} == GB_PBO_LEN) {{ uint64_t __off = "
+                         f"(uint64_t)(uintptr_t){n}; "
+                         f"memcpy(gb_w_blob(&__w, 8), &__off, 8); }}")
+                L.append(f"\telse if (__l_{n} != GB_NULL_LEN) {{")
+            else:
+                L.append(f"\tif (__l_{n} != GB_NULL_LEN) {{")
             L.append(f"\t\tvoid *__d = gb_w_blob(&__w, __l_{n});")
             if mode == "raw":
                 L.append(f"\t\tmemcpy(__d, {n}, __l_{n});")
             else:
-                cnt = f"__n_{n}" if k[0] == "attrib" else f"__n_{n}"
-                L.append(f"\t\tfor (int64_t __i = 0; __i < {cnt}; __i++) {{")
+                L.append(f"\t\tfor (int64_t __i = 0; __i < __n_{n}; __i++) {{")
                 if mode == "widen":
                     L.append(f"\t\t\t((uint64_t *)__d)[__i] = (uint64_t)"
                              f"(int64_t){n}[__i];")
-                else:  # handle
+                else:
                     L.append(f"\t\t\t((uint32_t *)__d)[__i] = (uint32_t)"
                              f"(uintptr_t){n}[__i];")
                 L.append("\t\t}")
@@ -473,16 +633,25 @@ def emit_client(cmd, public, opname):
         elif cmd.rk[0] == "handle":
             L.append(f"\t__ret = ({ret_t})(uintptr_t)(uint32_t)"
                      f"gb_r_u64(&__r);")
+        elif cmd.rk[0] == "xvis":
+            L.append("\t{ uint32_t __vid = gb_r_u32(&__r); "
+                     "uint32_t __scr = gb_r_u32(&__r);")
+            L.append(f"\t  __ret = __vid ? gb_cl_xvisual({dpy_param(cmd)}, "
+                     f"__vid, __scr) : NULL; }}")
         for p in P:
             k = p["k"]
             n = p["name"]
             if k[0] != "arr_out":
                 continue
-            mode, wsz = k[2], k[3]
+            mode = k[2]
             L.append(f"\t{{ uint32_t __rl = gb_r_u32(&__r);")
-            L.append(f"\t  if (__rl != GB_NULL_LEN) {{")
+            L.append(f"\t  if (__rl != GB_NULL_LEN && __rl != GB_PBO_LEN) {{")
             L.append(f"\t    const void *__s = gb_r_blob(&__r, __rl);")
-            L.append(f"\t    if (__s && {n} && __rl == __l_{n}) {{")
+            if k[4][0] == "server":
+                L.append(f"\t    if (__s && {n} && __rl <= "
+                         f"GB_MAX_ARRAY_BYTES) {{")
+            else:
+                L.append(f"\t    if (__s && {n} && __rl == __l_{n}) {{")
             if mode == "raw":
                 L.append(f"\t      memcpy({n}, __s, __rl);")
             elif mode == "widen":
@@ -504,11 +673,13 @@ def emit_client(cmd, public, opname):
     return "\n".join(L)
 
 
-def emit_client_stub(cmd, opname):
+def emit_client_stub(cmd):
     plist = ", ".join(f"{p['ctype']} {p['name']}" for p in cmd.params) or "void"
     L = [f'__attribute__((visibility("default"))) {cmd.ret} '
          f'{cmd.name}({plist})', "{"]
-    L.append(f'\tgb_cl_unsupported_{cmd.api}("{cmd.name}");')
+    api = "egl" if cmd.api in ("egl",) else ("glx" if cmd.api == "glx"
+                                              else "gl")
+    L.append(f'\tgb_cl_unsupported_{api}("{cmd.name}");')
     b, d, _ = split_type(cmd.ret)
     if b == "void" and not d:
         L.append("\treturn;")
@@ -523,10 +694,6 @@ def emit_client_stub(cmd, opname):
 # --------------------------------------------------------------------------
 
 
-def native_cast(p):
-    return p["ctype"]
-
-
 def emit_server(cmd, opname):
     P = cmd.params
     L = []
@@ -535,31 +702,47 @@ def emit_server(cmd, opname):
     L.append("{")
     L.append(f"\tconst uint32_t __op = {opname}; (void)__op;")
     names = {p["name"]: "a_" + p["name"] for p in P}
+    dpy = dpy_param(cmd)
 
-    # fixed fields
+    # locals that need cleanup are declared before any goto
+    for p in P:
+        if p["k"][0] == "xvis":
+            L.append(f"\tXVisualInfo *a_{p['name']} = NULL;")
+
     for p in P:
         k = p["k"]
         n = p["name"]
         if k[0] == "val":
-            t = {"u32": "uint32_t", "i32": "int32_t", "f32": "float",
-                 "u64": "uint64_t", "i64": "int64_t", "f64": "double"}[k[1]]
-            L.append(f"\t{t} v_{n} = {r_expr(k[1], WIRE_R[k[1]] + '(__r)')};")
+            L.append(f"\t{CTYPE[k[1]]} v_{n} = "
+                     f"{r_expr(k[1], WIRE_R[k[1]] + '(__r)')};")
             L.append(f"\t{p['ctype']} a_{n} = ({p['ctype']})v_{n};")
+        elif k[0] == "offset":
+            L.append(f"\tuint64_t v_{n} = gb_r_u64(__r);")
+            L.append(f"\t{p['ctype']} a_{n} = ({p['ctype']})(uintptr_t)v_{n};")
         elif k[0] == "handle":
             L.append(f"\tuint32_t h_{n} = gb_r_u32(__r);")
+        elif k[0] == "xdpy":
+            L.append(f"\tuint32_t h_{n} = gb_r_u32(__r);")
+        elif k[0] == "xvis":
+            L.append(f"\tuint32_t xv_{n} = gb_r_u32(__r);")
+            L.append(f"\tuint32_t xs_{n} = gb_r_u32(__r);")
         else:
             L.append(f"\tuint32_t l_{n} = gb_r_u32(__r);")
     L.append("\tif (__r->err) goto proto_error;")
 
-    # resolve handles
     for p in P:
         k = p["k"]
         n = p["name"]
         if k[0] == "handle":
             L.append(f"\t{p['ctype']} a_{n} = ({p['ctype']})gb_h2p(HK_{k[1]}, "
                      f"h_{n});")
+        elif k[0] == "xdpy":
+            L.append(f"\tDisplay *a_{n} = (Display *)gb_h2p(HK_XDPY, h_{n});")
+            L.append(f"\tif (!a_{n}) goto proto_error;")
+        elif k[0] == "xvis":
+            L.append(f"\tif (xv_{n}) {{ a_{n} = gb_x_visual(a_{dpy}, xv_{n}, "
+                     f"xs_{n}); if (!a_{n}) goto proto_error; }}")
 
-    # blobs
     for p in P:
         k = p["k"]
         n = p["name"]
@@ -574,9 +757,15 @@ def emit_server(cmd, opname):
             L.append("\t}")
             L.append(f"\t{p['ctype']} a_{n} = ({p['ctype']})s_{n};")
         elif k[0] == "arr_in":
-            mode, wsz = k[2], k[3]
-            cexp = count_c(k[4], names)
+            mode, wsz, pbo = k[2], k[3], k[5]
+            cexp = count_c(cmd, k[4], names)
             L.append(f"\tconst void *b_{n} = NULL; int64_t n_{n} = 0;")
+            if pbo:
+                L.append(f"\tif (l_{n} == GB_PBO_LEN) {{")
+                L.append(f"\t\tconst uint64_t *o_ = gb_r_blob(__r, 8);")
+                L.append(f"\t\tif (!o_) goto proto_error;")
+                L.append(f"\t\tb_{n} = (const void *)(uintptr_t)*o_;")
+                L.append("\t} else")
             L.append(f"\tif (l_{n} != GB_NULL_LEN) {{")
             L.append(f"\t\tn_{n} = {cexp};")
             L.append(f"\t\tif (n_{n} < 0) n_{n} = 0; else b_{n} = "
@@ -605,6 +794,28 @@ def emit_server(cmd, opname):
                              f"t_{n}[i] = (void *)gb_h2p(HK_{hk}, "
                              f"((const uint32_t *)b_{n})[i]); }}")
                 L.append(f"\t{p['ctype']} a_{n} = ({p['ctype']})t_{n};")
+        elif k[0] == "strarr":
+            cexp = count_c(cmd, k[1], names)
+            L.append(f"\tconst char **sa_{n} = NULL;")
+            L.append(f"\tif (l_{n} != GB_NULL_LEN) {{")
+            L.append(f"\t\tint64_t n_ = {cexp}; if (n_ < 0) n_ = 0;")
+            L.append(f"\t\tif (n_ > 65536 || l_{n} > GB_MAX_ARRAY_BYTES) "
+                     f"goto proto_error;")
+            L.append(f"\t\tconst char *blob_ = gb_r_blob(__r, l_{n});")
+            L.append(f"\t\tif (!blob_ && l_{n}) goto proto_error;")
+            L.append(f"\t\tsa_{n} = gb_tmp(__t, (size_t)n_ * sizeof(char *) "
+                     f"+ 8);")
+            L.append(f"\t\tuint32_t o_ = 0;")
+            L.append(f"\t\tfor (int64_t i = 0; i < n_; i++) {{")
+            L.append(f"\t\t\tconst char *e_ = memchr(blob_ + o_, 0, "
+                     f"l_{n} - o_);")
+            L.append(f"\t\t\tif (!e_) goto proto_error;")
+            L.append(f"\t\t\tsa_{n}[i] = blob_ + o_; "
+                     f"o_ = (uint32_t)(e_ - blob_) + 1;")
+            L.append(f"\t\t}}")
+            L.append(f"\t\tif (o_ != l_{n}) goto proto_error;")
+            L.append("\t}")
+            L.append(f"\t{p['ctype']} a_{n} = ({p['ctype']})sa_{n};")
         elif k[0] == "attrib":
             mode, wsz = k[2], k[3]
             L.append(f"\tconst void *b_{n} = NULL; int64_t n_{n} = 0;")
@@ -614,29 +825,70 @@ def emit_server(cmd, opname):
             L.append(f"\t\tn_{n} = l_{n} / {wsz};")
             L.append(f"\t\tb_{n} = gb_r_blob(__r, l_{n});")
             L.append(f"\t\tif (!b_{n}) goto proto_error;")
-            L.append(f"\t\tif (!gb_attrib_valid_{k[1]}(b_{n}, n_{n})) "
-                     f"goto proto_error;")
-            L.append("\t}")
-            if mode == "raw":
-                L.append(f"\t{p['ctype']} a_{n} = ({p['ctype']})b_{n};")
+            if k[4] == "egl":
+                L.append(f"\t\tif (!gb_attrib_valid_{k[1]}(b_{n}, n_{n})) "
+                         f"goto proto_error;")
             else:
-                L.append(f"\t{p['ctype']} a_{n} = ({p['ctype']})b_{n};"
-                         f" /* 64-bit server: wire == native */")
+                L.append(f"\t\tif (!gb_glx_attrib_valid(b_{n}, n_{n}, "
+                         f"{1 if k[5] == 'visual' else 0})) "
+                         f"goto proto_error;")
+            L.append("\t}")
+            L.append(f"\t{p['ctype']} a_{n} = ({p['ctype']})b_{n};")
+        elif k[0] == "arr_out" and k[4][0] == "server":
+            mode, wsz, pbo = k[2], k[3], k[5]
+            key, sargs = k[4][1], k[4][2]
+            sa = ", ".join(names[a] for a in sargs)
+            L.append(f"\tint64_t n_{n} = 0; void *o_{n} = NULL; "
+                     f"int uns_{n} = 0; uint64_t off_{n} = 0; "
+                     f"uint32_t lr_{n} = l_{n};")
+            if pbo:
+                L.append(f"\tif (l_{n} == GB_PBO_LEN) {{")
+                L.append(f"\t\tconst uint64_t *o_ = gb_r_blob(__r, 8);")
+                L.append(f"\t\tif (!o_) goto proto_error;")
+                L.append(f"\t\toff_{n} = *o_;")
+                L.append("\t} else")
+            L.append(f"\tif (l_{n} == GB_SRV_LEN) {{")
+            L.append(f"\t\tint64_t nb_ = GB_SZS_{key}(__t, __op, {wsz}, "
+                     f"{sa});")
+            L.append(f"\t\tif (nb_ < 0 || nb_ > GB_MAX_ARRAY_BYTES) nb_ = 0;")
+            L.append(f"\t\tlr_{n} = (uint32_t)nb_; n_{n} = nb_ / {wsz};")
+            L.append(f"\t\to_{n} = gb_tmp_zero(__t, (size_t)nb_ + 512);")
+            L.append("\t}")
+            if pbo:
+                L.append(f"\t{p['ctype']} a_{n} = (l_{n} == GB_PBO_LEN) ? "
+                         f"({p['ctype']})(uintptr_t)off_{n} : "
+                         f"({p['ctype']})o_{n};")
+            else:
+                L.append(f"\t{p['ctype']} a_{n} = ({p['ctype']})o_{n};")
         elif k[0] == "arr_out":
-            mode, wsz = k[2], k[3]
-            cexp = count_c(k[4], names)
-            L.append(f"\tint64_t n_{n} = 0; void *o_{n} = NULL; int uns_{n} = 0;")
+            mode, wsz, pbo = k[2], k[3], k[5]
+            cexp = count_c(cmd, k[4], names)
+            L.append(f"\tint64_t n_{n} = 0; void *o_{n} = NULL; "
+                     f"int uns_{n} = 0; uint64_t off_{n} = 0; "
+                     f"uint32_t lr_{n} = l_{n};")
+            if pbo:
+                L.append(f"\tif (l_{n} == GB_PBO_LEN) {{")
+                L.append(f"\t\tconst uint64_t *o_ = gb_r_blob(__r, 8);")
+                L.append(f"\t\tif (!o_) goto proto_error;")
+                L.append(f"\t\toff_{n} = *o_;")
+                L.append("\t} else")
             L.append(f"\tif (l_{n} != GB_NULL_LEN) {{")
             L.append(f"\t\tif (l_{n} > GB_MAX_ARRAY_BYTES) goto proto_error;")
             L.append(f"\t\tn_{n} = {cexp};")
             L.append(f"\t\tuns_{n} = n_{n} < 0; if (uns_{n}) n_{n} = 0;")
             L.append(f"\t\tif (n_{n} * {wsz} != (int64_t)l_{n}) "
                      f"goto proto_error;")
+            # +512: a wrong (too small) size rule must not corrupt the heap
             L.append(f"\t\to_{n} = gb_tmp_zero(__t, (size_t)n_{n} * "
-                     f"sizeof(void *) + 16);")
+                     f"{max(wsz, 8)} + 512);")
             L.append("\t}")
-            L.append(f"\t{p['ctype']} a_{n} = uns_{n} ? NULL : "
-                     f"({p['ctype']})o_{n};")
+            if pbo:
+                L.append(f"\t{p['ctype']} a_{n} = (l_{n} == GB_PBO_LEN) ? "
+                         f"({p['ctype']})(uintptr_t)off_{n} : "
+                         f"(uns_{n} ? NULL : ({p['ctype']})o_{n});")
+            else:
+                L.append(f"\t{p['ctype']} a_{n} = uns_{n} ? NULL : "
+                         f"({p['ctype']})o_{n};")
 
     if cmd.rk[0] != "void":
         L.append(f"\t{cmd.ret} ret = ({cmd.ret})0;")
@@ -650,26 +902,31 @@ def emit_server(cmd, opname):
     if cmd.api == "egl" and cmd.rk[0] in ("val", "handle"):
         L.append(f'\tGB_EGL_TRACE("{cmd.name}", (intptr_t)ret);')
 
-    # post-call handle bookkeeping
     if cmd.name in cfg.HANDLE_FREE:
         hp, ok = cfg.HANDLE_FREE[cmd.name]
         hk = [p for p in P if p["name"] == hp][0]["k"][1]
         cond = "1" if ok is None else ok
         L.append(f"\tif ({cond}) gb_h_free(HK_{hk}, h_{hp});")
 
+    # release native XVisualInfo structures
+    cleanup = [p["name"] for p in P if p["k"][0] == "xvis"]
+
     if cmd.sync:
         L.append("\tif (!(__h->flags & GB_CMD_F_WANT_REPLY)) goto done;")
         L.append("\t{")
-        # compute reply size
         L.append("\tuint32_t rs = 16;")
         if cmd.rk[0] != "void":
-            L.append("\trs = GB_ALIGN_UP(rs, 8u) + 8;")
+            if cmd.rk[0] == "xvis":
+                L.append("\trs += 8;")
+            else:
+                L.append("\trs = GB_ALIGN_UP(rs, 8u) + 8;")
         outs = [p for p in P if p["k"][0] == "arr_out"]
         for p in outs:
             n = p["name"]
-            L.append(f"\trs += 4;")
-            L.append(f"\tif (l_{n} != GB_NULL_LEN) rs = GB_ALIGN_UP(rs, 8u)"
-                     f" + l_{n};")
+            L.append("\trs += 4;")
+            L.append(f"\tif (lr_{n} != GB_NULL_LEN && lr_{n} != GB_PBO_LEN "
+                     f"&& lr_{n} != GB_SRV_LEN) "
+                     f"rs = GB_ALIGN_UP(rs, 8u) + lr_{n};")
         L.append("\trs = GB_ALIGN_UP(rs, 8u);")
         L.append("\tstruct gb_out o; struct gb_w w;")
         L.append("\tif (gb_sv_reply_begin(__t, __h, &o, rs)) goto done;")
@@ -681,19 +938,26 @@ def emit_server(cmd, opname):
             elif k[1] == "f64":
                 L.append("\tgb_w_f64(&w, ret);")
             else:
-                L.append(f"\tgb_w_u64(&w, {w_expr(k[1] if k[1] in ('u64','i64') else ('i64' if k[1]=='i32' else 'u64'), 'ret')});")
+                wk = k[1] if k[1] in ("u64", "i64") else (
+                    "i64" if k[1] == "i32" else "u64")
+                L.append(f"\tgb_w_u64(&w, {w_expr(wk, 'ret')});")
         elif cmd.rk[0] == "handle":
             L.append(f"\tgb_w_u64(&w, (uint64_t)gb_p2h(HK_{cmd.rk[1]}, "
                      f"(void *)ret));")
+        elif cmd.rk[0] == "xvis":
+            L.append("\tgb_w_u32(&w, ret ? (uint32_t)ret->visualid : 0);")
+            L.append("\tgb_w_u32(&w, ret ? (uint32_t)ret->screen : 0);")
+            L.append("\tif (ret) gb_x_free(ret);")
         for p in outs:
             n = p["name"]
             k = p["k"]
             mode = k[2]
-            L.append(f"\tgb_w_u32(&w, l_{n});")
-            L.append(f"\tif (l_{n} != GB_NULL_LEN) {{")
-            L.append(f"\t\tvoid *d = gb_w_blob(&w, l_{n});")
+            L.append(f"\tgb_w_u32(&w, lr_{n} == GB_SRV_LEN ? 0 : lr_{n});")
+            L.append(f"\tif (lr_{n} != GB_NULL_LEN && lr_{n} != GB_PBO_LEN "
+                     f"&& lr_{n} != GB_SRV_LEN) {{")
+            L.append(f"\t\tvoid *d = gb_w_blob(&w, lr_{n});")
             if mode == "raw":
-                L.append(f"\t\tmemcpy(d, o_{n}, l_{n});")
+                L.append(f"\t\tmemcpy(d, o_{n}, lr_{n});")
             elif mode == "widen":
                 L.append(f"\t\tfor (int64_t i = 0; i < n_{n}; i++) "
                          f"((int64_t *)d)[i] = (int64_t)((intptr_t *)"
@@ -706,9 +970,15 @@ def emit_server(cmd, opname):
             L.append("\t}")
         L.append("\tgb_sv_reply_end(__t, &o);")
         L.append("\t}")
+    elif cmd.rk[0] == "xvis":
+        L.append("\tif (ret) gb_x_free(ret);")
     L.append("done:")
+    for n in cleanup:
+        L.append(f"\tif (a_{n}) gb_x_free(a_{n});")
     L.append("\treturn;")
     L.append("proto_error:")
+    for n in cleanup:
+        L.append(f"\tif (a_{n}) gb_x_free(a_{n});")
     L.append("\tgb_sv_proto_error(__t, __h);")
     L.append("}")
     return "\n".join(L)
@@ -719,133 +989,164 @@ def emit_server(cmd, opname):
 # --------------------------------------------------------------------------
 
 
+def lib_command_names(lib, roots):
+    spec = cfg.LIBS[lib]
+    names = []
+    for rootkey, api, versions in spec["features"]:
+        names += feature_commands(roots[rootkey], api, versions)
+    exts = {}
+    for rootkey, apis, sel in spec["extensions"]:
+        for ename, cl in extension_table(roots[rootkey], apis).items():
+            if select_ext(ename, sel):
+                names += cl
+                exts[ename] = cl
+    return names, exts
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     report = "--report" in sys.argv
     regdir, outdir = Path(args[0]), Path(args[1])
     outdir.mkdir(parents=True, exist_ok=True)
 
-    cmds, gl_root, egl_root = load_commands(regdir)
-    want = []
-    want += feature_commands(egl_root, "egl", cfg.EGL_VERSIONS)
-    want += feature_commands(gl_root, "gles2", cfg.GLES_VERSIONS)
-    want += extension_commands(egl_root, cfg.EGL_EXTENSIONS, ["egl"])
-    want += extension_commands(gl_root, cfg.GLES_EXTENSIONS, ["gles2"])
-    seen, order = set(), []
-    for n in want:
-        if n in cmds and n not in seen:
-            seen.add(n)
-            order.append(n)
-    order.sort()
+    cmds, roots = load_registries(regdir)
 
-    for n in order:
-        classify(cmds[n], None)
+    lib_cmds = {}
+    for lib in cfg.LIBS:
+        names, _ = lib_command_names(lib, roots)
+        seen, order = set(), []
+        for n in names:
+            if n in cmds and n not in seen:
+                seen.add(n)
+                order.append(n)
+        lib_cmds[lib] = sorted(order)
 
-    if report:
-        by = {}
+    union = sorted(set(n for v in lib_cmds.values() for n in v))
+    for n in union:
+        classify(cmds[n])
+
+    for lib, order in lib_cmds.items():
+        manual = cfg.MANUAL[lib]
+        wrapped = cfg.WRAPPED[lib]
         for n in order:
             c = cmds[n]
-            by.setdefault(c.status, []).append(c)
-        for st, lst in by.items():
-            print(f"== {st}: {len(lst)}")
-            if st in ("unsupported", "manual", "wrapped"):
-                for c in lst:
-                    print(f"   {c.name:42s} {c.reason}")
+            if n in manual:
+                c.status[lib] = "manual"
+            elif not c.gen:
+                c.status[lib] = "unsupported"
+            elif n in wrapped:
+                c.status[lib] = "wrapped"
+            else:
+                c.status[lib] = "generated"
+
+    if report:
+        for lib, order in lib_cmds.items():
+            cnt = {}
+            for n in order:
+                cnt.setdefault(cmds[n].status[lib], []).append(cmds[n])
+            print(f"##### lib {lib}: {len(order)} commands")
+            for st, lst in sorted(cnt.items()):
+                print(f"== {st}: {len(lst)}")
+                if st in ("unsupported", "manual", "wrapped"):
+                    for c in lst:
+                        print(f"   {c.name:44s} {c.reason}")
         return 0
 
-    # opcode numbering: every command gets one (stable sorted order)
-    ops = {n: i + 1 for i, n in enumerate(order)}
-    h = zlib.crc32("\n".join(order).encode()) & 0xFFFFFFFF
+    ops = {n: i + 1 for i, n in enumerate(union)}
+    h = zlib.crc32("\n".join(union).encode()) & 0xFFFFFFFF
 
     with open(outdir / "gb_ops.h", "w") as f:
         f.write("/* generated by gb_gen.py - do not edit */\n"
                 "#ifndef GB_OPS_H\n#define GB_OPS_H\n#include <stdint.h>\n")
         f.write(f"#define GB_OPS_HASH 0x{h:08X}u\n")
-        f.write(f"#define GB_OP_COUNT {len(order) + 1}u\n")
-        for n in order:
+        f.write(f"#define GB_OP_COUNT {len(union) + 1}u\n")
+        for n in union:
             f.write(f"#define GB_OP_{n} {ops[n]}u\n")
         f.write("#ifdef GB_OPS_NAMES\n"
                 "static const char *const gb_op_names[GB_OP_COUNT] = {\n"
                 '\t"(none)",\n')
-        for n in order:
+        for n in union:
             f.write(f'\t"{n}",\n')
         f.write("};\n#endif\n#endif\n")
 
-    # handle-kind enum (shared)
+    kinds = sorted(set(HANDLES.values()) | {"XDPY"})
     with open(outdir / "gb_handle_kinds.h", "w") as f:
         f.write("/* generated */\n#ifndef GB_HANDLE_KINDS_H\n"
                 "#define GB_HANDLE_KINDS_H\nenum gb_handle_kind {\n"
                 "\tHK_NONE = 0,\n")
-        for k in sorted(set(HANDLES.values())):
+        for k in kinds:
             f.write(f"\tHK_{k},\n")
         f.write("\tHK_COUNT\n};\n#endif\n")
 
-    # client
-    with open(outdir / "gb_client_gen.c", "w") as f:
-        f.write("/* generated by gb_gen.py - do not edit */\n"
-                '#include "gb_client_impl.h"\n\n'
-                "/* prototypes: extension entry points have none in the\n"
-                " * stock Khronos headers */\n")
-        for n in order:
-            c = cmds[n]
-            if c.status in ("generated", "wrapped", "manual"):
-                pl = ", ".join(f"{p['ctype']} {p['name']}"
-                               for p in c.params) or "void"
-                f.write('__attribute__((visibility("default"))) '
-                        f"{c.ret} {n}({pl});\n")
-        f.write("\n")
-        for n in order:
-            c = cmds[n]
-            op = f"GB_OP_{n}"
-            if c.status == "generated":
-                f.write(emit_client(c, True, op) + "\n\n")
-            elif c.status == "wrapped":
-                f.write(emit_client(c, False, op) + "\n\n")
-            elif c.status == "unsupported":
-                f.write(emit_client_stub(c, op) + "\n\n")
-        # wrapped prototypes for hand-written wrappers
-        f.write("/* proc-address table (implemented entry points only) */\n"
-                "const struct gb_proc gb_proc_table[] = {\n")
-        for n in order:
-            if cmds[n].status != "unsupported":
-                f.write(f'\t{{ "{n}", (void *){n} }},\n')
-        f.write("\t{ 0, 0 }\n};\n\n")
-        # extension -> commands, for filtering advertised extension strings
-        f.write("const struct gb_ext gb_ext_table[] = {\n")
-        for root, apis in ((gl_root, ("gles2",)), (egl_root, ("egl",))):
-            for e in root.find("extensions").findall("extension"):
-                sup = (e.get("supported") or "").split("|")
-                if not any(a in sup for a in apis):
-                    continue
-                cl = []
-                for r in e.findall("require"):
-                    if r.get("api") and r.get("api") not in apis:
-                        continue
-                    cl += [c.get("name") for c in r.findall("command")]
-                items = ", ".join(f'"{c}"' for c in cl)
-                f.write(f'\t{{ "{e.get("name")}", {len(cl)}, '
-                        f'(const char *const[]){{ {items}{", " if cl else ""}0 }} }},\n')
-        f.write("\t{ 0, 0, 0 }\n};\n")
+    # pname classes (shared enum used by generated size calls)
+    classes = sorted(set(c for _, c in cfg.PNAME_CLASSES) | {"generic"})
+    with open(outdir / "gb_pname_classes.h", "w") as f:
+        f.write("/* generated */\n#ifndef GB_PNAME_CLASSES_H\n"
+                "#define GB_PNAME_CLASSES_H\nenum gb_pname_class {\n")
+        for c in classes:
+            f.write(f"\tGB_PNC_{c},\n")
+        f.write("};\n#endif\n")
 
-    with open(outdir / "gb_client_gen.h", "w") as f:
-        f.write("/* generated */\n#ifndef GB_CLIENT_GEN_H\n"
-                "#define GB_CLIENT_GEN_H\n")
-        for n in order:
-            c = cmds[n]
-            if c.status == "wrapped":
-                pl = ", ".join(f"{p['ctype']} {p['name']}"
-                               for p in c.params) or "void"
-                f.write(f"{c.ret} gbx_{n}({pl});\n")
-        f.write("#endif\n")
+    # per-library client sources
+    for lib, order in lib_cmds.items():
+        names, exts = lib_command_names(lib, roots)
+        with open(outdir / f"gb_client_{lib}_gen.c", "w") as f:
+            f.write("/* generated by gb_gen.py - do not edit */\n"
+                    '#include "gb_client_impl.h"\n\n'
+                    "/* prototypes: many entry points have none in the\n"
+                    " * stock Khronos headers */\n")
+            for n in order:
+                c = cmds[n]
+                if c.status[lib] in ("generated", "wrapped", "manual"):
+                    pl = ", ".join(f"{p['ctype']} {p['name']}"
+                                   for p in c.params) or "void"
+                    f.write('__attribute__((visibility("default"))) '
+                            f"{c.ret} {n}({pl});\n")
+            f.write("\n")
+            for n in order:
+                c = cmds[n]
+                op = f"GB_OP_{n}"
+                st = c.status[lib]
+                if st == "generated":
+                    f.write(emit_client(c, True, op) + "\n\n")
+                elif st == "wrapped":
+                    f.write(emit_client(c, False, op) + "\n\n")
+                elif st == "unsupported":
+                    f.write(emit_client_stub(c) + "\n\n")
+            f.write("const struct gb_proc gb_proc_table[] = {\n")
+            for n in order:
+                if cmds[n].status[lib] != "unsupported":
+                    f.write(f'\t{{ "{n}", (void *){n} }},\n')
+            f.write("\t{ 0, 0 }\n};\n\n")
+            f.write("const struct gb_ext gb_ext_table[] = {\n")
+            spec = cfg.LIBS[lib]
+            for rootkey, apis, _sel in spec["ext_filter"]:
+                for ename, cl in extension_table(roots[rootkey], apis).items():
+                    items = ", ".join(f'"{c}"' for c in cl)
+                    f.write(f'\t{{ "{ename}", {len(cl)}, (const char *const[])'
+                            f'{{ {items}{", " if cl else ""}0 }} }},\n')
+            f.write("\t{ 0, 0, 0 }\n};\n")
 
-    # server
+        with open(outdir / f"gb_client_{lib}_gen.h", "w") as f:
+            f.write("/* generated */\n#ifndef GB_CLIENT_GEN_H\n"
+                    "#define GB_CLIENT_GEN_H\n")
+            for n in order:
+                c = cmds[n]
+                if c.status[lib] == "wrapped":
+                    pl = ", ".join(f"{p['ctype']} {p['name']}"
+                                   for p in c.params) or "void"
+                    f.write(f"{c.ret} gbx_{n}({pl});\n")
+            f.write("#endif\n")
+
+    # server: decoders for every generable command some library uses
     with open(outdir / "gb_server_gen.c", "w") as f:
         f.write("/* generated by gb_gen.py - do not edit */\n"
                 '#include "gb_server_impl.h"\n\n')
         gen = []
-        for n in order:
+        for n in union:
             c = cmds[n]
-            if c.status in ("generated", "wrapped"):
+            if c.gen and any(c.status[l] in ("generated", "wrapped")
+                             for l in c.status):
                 f.write(emit_server(c, f"GB_OP_{n}") + "\n\n")
                 gen.append(n)
         f.write("const gb_srv_fn gb_srv_table[GB_OP_COUNT] = {\n")
@@ -853,10 +1154,12 @@ def main():
             f.write(f"\t[GB_OP_{n}] = srv_{n},\n")
         f.write("};\n")
 
-    st = {}
-    for n in order:
-        st[cmds[n].status] = st.get(cmds[n].status, 0) + 1
-    print(f"gb-gen: {len(order)} commands, ops hash 0x{h:08X}: {st}")
+    for lib, order in lib_cmds.items():
+        st = {}
+        for n in order:
+            st[cmds[n].status[lib]] = st.get(cmds[n].status[lib], 0) + 1
+        print(f"gb-gen[{lib}]: {len(order)} commands {st}")
+    print(f"gb-gen: ops hash 0x{h:08X}, {len(union)} opcodes")
     return 0
 
 

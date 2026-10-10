@@ -99,6 +99,63 @@ static int find_server(char *out, size_t cap)
 	return access(out, X_OK);
 }
 
+/* gbd refuses to use any "native" GL library that exports this symbol: it is
+ * one of ours (e.g. our libGL.so.1 shim found via LD_LIBRARY_PATH), and
+ * loading it would make the server spawn a server, recursively. */
+GB_API const char gb_bridge_client_marker[] = "gpu-bridge client library";
+
+/* Copy of the environment without this library's directory in
+ * LD_LIBRARY_PATH, so the server loads the real drivers, not us. */
+static char **server_environ(void)
+{
+	Dl_info di;
+	char dir[4096] = "";
+	size_t n = 0, i, j;
+	char **env;
+
+	if (dladdr((void *)gb_cl_get, &di) && di.dli_fname) {
+		char tmp[4096];
+		snprintf(tmp, sizeof(tmp), "%s", di.dli_fname);
+		snprintf(dir, sizeof(dir), "%s", dirname(tmp));
+	}
+	while (environ[n])
+		n++;
+	env = calloc(n + 1, sizeof(char *));
+	if (!env)
+		return environ;
+	for (i = j = 0; i < n; i++) {
+		const char *e = environ[i];
+		if (!strncmp(e, "LD_LIBRARY_PATH=", 16) && dir[0]) {
+			char *v = strdup(e + 16), *out, *save = NULL, *tok;
+			size_t cap = strlen(e) + 32;
+			out = malloc(cap);
+			if (!v || !out) {
+				env[j++] = (char *)e;
+				free(v);
+				free(out);
+				continue;
+			}
+			snprintf(out, cap, "LD_LIBRARY_PATH=");
+			int first = 1;
+			for (tok = strtok_r(v, ":", &save); tok;
+			     tok = strtok_r(NULL, ":", &save)) {
+				if (!strcmp(tok, dir))
+					continue;
+				if (!first)
+					strncat(out, ":", cap - strlen(out) - 1);
+				strncat(out, tok, cap - strlen(out) - 1);
+				first = 0;
+			}
+			free(v);
+			env[j++] = out;
+			continue;
+		}
+		env[j++] = (char *)e;
+	}
+	env[j] = NULL;
+	return env;
+}
+
 static int connect_locked(void)
 {
 	int sv[2];
@@ -114,7 +171,10 @@ static int connect_locked(void)
 
 	snprintf(fdarg, sizeof(fdarg), "%d", sv[1]);
 	char *argv[] = { path, (char *)"--fd", fdarg, NULL };
-	int rc = posix_spawn(&G.pid, path, NULL, NULL, argv, environ);
+	char **senv = server_environ();
+	int rc = posix_spawn(&G.pid, path, NULL, NULL, argv, senv);
+	if (senv != environ)
+		free(senv); /* leaks the rewritten LD_LIBRARY_PATH string once */
 	close(sv[1]);
 	if (rc) {
 		close(sv[0]);
@@ -268,32 +328,320 @@ void gb_cl_unsupported(const char *what)
 	fprintf(stderr, "gpu-bridge: unsupported: %s\n", what);
 }
 
-/* ---- COMPSIZE helpers ------------------------------------------------------ */
+/* ---- locally generated errors / unsupported entry points -------------------- */
 
-static int cl_geti(void *ctx, uint32_t pname)
+void gb_cl_gl_error(uint32_t e)
 {
-	GLint v = 0;
-	glGetIntegerv(pname, &v);
-	return v;
-}
-
-int64_t gb_cl_pname_count(uint32_t op, uint32_t pname)
-{
-	if (op == GB_OP_glGetIntegerv || op == GB_OP_glGetFloatv ||
-	    op == GB_OP_glGetBooleanv || op == GB_OP_glGetInteger64v)
-		return gb_pname_count_state(pname, cl_geti, NULL);
-	return gb_pname_count_param(pname);
-}
-
-int64_t gb_cl_pixel_bytes(uint32_t op, uint32_t format, uint32_t type,
-			  int64_t w, int64_t h)
-{
-	static const struct gb_pixstore def = { 4, 0, 0, 0 };
 	struct gb_cl *cx = gb_cl_get();
-	const struct gb_pixstore *ps = &def;
+	if (cx && !cx->gl_error)
+		cx->gl_error = e;
+}
 
-	if (cx && cx->cur)
-		ps = op == GB_OP_glReadPixels ? &cx->cur->pack
-					      : &cx->cur->unpack;
-	return gb_pixel_bytes(format, type, w, h, ps);
+void gb_cl_egl_error(int32_t e)
+{
+	struct gb_cl *cx = gb_cl_get();
+	if (cx && !cx->egl_error)
+		cx->egl_error = e;
+}
+
+void gb_cl_unsupported_egl(const char *what)
+{
+	gb_cl_unsupported(what);
+	gb_cl_egl_error(0x3003 /* EGL_BAD_ALLOC */);
+}
+
+void gb_cl_unsupported_gl(const char *what)
+{
+	gb_cl_unsupported(what);
+	gb_cl_gl_error(0x0502 /* GL_INVALID_OPERATION */);
+}
+
+void gb_cl_unsupported_glx(const char *what)
+{
+	gb_cl_unsupported(what);
+}
+
+int gb_cl_msg_begin(struct gb_cl *cx, struct gb_out *o, struct gb_w *w,
+		    uint32_t op, uint32_t size, uint32_t flags)
+{
+	if (gb_cl_begin(cx, o, op, GB_ALIGN_UP(size, 8u), flags))
+		return -1;
+	gb_w_init(w, o->p);
+	return 0;
+}
+
+/* ---- interned strings and filtered extension lists ----------------------------- */
+
+struct istr {
+	struct istr *next;
+	char s[];
+};
+static struct istr *g_istr;
+static pthread_mutex_t g_str_mu = PTHREAD_MUTEX_INITIALIZER;
+
+const char *gb_cl_intern(const char *s, size_t len)
+{
+	pthread_mutex_lock(&g_str_mu);
+	for (struct istr *i = g_istr; i; i = i->next)
+		if (!strncmp(i->s, s, len) && i->s[len] == 0) {
+			pthread_mutex_unlock(&g_str_mu);
+			return i->s;
+		}
+	struct istr *n = malloc(sizeof(*n) + len + 1);
+	if (!n) {
+		pthread_mutex_unlock(&g_str_mu);
+		return NULL;
+	}
+	memcpy(n->s, s, len);
+	n->s[len] = 0;
+	n->next = g_istr;
+	g_istr = n;
+	pthread_mutex_unlock(&g_str_mu);
+	return n->s;
+}
+
+const char *gb_cl_fetch_string(uint32_t op, uint32_t a, uint32_t b)
+{
+	struct gb_cl *cx = gb_cl_get();
+	struct gb_out o;
+	struct gb_w w;
+
+	if (!cx || gb_cl_msg_begin(cx, &o, &w, op, 28, GB_CMD_F_WANT_REPLY))
+		return NULL;
+	gb_w_u32(&w, a);
+	gb_w_u32(&w, b);
+	gb_cl_end(cx, &o);
+
+	struct gb_in in;
+	if (gb_cl_wait_reply(cx, &in, op))
+		return NULL;
+	struct gb_r r;
+	gb_r_init(&r, in.p, in.size);
+	uint32_t len = gb_r_u32(&r);
+	const char *res = NULL;
+	if (len != GB_NULL_LEN && len > 0 && len <= (1u << 20)) {
+		const char *s = gb_r_blob(&r, len);
+		if (s && !r.err && s[len - 1] == 0)
+			res = gb_cl_intern(s, len - 1);
+	}
+	gb_in_release(&in);
+	return res;
+}
+
+static int proc_present(const char *name)
+{
+	for (const struct gb_proc *p = gb_proc_table; p->name; p++)
+		if (!strcmp(p->name, name))
+			return 1;
+	return 0;
+}
+
+/* An extension is advertised only if the registry knows it and every
+ * command it adds is implemented. Unknown extensions are dropped. */
+static int ext_allowed(const char *name, size_t len)
+{
+	for (const struct gb_ext *e = gb_ext_table; e->name; e++) {
+		if (strlen(e->name) != len || strncmp(e->name, name, len))
+			continue;
+		for (int i = 0; i < e->ncmds; i++)
+			if (!proc_present(e->cmds[i]))
+				return 0;
+		return 1;
+	}
+	return 0;
+}
+
+const char *gb_cl_filter_ext(const char *list)
+{
+	size_t cap = strlen(list) + 1;
+	char *out = malloc(cap);
+	size_t o = 0;
+
+	if (!out)
+		return NULL;
+	out[0] = 0;
+	for (const char *p = list; *p;) {
+		while (*p == ' ')
+			p++;
+		const char *s = p;
+		while (*p && *p != ' ')
+			p++;
+		size_t len = (size_t)(p - s);
+		if (len && ext_allowed(s, len)) {
+			if (o)
+				out[o++] = ' ';
+			memcpy(out + o, s, len);
+			o += len;
+			out[o] = 0;
+		}
+	}
+	const char *r = gb_cl_intern(out, o);
+	free(out);
+	return r;
+}
+
+/* Filtered GL extension list, cached per context id. */
+const struct gb_extlist *gb_cl_ext_list(void)
+{
+	static struct {
+		uint32_t ctx_id;
+		struct gb_extlist l;
+	} cache;
+	static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
+	struct gb_ctxstate *st = gb_cur_state();
+	uint32_t id = st ? st->ctx_id : 0;
+
+	pthread_mutex_lock(&mu);
+	if (cache.l.joined && cache.ctx_id == id) {
+		pthread_mutex_unlock(&mu);
+		return &cache.l;
+	}
+	pthread_mutex_unlock(&mu);
+
+	const char *native = gb_cl_fetch_string(GB_OPX_GetString, 0x1F03,
+						0xFFFFFFFFu);
+	if (!native)
+		return NULL;
+	const char *joined = gb_cl_filter_ext(native);
+	if (!joined)
+		return NULL;
+
+	int n = 0;
+	for (const char *p = joined; *p; p++)
+		if (*p == ' ')
+			n++;
+	n += joined[0] ? 1 : 0;
+	const char **names = calloc((size_t)n + 1, sizeof(char *));
+	int k = 0;
+	for (const char *p = joined; *p && names;) {
+		const char *s = p;
+		while (*p && *p != ' ')
+			p++;
+		names[k++] = gb_cl_intern(s, (size_t)(p - s));
+		if (*p == ' ')
+			p++;
+	}
+	pthread_mutex_lock(&mu);
+	free(cache.l.names);
+	cache.ctx_id = id;
+	cache.l.joined = joined;
+	cache.l.names = names;
+	cache.l.n = names ? k : 0;
+	pthread_mutex_unlock(&mu);
+	return &cache.l;
+}
+
+/* ---- X11 helpers ------------------------------------------------------------------ */
+
+const char *gb_cl_xdisplay_string(Display *dpy)
+{
+	static char *(*xds)(Display *);
+
+	if (!xds)
+		xds = (char *(*)(Display *))dlsym(RTLD_DEFAULT,
+						  "XDisplayString");
+	return xds && dpy ? xds(dpy) : NULL;
+}
+
+uint32_t gb_cl_xdpy_id(Display *dpy)
+{
+	static struct {
+		Display *dpy;
+		uint32_t id;
+	} tab[16];
+	static int next;
+	static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
+	struct gb_cl *cx;
+
+	if (!dpy)
+		return 0;
+	pthread_mutex_lock(&mu);
+	for (int i = 0; i < 16; i++)
+		if (tab[i].dpy == dpy && tab[i].id) {
+			uint32_t id = tab[i].id;
+			pthread_mutex_unlock(&mu);
+			return id;
+		}
+	pthread_mutex_unlock(&mu);
+
+	const char *name = gb_cl_xdisplay_string(dpy);
+	cx = gb_cl_get();
+	if (!name || !cx)
+		return 0;
+
+	struct gb_out o;
+	struct gb_w w;
+	uint32_t slen = (uint32_t)strlen(name) + 1;
+	if (gb_cl_msg_begin(cx, &o, &w, GB_OPX_OpenXDisplay,
+			    GB_ALIGN_UP(20, 8u) + slen, GB_CMD_F_WANT_REPLY))
+		return 0;
+	gb_w_u32(&w, slen);
+	memcpy(gb_w_blob(&w, slen), name, slen);
+	gb_cl_end(cx, &o);
+
+	struct gb_in in;
+	if (gb_cl_wait_reply(cx, &in, GB_OPX_OpenXDisplay))
+		return 0;
+	struct gb_r r;
+	gb_r_init(&r, in.p, in.size);
+	uint32_t id = (uint32_t)gb_r_u64(&r);
+	gb_in_release(&in);
+
+	if (id) {
+		pthread_mutex_lock(&mu);
+		tab[next].dpy = dpy;
+		tab[next].id = id;
+		next = (next + 1) % 16;
+		pthread_mutex_unlock(&mu);
+	}
+	return id;
+}
+
+XVisualInfo *gb_cl_xvisual(Display *dpy, uint32_t vid, uint32_t scr)
+{
+	static XVisualInfo *(*getvi)(Display *, long, XVisualInfo *, int *);
+	XVisualInfo tmpl;
+	int n = 0;
+
+	if (!getvi)
+		getvi = (XVisualInfo *(*)(Display *, long, XVisualInfo *,
+					  int *))dlsym(RTLD_DEFAULT,
+						       "XGetVisualInfo");
+	if (!getvi || !dpy)
+		return NULL;
+	memset(&tmpl, 0, sizeof(tmpl));
+	tmpl.visualid = vid;
+	(void)scr;
+	return getvi(dpy, VisualIDMask, &tmpl, &n);
+}
+
+/*
+ * X request ordering. The server renders through its *own* X connection, so
+ * X's per-connection ordering guarantee does not cover "client creates a
+ * window" -> "server renders into it". Xlib buffers requests, so before any
+ * call that names an X resource we make sure everything the app has issued
+ * on `dpy` has been *processed* by the X server (a round trip, only when
+ * something is actually outstanding).
+ */
+void gb_cl_xsync(Display *dpy)
+{
+	static unsigned long (*next_req)(Display *);
+	static unsigned long (*last_proc)(Display *);
+	static int (*xsync)(Display *, int);
+
+	if (!dpy)
+		return;
+	if (!xsync) {
+		next_req = (unsigned long (*)(Display *))dlsym(
+			RTLD_DEFAULT, "XNextRequest");
+		last_proc = (unsigned long (*)(Display *))dlsym(
+			RTLD_DEFAULT, "XLastKnownRequestProcessed");
+		xsync = (int (*)(Display *, int))dlsym(RTLD_DEFAULT,
+						       "XSync");
+	}
+	if (!xsync)
+		return;
+	if (next_req && last_proc && next_req(dpy) - 1 <= last_proc(dpy))
+		return; /* nothing outstanding */
+	xsync(dpy, 0);
 }

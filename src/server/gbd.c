@@ -23,7 +23,7 @@
 #include "gb_server_impl.h"
 
 static int g_debug;
-static void *g_egl, *g_gles;
+static void *g_egl, *g_gles, *g_gl;
 
 void gb_log(const char *fmt, ...)
 {
@@ -48,11 +48,25 @@ int gb_native_init(void)
 {
 	const char *e = getenv("GB_NATIVE_EGL");
 	const char *g = getenv("GB_NATIVE_GLES2");
+	const char *gl = getenv("GB_NATIVE_GL");
 
+	gb_x_init(); /* XInitThreads must come before any other Xlib use */
 	g_egl = dlopen(e ? e : "libEGL.so.1", RTLD_NOW | RTLD_GLOBAL);
+	g_gl = dlopen(gl ? gl : "libGL.so.1", RTLD_NOW | RTLD_GLOBAL);
 	g_gles = dlopen(g ? g : "libGLESv2.so.2", RTLD_NOW | RTLD_GLOBAL);
-	if (!g_egl) {
-		fprintf(stderr, "gbd: cannot load EGL: %s\n", dlerror());
+	/* Never use ourselves as the "native" driver (see gb_client.c). */
+	void **libs[] = { &g_egl, &g_gles, &g_gl };
+	for (unsigned i = 0; i < 3; i++) {
+		if (*libs[i] && dlsym(*libs[i], "gb_bridge_client_marker")) {
+			fprintf(stderr, "gbd: refusing to use the gpu-bridge "
+				"client library as the native driver "
+				"(check LD_LIBRARY_PATH / GB_NATIVE_*)\n");
+			dlclose(*libs[i]);
+			*libs[i] = NULL;
+		}
+	}
+	if (!g_egl && !g_gl) {
+		fprintf(stderr, "gbd: cannot load EGL or GL: %s\n", dlerror());
 		return -1;
 	}
 	if (!g_gles)
@@ -63,13 +77,44 @@ int gb_native_init(void)
 void *gb_native_sym(const char *name)
 {
 	void *p = NULL;
+	int is_egl = !strncmp(name, "egl", 3);
+	int is_glx = !strncmp(name, "glX", 3);
 
-	if (g_egl)
-		p = dlsym(g_egl, name);
-	if (!p && g_gles)
+	/*
+	 * Namespace-aware on purpose: GLVND's glXGetProcAddress* hands back a
+	 * dispatch stub for ANY name (it cannot know what a vendor exports), so
+	 * it must never be asked about egl* names.
+	 */
+	if (is_egl) {
+		if (g_egl)
+			p = dlsym(g_egl, name);
+		if (!p && g_egl) {
+			void *(*gpa)(const char *) =
+				dlsym(g_egl, "eglGetProcAddress");
+			if (gpa)
+				p = gpa(name);
+		}
+		return p;
+	}
+	if (is_glx) {
+		if (g_gl)
+			p = dlsym(g_gl, name);
+		return p;
+	}
+	/* OpenGL / OpenGL ES entry points */
+	if (g_gles)
 		p = dlsym(g_gles, name);
+	if (!p && g_egl)
+		p = dlsym(g_egl, name);
+	if (!p && g_gl)
+		p = dlsym(g_gl, name);
 	if (!p && g_egl) {
 		void *(*gpa)(const char *) = dlsym(g_egl, "eglGetProcAddress");
+		if (gpa)
+			p = gpa(name);
+	}
+	if (!p && g_gl) {
+		void *(*gpa)(const char *) = dlsym(g_gl, "glXGetProcAddressARB");
 		if (gpa)
 			p = gpa(name);
 	}
@@ -150,30 +195,10 @@ int gb_sv_geti(void *ctx, uint32_t pname)
 {
 	GB_NATIVE(glGetIntegerv, void, (GLenum, GLint *));
 	GLint v = 0;
+	(void)ctx;
 	if (fn_glGetIntegerv)
 		fn_glGetIntegerv(pname, &v);
 	return v;
-}
-
-int64_t gb_sv_pname_count(uint32_t op, uint32_t pname)
-{
-	if (op == GB_OP_glGetIntegerv || op == GB_OP_glGetFloatv ||
-	    op == GB_OP_glGetBooleanv || op == GB_OP_glGetInteger64v)
-		return gb_pname_count_state(pname, gb_sv_geti, NULL);
-	return gb_pname_count_param(pname);
-}
-
-int64_t gb_sv_pixel_bytes(uint32_t op, uint32_t format, uint32_t type,
-			  int64_t w, int64_t h)
-{
-	int pack = op == GB_OP_glReadPixels;
-	struct gb_pixstore ps;
-
-	ps.alignment = gb_sv_geti(NULL, pack ? 0x0D05 : 0x0CF5);
-	ps.row_length = gb_sv_geti(NULL, pack ? 0x0D02 : 0x0CF2);
-	ps.skip_pixels = gb_sv_geti(NULL, pack ? 0x0D04 : 0x0CF4);
-	ps.skip_rows = gb_sv_geti(NULL, pack ? 0x0D03 : 0x0CF3);
-	return gb_pixel_bytes(format, type, w, h, &ps);
 }
 
 /* ---- worker --------------------------------------------------------------- */

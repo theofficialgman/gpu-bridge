@@ -12,11 +12,20 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <GLES3/gl3.h>
-#include <GLES2/gl2ext.h>
+#include <GL/gl.h>
+#include <GL/glext.h>
+#include <GL/glx.h>
+#include <GL/glxext.h>
 
+/* ES-only types the generated decoders mention (gl2ext.h cannot be included
+ * next to the desktop headers). */
+typedef void *GLeglImageOES;
+
+#include "gb_carr.h"
 #include "gb_chan.h"
 #include "gb_codec.h"
 #include "gb_ctl.h"
@@ -69,16 +78,55 @@ int gb_sv_reply_begin(struct gb_sth *t, const struct gb_cmd_hdr *req,
 void gb_sv_reply_end(struct gb_sth *t, struct gb_out *o);
 void gb_sv_proto_error(struct gb_sth *t, const struct gb_cmd_hdr *req);
 
+/* ---- X11 (loaded with dlopen; no link-time dependency) -------------------- */
+void gb_x_init(void);
+Display *gb_x_open(const char *name);
+XVisualInfo *gb_x_visual(Display *dpy, uint32_t visualid, uint32_t screen);
+void gb_x_free(void *p);
+
 /* ---- helpers used by generated size macros -------------------------------- */
 int gb_sv_geti(void *ctx, uint32_t pname);
-int64_t gb_sv_pname_count(uint32_t op, uint32_t pname);
-int64_t gb_sv_pixel_bytes(uint32_t op, uint32_t format, uint32_t type,
-			  int64_t w, int64_t h);
+int64_t gb_sv_pixel_bytes(int mode, uint32_t format, uint32_t type, int64_t w,
+			  int64_t h, int64_t d);
+int64_t gb_sv_bitmap_bytes(int mode, int64_t w, int64_t h);
 
-#define GB_COUNT_PNAME(op, pname) gb_sv_pname_count((op), (uint32_t)(pname))
-#define GB_BYTES_PIXELS(op, f, t, w, h) \
-	gb_sv_pixel_bytes((op), (uint32_t)(f), (uint32_t)(t), (int64_t)(w), \
-			  (int64_t)(h))
+/* Server-sized out arrays: byte count computed from native GL state. */
+int64_t gb_sv_sz_uniform(struct gb_sth *t, int wsz, uint32_t program,
+			 int32_t location);
+int64_t gb_sv_sz_pixels_tex(struct gb_sth *t, uint32_t target, int32_t level,
+			    uint32_t format, uint32_t type);
+int64_t gb_sv_sz_ctex(struct gb_sth *t, uint32_t target, int32_t level);
+int64_t gb_sv_sz_pixelmap(struct gb_sth *t, int wsz, uint32_t map);
+int64_t gb_sv_sz_uniformblock(struct gb_sth *t, int wsz, uint32_t program,
+			      uint32_t block, uint32_t pname);
+int64_t gb_sv_sz_progstring(struct gb_sth *t, uint32_t target,
+			    uint32_t pname);
+
+#define GB_COUNT_PNAME(op, cls, pname) \
+	gb_pname_count_class((cls), (uint32_t)(pname), gb_sv_geti, NULL)
+#define GB_BYTES_pixels1(m, f, t, w) \
+	gb_sv_pixel_bytes((m), (uint32_t)(f), (uint32_t)(t), (int64_t)(w), 1, 1)
+#define GB_BYTES_pixels2(m, f, t, w, h) \
+	gb_sv_pixel_bytes((m), (uint32_t)(f), (uint32_t)(t), (int64_t)(w), \
+			  (int64_t)(h), 1)
+#define GB_BYTES_pixels3(m, f, t, w, h, d) \
+	gb_sv_pixel_bytes((m), (uint32_t)(f), (uint32_t)(t), (int64_t)(w), \
+			  (int64_t)(h), (int64_t)(d))
+#define GB_BYTES_pixel1(m, f, t) \
+	gb_sv_pixel_bytes(GB_PM_UNPACK, (uint32_t)(f), (uint32_t)(t), 1, 1, 1)
+#define GB_BYTES_bitmap(m, w, h) \
+	gb_sv_bitmap_bytes((m), (int64_t)(w), (int64_t)(h))
+
+/* arguments: (thread, op, element size, ...) */
+#define GB_SZS_uniform(t, op, wsz, p, l) gb_sv_sz_uniform((t), (wsz), (p), (l))
+#define GB_SZS_pixels_tex(t, op, wsz, tg, lv, f, ty) \
+	gb_sv_sz_pixels_tex((t), (tg), (lv), (f), (ty))
+#define GB_SZS_ctex(t, op, wsz, tg, lv) gb_sv_sz_ctex((t), (tg), (lv))
+#define GB_SZS_pixelmap(t, op, wsz, m) gb_sv_sz_pixelmap((t), (wsz), (m))
+#define GB_SZS_uniformblock(t, op, wsz, p, b, pn) \
+	gb_sv_sz_uniformblock((t), (wsz), (p), (b), (pn))
+#define GB_SZS_progstring(t, op, wsz, tg, pn) \
+	gb_sv_sz_progstring((t), (tg), (pn))
 
 static inline int64_t gb_capcount(int64_t n)
 {
