@@ -1,8 +1,11 @@
 # arm32 → arm64 GPU API Remoting Layer (Tegra)
 
 Working name: **`gpu-bridge`** (client: `gb32`, server: `gbd`).
-Status: design only. No code exists yet. This document is the handoff for the
-AI/engineer who will implement it.
+Status: **first vertical slice implemented and passing** — see
+[docs/STATUS.md](docs/STATUS.md) for what exists, measurements, lessons and
+known gaps. This document remains the design; where the code deliberately
+differs from it, the difference is listed under "Deviations from this
+design" at the end.
 
 ---
 
@@ -36,6 +39,8 @@ stack, running under a 64-bit kernel that can execute AArch32 binaries.
 - Modifying, patching, or redistributing NVIDIA binaries.
 - Multi-user / sandbox-grade security isolation (same-user trust model; see §5.10).
 - Network transparency (local machine only).
+- **Wayland** (the target runs X11 only — user-confirmed). Wayland/Strategy W
+  is kept in the doc as a deferred option, not a v1 deliverable.
 
 ### Success criteria
 1. `es2gears`, `glxgears`, `glmark2-es2` (armhf builds) render correctly on the target using the Tegra GPU.
@@ -86,9 +91,12 @@ All items below are **[ASSUMED]** unless stated; confirm in Phase 0.
   any process.
 - GL: desktop GL 4.x and GLES 3.x; EGL with NVIDIA-specific extensions (EGLStream
   family, `EGL_EXT_device_*`, `EGL_EXT_platform_device`); Vulkan 1.x on newer L4T.
-- Display stack on Jetson is commonly **X11** (NVIDIA X driver + GLX). Wayland on
-  Tegra goes through `egl-wayland` (EGLStreams historically; dma-buf/explicit-sync
-  support depends on release).
+- **Display stack is X11 only** (user-confirmed; NVIDIA X driver + GLX). This
+  makes Strategy X (§5.7) the primary presentation path and removes Wayland
+  from v1. (For reference: Wayland on Tegra goes through `egl-wayland`,
+  EGLStreams historically.) Q2 is therefore answered; Q8 (a second X connection
+  rendering to a window owned by the client connection) is now the critical
+  Phase 0 check.
 
 ### Phase 0 questions the target must answer  [VERIFY]
 
@@ -488,6 +496,14 @@ Build:
 
 ### 9.1 Host loopback dev loop (no Tegra required)  — recommended first
 
+Dev machine (confirmed): x86_64, KDE neon / Ubuntu 24.04, AMD Radeon RX 9060 XT
+(Mesa 26.2 radeonsi, GL 4.6), gcc 13, clang, cmake, ninja, Xvfb. i386 runtime
+libs (libc6, libX11, libxcb, libEGL, libGL, libvulkan, libGLdispatch…) are
+installed; `gcc-multilib` + `libc6-dev-i386` are required for `-m32` links.
+Build system for this project: **CMake + Ninja** (no meson).
+Because the dev GPU is not the Tegra, treat the backend as a "reference"
+driver: correctness of marshalling, not NVIDIA behavior.
+
 The bridge logic is **word-size dependent, not ISA dependent**. Therefore:
 
 - Build the client for **i386 (x86-32)**: `-m32`, requires `gcc-multilib`
@@ -562,9 +578,13 @@ primary presentation path (verify with `GB_STATS`).
   semaphores/fences with fd export.
 **Exit:** `vkcube`, `vkcube --present_mode …`, `vulkaninfo`, a deqp-vk smoke subset.
 
-### Phase 5 — Wayland + explicit sync
-- Strategy W complete (dma-buf + modifiers + explicit sync) if the compositor allows.
-**Exit:** `es2gears`/`vkcube` zero-copy under the target's Wayland compositor.
+### Phase 5 — (DEFERRED) Wayland + explicit sync
+Target is X11-only; do not start unless the requirement changes. If it does:
+Strategy W (dma-buf + modifiers + explicit sync).
+**Replacement Phase 5 for X11:** zero-copy-ish presentation polish — vsync /
+swap interval correctness, `GLX_EXT_swap_control`, `EGL_EXT_buffer_age`,
+multi-window/multi-context apps, window resize and reparenting edge cases, and
+DRI3/Present fallback (Strategy W-X11) only if Strategy X proves unusable.
 
 ### Phase 6 — Hardening and packaging
 - Fuzzing, leak checks (fd, shm, GPU memory), fork handling, crash recovery.
@@ -655,3 +675,22 @@ primary presentation path (verify with `GB_STATS`).
 | **Khronos registries** (`gl.xml`, `egl.xml`, `glx.xml`, `vk.xml`) | Source of truth for generators |
 | Khronos **Vulkan Loader — ICD interface** docs | Required for `libvulkan_gb32` |
 | **libglvnd** docs (EGL/GLX vendor interface) | Required for the GLVND vendor libraries |
+
+---
+
+## 14. Deviations from this design (as built)
+
+Decisions made while implementing the first slice. Each one is intentional;
+the "target" column is where the design is meant to end up.
+
+| Topic | Design said | As built | Why / target |
+|---|---|---|---|
+| GL object names | client-allocated, server-validated (5.5) | server-allocated; every `glGen*` is a sync round trip | simpler first; client-allocated names are a Phase 2 optimisation |
+| Ring publish | batch, one doorbell per flush (5.2/7) | publish after every record (wake only if the consumer sleeps) | avoids "trailing async calls never start" bugs; batching needs an idle-flush timer |
+| Wait strategy | spin then futex (7.6) | 64 pauses, 64 `sched_yield`s, then futex | same-core sync call was 145 us with pure spinning; now ~9 us. See STATUS.md |
+| Bulk data | shared staging arena (5.6) | chunked BIG messages through the rings (one extra copy each way) | correct for any size; arena/dma-buf mapping is Phase 2 |
+| Display selection | `eglGetDisplay(Display*)` | server calls `eglGetPlatformDisplayEXT(EGL_PLATFORM_X11_EXT, ...)` | the legacy call guesses the platform from the pointer *and the inherited `EGL_PLATFORM`* env var and crashed under a Wayland session |
+| Window-system libs | client uses distro libs | same; client resolves `XDisplayString` via `dlsym` so libgb has no libX11 link dependency | keeps the client lib free of ABI-sensitive deps |
+| Server discovery | `gb-launch` socket activation | client `posix_spawn`s `gbd` with a socketpair end; lifetime tied to the client | no filesystem socket, nothing to clean up, no cross-user surface |
+| Extension strings | advertise only what is implemented (6) | generator emits extension -> commands table; client filters `EGL_EXTENSIONS` / `GL_EXTENSIONS` to extensions whose commands are all implemented; unknown extensions dropped | mechanical, no hand-maintained allow-list |
+| GLVND vendor split | EGL/GLX vendor libs (5.1) | single `libgb32_gl.so` exporting EGL + GLES directly | first slice; vendor split is the next packaging step |
