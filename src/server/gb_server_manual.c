@@ -188,23 +188,25 @@ static void h_get_string(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	GB_NATIVE(glGetIntegerv, void, (GLenum, GLint *));
 	const char *s = NULL;
 	if (index == 0xFFFFFFFFu) {
-		if (fn_glGetString)
-			s = (const char *)fn_glGetString(name);
 		/*
-		 * Core-profile contexts have no legacy GL_EXTENSIONS string
-		 * (glGetString returns NULL and raises INVALID_ENUM): rebuild
-		 * the list from glGetStringi so the client sees one list in
-		 * every profile. Drain the error we may have just provoked.
+		 * GL_EXTENSIONS: desktop 3.0+ contexts enumerate with
+		 * glGetStringi (the legacy string does not exist in core
+		 * profiles and querying it would raise INVALID_ENUM, which
+		 * the app would later see). Decide from the version string
+		 * rather than by trying.
 		 */
-		if (!s && name == GL_EXTENSIONS && fn_glGetStringi &&
-		    fn_glGetIntegerv) {
-			GB_NATIVE(glGetError, GLenum, (void));
+		const char *ver = NULL;
+		if (name == GL_EXTENSIONS && fn_glGetString)
+			ver = (const char *)fn_glGetString(GL_VERSION);
+		int desktop3 = ver && strncmp(ver, "OpenGL ES", 9) &&
+			       atoi(ver) >= 3;
+		if (desktop3 && fn_glGetStringi && fn_glGetIntegerv) {
 			GLint n = 0;
-			if (fn_glGetError)
-				(void)fn_glGetError();
 			fn_glGetIntegerv(GL_NUM_EXTENSIONS, &n);
+			if (n > 4096)
+				n = 4096;
 			size_t cap = 16;
-			for (GLint i = 0; i < n && i < 4096; i++) {
+			for (GLint i = 0; i < n; i++) {
 				const char *e = (const char *)
 					fn_glGetStringi(GL_EXTENSIONS, i);
 				if (e)
@@ -212,7 +214,7 @@ static void h_get_string(struct gb_sth *t, const struct gb_cmd_hdr *h,
 			}
 			char *buf = gb_tmp(t, cap);
 			size_t o = 0;
-			for (GLint i = 0; buf && i < n && i < 4096; i++) {
+			for (GLint i = 0; buf && i < n; i++) {
 				const char *e = (const char *)
 					fn_glGetStringi(GL_EXTENSIONS, i);
 				if (!e)
@@ -227,6 +229,8 @@ static void h_get_string(struct gb_sth *t, const struct gb_cmd_hdr *h,
 				buf[o] = 0;
 				s = buf;
 			}
+		} else if (fn_glGetString) {
+			s = (const char *)fn_glGetString(name);
 		}
 	} else if (fn_glGetStringi) {
 		s = (const char *)fn_glGetStringi(name, index);

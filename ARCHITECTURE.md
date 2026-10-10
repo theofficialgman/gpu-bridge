@@ -694,3 +694,7 @@ the "target" column is where the design is meant to end up.
 | Server discovery | `gb-launch` socket activation | client `posix_spawn`s `gbd` with a socketpair end; lifetime tied to the client | no filesystem socket, nothing to clean up, no cross-user surface |
 | Extension strings | advertise only what is implemented (6) | generator emits extension -> commands table; client filters `EGL_EXTENSIONS` / `GL_EXTENSIONS` to extensions whose commands are all implemented; unknown extensions dropped | mechanical, no hand-maintained allow-list |
 | GLVND vendor split | EGL/GLX vendor libs (5.1) | single `libgb32_gl.so` exporting EGL + GLES directly | first slice; vendor split is the next packaging step |
+| GLX/GL library form | GLVND vendor library (5.1) | `libGL.so.1` drop-in replacement exporting GLX + GL directly | the target has no armhf GL at all, so there is nothing to coexist with; a GLVND vendor split is only needed if one is installed |
+| Window-system ordering | not considered | client `XSync`s before calls that name X resources | the server's separate X connection is not ordered with the app's (found by running the real glxgears) |
+| Pixel transfers with PBOs | guard + error | encoder sends a buffer offset when the matching binding is non-zero | works for ES3 and desktop alike |
+| Core-profile client arrays | n/a | rejected at the pointer call, like the driver | fidelity: do not be more permissive than the real driver |

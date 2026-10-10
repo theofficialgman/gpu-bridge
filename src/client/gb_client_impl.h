@@ -78,6 +78,7 @@ struct gb_ctxstate {
 	struct gb_vao *vaos;    /* named VAOs seen so far */
 	struct gb_pixstore pack, unpack;
 	uint32_t client_active_tex; /* texture unit index */
+	int8_t core;                /* -1 unknown, 0 compat/ES, 1 core profile */
 	/* glPushClientAttrib / glPopClientAttrib */
 	struct gb_attrib_save {
 		uint32_t mask;

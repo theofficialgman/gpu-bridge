@@ -32,6 +32,7 @@ struct gb_ctxstate *gb_state_for(uint32_t ctx_id)
 	if (s) {
 		s->ctx_id = ctx_id;
 		s->vao = &s->vao0;
+		s->core = -1;
 		s->pack = (struct gb_pixstore){ 4, 0, 0, 0, 0, 0 };
 		s->unpack = (struct gb_pixstore){ 4, 0, 0, 0, 0, 0 };
 		s->next = g_states;
@@ -126,6 +127,35 @@ int64_t gb_cl_bitmap_bytes(int mode, int64_t w, int64_t h)
 	return gb_bitmap_bytes(w, h, ps);
 }
 
+/* Core profiles (desktop 3.2+ without ARB_compatibility) have no client-
+ * memory arrays. Determined lazily, once per context, without provoking
+ * errors: version string first, profile mask only where it is valid. */
+static int ctx_is_core(struct gb_ctxstate *st)
+{
+#ifdef GB_LIB_GL
+	if (st->core < 0) {
+		const char *v = (const char *)glGetString(GL_VERSION);
+		int core = 0;
+		if (v && strncmp(v, "OpenGL ES", 9)) {
+			int maj = atoi(v), min = 0;
+			const char *dot = strchr(v, '.');
+			if (dot)
+				min = atoi(dot + 1);
+			if (maj > 3 || (maj == 3 && min >= 2)) {
+				GLint mask = 0;
+				glGetIntegerv(0x9126 /* PROFILE_MASK */, &mask);
+				core = !(mask & 2); /* not COMPATIBILITY bit */
+			}
+		}
+		st->core = (int8_t)core;
+	}
+	return st->core;
+#else
+	(void)st;
+	return 0;
+#endif
+}
+
 /* ---- array shadow ----------------------------------------------------------------- */
 
 int gb_arr_pointer(struct gb_ctxstate *st, int slot, int size, uint32_t type,
@@ -134,6 +164,12 @@ int gb_arr_pointer(struct gb_ctxstate *st, int slot, int size, uint32_t type,
 {
 	if (slot < 0 || slot >= CA_COUNT)
 		return 0;
+	/* Core profile: a non-NULL client pointer with no buffer bound is an
+	 * error at the call (not at the draw), exactly as in the driver. */
+	if (st->array_buffer == 0 && ptr != NULL && ctx_is_core(st)) {
+		gb_cl_gl_error(0x0502 /* INVALID_OPERATION */);
+		return 1;
+	}
 	struct gb_carray *a = &st->vao->a[slot];
 
 	a->size = size;
@@ -175,6 +211,11 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 	for (int i = 0; i < CA_COUNT; i++)
 		if (v->a[i].enabled && v->a[i].buffer == 0)
 			nclient++;
+	if (nclient && ctx_is_core(st)) {
+		/* the driver would raise this; do not be more permissive */
+		gb_cl_gl_error(0x0502 /* INVALID_OPERATION */);
+		return 1;
+	}
 
 	if (indexed) {
 		if (v->element_buffer) {
