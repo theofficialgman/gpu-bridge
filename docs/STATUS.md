@@ -60,7 +60,7 @@ Verified with **unmodified distribution binaries** on a real X server
 there is Mesa's llvmpipe in *both* the native reference and the bridged run.
 Those runs validate marshalling, not acceleration. Acceleration is only
 evidenced by the runs on the real display (the `GL_RENDERER` line in the
-output). `GB_DEBUG=1`-free: just read `GL_RENDERER`.
+output); always read `GL_RENDERER` before drawing conclusions.
 
 Notable behaviour/fidelity decisions:
 
