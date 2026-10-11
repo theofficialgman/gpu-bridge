@@ -759,7 +759,8 @@ def emit_server(cmd, opname):
         elif k[0] == "arr_in":
             mode, wsz, pbo = k[2], k[3], k[5]
             cexp = count_c(cmd, k[4], names)
-            L.append(f"\tconst void *b_{n} = NULL; int64_t n_{n} = 0;")
+            L.append(f"\tconst void *b_{n} = NULL; int64_t n_{n} = 0; "
+                     f"int uns_{n} = 0;")
             if pbo:
                 L.append(f"\tif (l_{n} == GB_PBO_LEN) {{")
                 L.append(f"\t\tconst uint64_t *o_ = gb_r_blob(__r, 8);")
@@ -768,8 +769,8 @@ def emit_server(cmd, opname):
                 L.append("\t} else")
             L.append(f"\tif (l_{n} != GB_NULL_LEN) {{")
             L.append(f"\t\tn_{n} = {cexp};")
-            L.append(f"\t\tif (n_{n} < 0) n_{n} = 0; else b_{n} = "
-                     f"(const void *)1; /* sized */")
+            L.append(f"\t\tif (n_{n} < 0) {{ n_{n} = 0; uns_{n} = 1; }} "
+                     f"else b_{n} = (const void *)1; /* sized */")
             L.append(f"\t\tif (n_{n} * {wsz} != (int64_t)l_{n}) "
                      f"goto proto_error;")
             L.append(f"\t\tconst void *blob_{n} = gb_r_blob(__r, l_{n});")
@@ -895,8 +896,14 @@ def emit_server(cmd, opname):
     ptypes = ", ".join(p["ctype"] for p in P) or "void"
     args = ", ".join(f"a_{p['name']}" for p in P)
     L.append(f"\tGB_NATIVE({cmd.name}, {cmd.ret}, ({ptypes}));")
+    # An array we could not size must not reach the driver as NULL (the
+    # driver dereferences it): skip the call and raise INVALID_VALUE.
+    uns = [f"uns_{p['name']}" for p in P
+           if p["k"][0] in ("arr_in", "arr_out") and p["k"][4][0] != "server"]
+    L.append(f"\tint __skip = {' || '.join(uns) if uns else '0'};")
+    L.append("\tif (__skip) gb_sv_raise_invalid();")
     L.append("\tuint64_t __t0 = gb_stat_now();")
-    L.append(f"\tif (fn_{cmd.name}) " +
+    L.append(f"\tif (fn_{cmd.name} && !__skip) " +
              ("ret = " if cmd.rk[0] != "void" else "") +
              f"fn_{cmd.name}({args});")
     L.append("\tgb_stat_native(__op, __t0);")

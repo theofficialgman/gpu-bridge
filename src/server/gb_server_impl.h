@@ -142,6 +142,10 @@ void gb_srv_manual_dispatch(struct gb_sth *t, const struct gb_cmd_hdr *h,
 			    struct gb_r *r);
 void gb_srv_scratch_free(struct gb_sth *t);
 
+/* Raise GL_INVALID_VALUE on the current context without side effects (used
+ * when an argument cannot be sized and the call is dropped). */
+void gb_sv_raise_invalid(void);
+
 /* GB_STATS: time spent inside the native driver call, per opcode. */
 extern int gb_stats_on;
 uint64_t gb_stat_mono_ns(void);

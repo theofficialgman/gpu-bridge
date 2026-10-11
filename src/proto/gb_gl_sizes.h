@@ -134,9 +134,12 @@ static inline int gb_pname_count_class(int cls, uint32_t pname,
 static inline int gb_format_components(uint32_t f)
 {
 	switch (f) {
+	case 0x1900: /* COLOR_INDEX */
 	case 0x1901: /* STENCIL_INDEX */
 	case 0x1902: /* DEPTH_COMPONENT */
 	case 0x1903: /* RED */
+	case 0x1904: /* GREEN */
+	case 0x1905: /* BLUE */
 	case 0x1906: /* ALPHA */
 	case 0x1909: /* LUMINANCE */
 	case 0x8D94: /* RED_INTEGER */
@@ -148,10 +151,14 @@ static inline int gb_format_components(uint32_t f)
 		return 2;
 	case 0x1907: /* RGB */
 	case 0x8D98: /* RGB_INTEGER */
+	case 0x80E0: /* BGR */
+	case 0x8D9A: /* BGR_INTEGER */
 		return 3;
 	case 0x1908: /* RGBA */
 	case 0x8D99: /* RGBA_INTEGER */
-	case 0x80E1: /* BGRA_EXT */
+	case 0x80E1: /* BGRA */
+	case 0x8D9B: /* BGRA_INTEGER */
+	case 0x8000: /* ABGR_EXT */
 		return 4;
 	default:
 		return -1;
@@ -162,12 +169,19 @@ static inline int gb_format_components(uint32_t f)
 static inline int gb_packed_type_bytes(uint32_t t)
 {
 	switch (t) {
+	case 0x8032: /* UNSIGNED_BYTE_3_3_2 */
+	case 0x8362: /* UNSIGNED_BYTE_2_3_3_REV */
+		return 1;
+	case 0x8364: /* UNSIGNED_SHORT_5_6_5_REV */
 	case 0x8033: /* UNSIGNED_SHORT_4_4_4_4 */
 	case 0x8034: /* UNSIGNED_SHORT_5_5_5_1 */
 	case 0x8363: /* UNSIGNED_SHORT_5_6_5 */
 	case 0x8365: /* UNSIGNED_SHORT_4_4_4_4_REV_EXT */
 	case 0x8366: /* UNSIGNED_SHORT_1_5_5_5_REV_EXT */
 		return 2;
+	case 0x8035: /* UNSIGNED_INT_8_8_8_8 */
+	case 0x8367: /* UNSIGNED_INT_8_8_8_8_REV */
+	case 0x8036: /* UNSIGNED_INT_10_10_10_2 */
 	case 0x8368: /* UNSIGNED_INT_2_10_10_10_REV */
 	case 0x8C3B: /* UNSIGNED_INT_10F_11F_11F_REV */
 	case 0x8C3E: /* UNSIGNED_INT_5_9_9_9_REV */
@@ -195,6 +209,8 @@ static inline int gb_type_bytes(uint32_t t)
 	case 0x1405: /* UNSIGNED_INT */
 	case 0x1406: /* FLOAT */
 		return 4;
+	case 0x140A: /* DOUBLE */
+		return 8;
 	default:
 		return -1;
 	}
@@ -209,6 +225,9 @@ struct gb_pixstore {
 	int skip_images;
 };
 
+static inline int64_t gb_bitmap_bytes(int64_t w, int64_t h,
+				      const struct gb_pixstore *ps);
+
 /* Bytes the driver will touch for a w*h rectangle, or -1 if unknown. */
 static inline int64_t gb_pixel_bytes(uint32_t format, uint32_t type, int64_t w,
 				     int64_t h, const struct gb_pixstore *ps)
@@ -217,6 +236,9 @@ static inline int64_t gb_pixel_bytes(uint32_t format, uint32_t type, int64_t w,
 		return -1;
 	if (w == 0 || h == 0)
 		return 0;
+	if (type == 0x1A00) /* GL_BITMAP: one bit per pixel */
+		return (format == 0x1900 || format == 0x1901)
+			       ? gb_bitmap_bytes(w, h, ps) : -1;
 	int bpp = gb_packed_type_bytes(type);
 	if (bpp == 0) {
 		int c = gb_format_components(format), tb = gb_type_bytes(type);

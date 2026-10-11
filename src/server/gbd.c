@@ -16,6 +16,7 @@
 #define GB_OPS_NAMES 1 /* gb_op_names[] for GB_STATS */
 #include <errno.h>
 #include <stdarg.h>
+#include <signal.h>
 #include <stddef.h>
 #include <time.h>
 #include <stdio.h>
@@ -207,6 +208,57 @@ int gb_sv_geti(void *ctx, uint32_t pname)
 
 int gb_stats_on;
 
+void gb_sv_raise_invalid(void)
+{
+	GB_NATIVE(glDeleteTextures, void, (GLsizei, const GLuint *));
+
+	if (fn_glDeleteTextures)
+		fn_glDeleteTextures(-1, NULL); /* INVALID_VALUE, no effect */
+}
+
+/* The last opcodes each worker executed, dumped from a crash handler: the
+ * driver crashes inside symbol-less proprietary code, so "what was the app
+ * doing" is otherwise unrecoverable. */
+#define RECENT_OPS 16
+static __thread uint32_t t_recent[RECENT_OPS];
+static __thread unsigned t_recent_n;
+static __thread uint32_t t_recent_cur;
+
+static void crash_handler(int sig, siginfo_t *si, void *uc)
+{
+	char buf[160];
+	int n = snprintf(buf, sizeof(buf),
+			 "gbd: fatal signal %d at address %p; last %d ops "
+			 "(oldest first):\n", sig, si->si_addr, RECENT_OPS);
+	(void)!write(2, buf, (size_t)n);
+	for (unsigned i = 0; i < RECENT_OPS; i++) {
+		uint32_t op = t_recent[(t_recent_n + i) % RECENT_OPS];
+		const char *nm = op && op < GB_OP_COUNT ? gb_op_names[op]
+							 : (op ? "opx/unknown" : "-");
+		n = snprintf(buf, sizeof(buf), "   %2u: %s\n", i, nm);
+		(void)!write(2, buf, (size_t)n);
+	}
+	if (t_recent_cur && t_recent_cur < GB_OP_COUNT) {
+		n = snprintf(buf, sizeof(buf), "   executing: %s\n",
+			     gb_op_names[t_recent_cur]);
+		(void)!write(2, buf, (size_t)n);
+	}
+	_exit(128 + sig);
+}
+
+static void install_crash_handler(void)
+{
+	struct sigaction sa;
+
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_sigaction = crash_handler;
+	sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
+	sigaction(SIGSEGV, &sa, NULL);
+	sigaction(SIGBUS, &sa, NULL);
+	sigaction(SIGABRT, &sa, NULL);
+	sigaction(SIGILL, &sa, NULL);
+}
+
 static uint64_t mono_ns(void)
 {
 	struct timespec ts;
@@ -259,6 +311,8 @@ static void *worker_main(void *arg)
 		struct gb_r r;
 		gb_r_init(&r, in.p, in.size);
 
+		t_recent_cur = h.opcode;
+		t_recent[t_recent_n++ % RECENT_OPS] = h.opcode;
 		if (h.size != in.size) {
 			gb_sv_proto_error(t, &h);
 		} else if (h.opcode > 0 && h.opcode < GB_OP_COUNT &&
@@ -433,6 +487,7 @@ int main(int argc, char **argv)
 		return 2;
 	}
 	g_debug = getenv("GB_DEBUG") != NULL;
+	install_crash_handler();
 	gb_stats_on = getenv("GB_STATS") != NULL;
 
 	if (gb_native_init())
