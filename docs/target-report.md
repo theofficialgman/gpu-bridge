@@ -274,23 +274,24 @@ What the sweep found (details and the generalised lessons are in
 | EGL tests "piglit_egl_get_display() failed" | `EGL_EXT_platform_base` hidden | pixmap/platform-pixmap surfaces implemented |
 | ES extension list 112 vs 195 | generator emitted 3 ES extensions | OES/EXT/KHR + NV aliases, alias wrappers |
 
-Remaining 28 differences and their status are listed in STATUS.md
-("Conformance"). The notable open ones: `glSelectBuffer`/`glFeedbackBuffer`
-(6 tests, known gap), the
-fence-sync difference (the test forks; natively EGL fails in the forked child
-and the test passes via an early-out, while the bridge supports fork and runs
-checks that are meaningless across processes), the colorspace test (needs GLES1, which is not
-implemented), and a client crash in `egl_ext_platform_device` (native fails
-that test too). `depth-clear-precision-check` is **not** a bridge problem: the
-armhf test binary itself loops forever on its `depth32` case, which a plain
-Mesa llvmpipe run of the same armhf binary reproduces without any bridge.
+Remaining 10 differences (run 5) and their status are listed in STATUS.md
+("Conformance"). Four are not defects: `depth-clear-precision-check` (the
+armhf test binary itself loops forever on its `depth32` case; a plain Mesa
+llvmpipe run of the same armhf binary reproduces it without any bridge),
+`ppgtt_memory_alignment` (crashes natively), `egl_ext_platform_device` (fails
+natively, passes bridged) and `egl_khr_fence_sync` (the test forks; natively
+EGL fails in the forked child and the test passes via an early-out, while the
+bridge supports fork and runs checks that are meaningless across processes).
+The other six are missing features: GLES1 (`egl_khr_gl_colorspace`), the
+`GL_KHR_debug` upcall (3 context-flag tests), `EGL_ANDROID_blob_cache`
+(callbacks) and dma-buf modifiers (fd passing).
 
 The native baseline was repeated four times (613 tests after excluding
 `max-texture-size`): 610 tests give identical results every time; the three
 that vary are multisample depth/stencil tests. The earlier "4 tests flipped in
 the bridge's favour" were `max-texture-size` (native timeout, see below), the
 Intel-only `ppgtt_memory_alignment` (stable native crash) and two of those
-flaky multisample tests. Real differences from the stable baseline: 24 (plus one 32-bit test-program hang that is not a bridge issue).
+flaky multisample tests. Real differences from the stable baseline are listed above (10 in run 5, 4 of which are not defects).
 
 **Operational hazard:** native arm64 `max-texture-size` stalls this 4 GB
 device for ~100 s and triggered the OOM killer twice (plasmashell, konsole,
