@@ -225,6 +225,50 @@ static void test_legacy(void)
 	glGetPointerv(GL_VERTEX_ARRAY_POINTER, &gp);
 	CHECK(gp == (void *)tri, "glGetPointerv");
 
+	/* selection mode: the driver writes hit records into a buffer it
+	 * retains; they must be back in ours when glRenderMode returns */
+	{
+		GLuint sel[64];
+		GLfloat fb[64];
+		GLint hits;
+
+		memset(sel, 0xAB, sizeof(sel));
+		glMatrixMode(GL_PROJECTION);
+		glLoadIdentity();
+		glMatrixMode(GL_MODELVIEW);
+		glLoadIdentity();
+		glSelectBuffer(64, sel);
+		glRenderMode(GL_SELECT);
+		glInitNames();
+		glPushName(7);
+		glBegin(GL_TRIANGLES); /* covers the whole viewport */
+		glVertex2f(-1, -1);
+		glVertex2f(3, -1);
+		glVertex2f(-1, 3);
+		glEnd();
+		glPopName();
+		hits = glRenderMode(GL_RENDER);
+		CHECK(hits == 1, "select: %d hits", hits);
+		CHECK(sel[0] == 1 && sel[3] == 7,
+		      "select record: count=%u name=%u", sel[0], sel[3]);
+		CHECK(sel[4] == 0xABABABABu, "select: buffer overrun");
+
+		/* feedback mode: GL_2D, one triangle -> token + count + 3 verts */
+		memset(fb, 0, sizeof(fb));
+		glFeedbackBuffer(64, GL_2D, fb);
+		glRenderMode(GL_FEEDBACK);
+		glBegin(GL_TRIANGLES);
+		glVertex2f(-0.5f, -0.5f);
+		glVertex2f(0.5f, -0.5f);
+		glVertex2f(0.0f, 0.5f);
+		glEnd();
+		hits = glRenderMode(GL_RENDER);
+		CHECK(hits == 8, "feedback: %d values", hits); /* 1+1+3*2 */
+		CHECK(fb[0] == (float)GL_POLYGON_TOKEN && fb[1] == 3.f,
+		      "feedback header: %g %g", fb[0], fb[1]);
+		CHECK(glGetError() == GL_NO_ERROR, "select/feedback errors");
+	}
+
 	/* error reporting */
 	while (glGetError() != GL_NO_ERROR)
 		;

@@ -106,6 +106,12 @@ struct gb_ctxstate {
 	struct gb_pixstore pack, unpack;
 	uint32_t client_active_tex; /* texture unit index */
 	int8_t core;                /* -1 unknown, 0 compat/ES, 1 core profile */
+	/* glRenderMode(GL_SELECT / GL_FEEDBACK): the application's buffers */
+	uint32_t render_mode;       /* 0 = GL_RENDER */
+	GLuint *sel_ptr;
+	GLsizei sel_size;
+	GLfloat *fb_ptr;
+	GLsizei fb_size;
 	/* glPushClientAttrib / glPopClientAttrib */
 	struct gb_attrib_save {
 		uint32_t mask;

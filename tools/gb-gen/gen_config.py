@@ -110,6 +110,9 @@ _MANUAL = {
         "glXChooseFBConfig", "glXGetFBConfigs", "glXGetCurrentDisplay",
         "glGetString", "glGetStringi",
         "glShaderSource", "glShaderSourceARB",
+        # the driver retains the buffer pointer and writes at glRenderMode:
+        # the server keeps a persistent buffer and returns its contents then
+        "glSelectBuffer", "glFeedbackBuffer", "glRenderMode",
         "glInterleavedArrays", "glGetPointerv",
         "glGetVertexAttribPointerv", "glGetVertexAttribPointervARB",
         "glMultiDrawElements", "glMultiDrawElementsBaseVertex",
@@ -338,8 +341,6 @@ HANDLE_FREE = {
 # Explicitly unsupported (with the reason shown in the report).
 UNSUPPORTED = {
     # The driver keeps these client pointers and writes through them later.
-    "glFeedbackBuffer": "retained client pointer (written at glRenderMode)",
-    "glSelectBuffer": "retained client pointer (written at glRenderMode)",
     "glFeedbackBufferEXT": "retained client pointer",
     "glSelectBufferEXT": "retained client pointer",
     # needs a font round-trip + display lists built from X font metrics

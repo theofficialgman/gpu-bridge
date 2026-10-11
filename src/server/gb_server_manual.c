@@ -29,6 +29,13 @@ struct gb_scratch {
 	void *ctx; /* EGLContext or GLXContext (whichever is current) */
 	GLuint vbo, ebo;
 	size_t vbo_cap, vbo_off, ebo_cap, ebo_off;
+	/* selection / feedback buffers the driver retains and writes through
+	 * (glSelectBuffer / glFeedbackBuffer); the previous generation is kept
+	 * one call longer in case the replacing call failed */
+	uint32_t *sel, *sel_prev;
+	uint32_t sel_n;
+	float *fb, *fb_prev;
+	uint32_t fb_n;
 };
 
 static void *current_ctx_key(struct gb_sth *t)
@@ -72,6 +79,10 @@ void gb_srv_scratch_free(struct gb_sth *t)
 	while (t->scratch) {
 		struct gb_scratch *s = t->scratch;
 		t->scratch = s->next;
+		free(s->sel);
+		free(s->sel_prev);
+		free(s->fb);
+		free(s->fb_prev);
 		free(s);
 	}
 }
@@ -470,6 +481,110 @@ static void h_buffer_read(struct gb_sth *t, const struct gb_cmd_hdr *h,
 			gb_w_init(&w, o.p);
 			gb_w_u32(&w, (uint32_t)len);
 			memcpy(gb_w_blob(&w, (uint32_t)len), buf, (size_t)len);
+			gb_sv_reply_end(t, &o);
+		}
+	}
+	return;
+bad:
+	gb_sv_proto_error(t, h);
+}
+
+/* ---- selection / feedback buffers ------------------------------------------------- */
+
+#define GB_MAX_SELECT_WORDS (1u << 22)
+
+static void h_select_buffer(struct gb_sth *t, const struct gb_cmd_hdr *h,
+			    struct gb_r *r)
+{
+	uint32_t kind = gb_r_u32(r), size = gb_r_u32(r), type = gb_r_u32(r);
+
+	if (r->err || kind > 1)
+		goto bad;
+
+	GB_NATIVE(glSelectBuffer, void, (GLsizei, GLuint *));
+	GB_NATIVE(glFeedbackBuffer, void, (GLsizei, GLenum, GLfloat *));
+	struct gb_scratch *s = scratch_for(t);
+
+	if (!s)
+		return; /* no context: nothing to attach to */
+	if ((int32_t)size < 0 || size > GB_MAX_SELECT_WORDS) {
+		gb_sv_raise_invalid(); /* INVALID_VALUE, as for a bad size */
+		return;
+	}
+	uint32_t *nb = calloc(size ? size : 1, 4);
+
+	if (!nb)
+		return;
+	if (kind == 0) {
+		if (fn_glSelectBuffer)
+			fn_glSelectBuffer((GLsizei)size, nb);
+		free(s->sel_prev);
+		s->sel_prev = s->sel;
+		s->sel = nb;
+		s->sel_n = size;
+	} else {
+		if (fn_glFeedbackBuffer)
+			fn_glFeedbackBuffer((GLsizei)size, type, (float *)nb);
+		free(s->fb_prev);
+		s->fb_prev = s->fb;
+		s->fb = (float *)nb;
+		s->fb_n = size;
+	}
+	return;
+bad:
+	gb_sv_proto_error(t, h);
+}
+
+/* RenderMode: switch modes; if the mode being left was SELECT or FEEDBACK,
+ * the results (written by the driver into the server's buffer) come back in
+ * the reply for the client to copy into the application's buffer. */
+static void h_render_mode(struct gb_sth *t, const struct gb_cmd_hdr *h,
+			  struct gb_r *r)
+{
+	uint32_t mode = gb_r_u32(r), prev = gb_r_u32(r);
+
+	if (r->err)
+		goto bad;
+
+	GB_NATIVE(glRenderMode, GLint, (GLenum));
+	GB_NATIVE(glGetIntegerv, void, (GLenum, GLint *));
+	struct gb_scratch *s = scratch_for(t);
+	GLint ret = fn_glRenderMode ? fn_glRenderMode(mode) : 0;
+	GLint cur = 0x1C00;
+	uint32_t n = 0;
+	const uint32_t *words = NULL;
+
+	if (fn_glGetIntegerv)
+		fn_glGetIntegerv(0x0C40 /* RENDER_MODE */, &cur);
+	if (s && prev == 0x1C02 && s->sel) {
+		words = s->sel;
+		if (ret < 0) {
+			n = s->sel_n; /* overflow: the whole buffer */
+		} else {
+			uint32_t pos = 0;
+			for (GLint i = 0; i < ret && pos < s->sel_n; i++)
+				pos += 3 + s->sel[pos]; /* name count, z1, z2 */
+			n = pos > s->sel_n ? s->sel_n : pos;
+		}
+	} else if (s && prev == 0x1C01 && s->fb) {
+		words = (const uint32_t *)s->fb;
+		n = ret < 0 ? s->fb_n
+			    : ((uint32_t)ret < s->fb_n ? (uint32_t)ret
+						       : s->fb_n);
+	}
+
+	if (h->flags & GB_CMD_F_WANT_REPLY) {
+		struct gb_out o;
+		struct gb_w w;
+		uint32_t total = GB_ALIGN_UP(16 + 12 + 4 * n, 8u);
+
+		if (!gb_sv_reply_begin(t, h, &o, total)) {
+			gb_w_init(&w, o.p);
+			gb_w_u32(&w, (uint32_t)ret);
+			gb_w_u32(&w, (uint32_t)cur);
+			gb_w_u32(&w, n);
+			if (n)
+				memcpy(gb_w_blob(&w, 4 * n), words, 4 * n);
 			gb_sv_reply_end(t, &o);
 		}
 	}
@@ -984,6 +1099,8 @@ void gb_srv_manual_dispatch(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	case GB_OPX_BufferRead: h_buffer_read(t, h, r); break;
 	case GB_OPX_ElementMax: h_element_max(t, h, r); break;
 	case GB_OPX_EglDevice: h_egl_device(t, h, r); break;
+	case GB_OPX_SelectBuffer: h_select_buffer(t, h, r); break;
+	case GB_OPX_RenderMode: h_render_mode(t, h, r); break;
 	case GB_OPX_DeviceString: h_device_string(t, h, r); break;
 	default: gb_sv_proto_error(t, h); break;
 	}

@@ -22,6 +22,8 @@ enum gb_opx {
 	GB_OPX_BufferRead,        /* mode, target|buffer, off64, len64 -> bytes */
 	GB_OPX_EglDevice,         /* sub, a, b -> device enumeration / queries */
 	GB_OPX_DeviceString,      /* device, name -> str */
+	GB_OPX_SelectBuffer,      /* kind, size, type (async) */
+	GB_OPX_RenderMode,        /* mode, prev -> ret, newmode, words[] */
 	GB_OPX_ElementMax,        /* itype, count, byte off -> max index (i64, -1 = out of range) */
 	GB_OPX_END
 };

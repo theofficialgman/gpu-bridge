@@ -1306,6 +1306,91 @@ GB_API void glGetPointerv(GLenum pname, void **params)
 	*params = st ? (void *)st->vao->a[slot].ptr : NULL;
 }
 
+/* ---- selection / feedback ------------------------------------------------------------ */
+
+#define GB_RM_FEEDBACK 0x1C01
+#define GB_RM_SELECT 0x1C02
+
+static void select_send(uint32_t kind, int32_t size, uint32_t type)
+{
+	struct gb_cl *cx = gb_cl_get();
+	struct gb_out o;
+	struct gb_w w;
+
+	if (!cx || gb_cl_msg_begin(cx, &o, &w, GB_OPX_SelectBuffer, 32, 0))
+		return;
+	gb_w_u32(&w, kind);
+	gb_w_u32(&w, (uint32_t)size);
+	gb_w_u32(&w, type);
+	gb_cl_end(cx, &o);
+}
+
+GB_API void glSelectBuffer(GLsizei size, GLuint *buffer)
+{
+	struct gb_ctxstate *st = gb_cur_state();
+
+	/* the server's own buffer is what the driver writes; the driver raises
+	 * any error (negative size, select mode active) */
+	if (st && size >= 0 && st->render_mode != GB_RM_SELECT) {
+		st->sel_ptr = buffer;
+		st->sel_size = size;
+	}
+	select_send(0, size, 0);
+}
+
+GB_API void glFeedbackBuffer(GLsizei size, GLenum type, GLfloat *buffer)
+{
+	struct gb_ctxstate *st = gb_cur_state();
+
+	if (st && size >= 0 && st->render_mode != GB_RM_FEEDBACK &&
+	    type >= 0x0600 && type <= 0x0604 /* GL_2D .. GL_4D_COLOR_TEXTURE */) {
+		st->fb_ptr = buffer;
+		st->fb_size = size;
+	}
+	select_send(1, size, type);
+}
+
+GB_API GLint glRenderMode(GLenum mode)
+{
+	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_cl *cx = gb_cl_get();
+	struct gb_out o;
+	struct gb_w w;
+	GLint ret = 0;
+
+	if (!cx || gb_cl_msg_begin(cx, &o, &w, GB_OPX_RenderMode, 32,
+				   GB_CMD_F_WANT_REPLY))
+		return 0;
+	gb_w_u32(&w, mode);
+	gb_w_u32(&w, st ? st->render_mode : 0);
+	gb_cl_end(cx, &o);
+
+	struct gb_in in;
+	if (gb_cl_wait_reply(cx, &in, GB_OPX_RenderMode))
+		return 0;
+	struct gb_r r;
+	gb_r_init(&r, in.p, in.size);
+	ret = (GLint)gb_r_u32(&r);
+	uint32_t newmode = gb_r_u32(&r), n = gb_r_u32(&r);
+	const void *words = n ? gb_r_blob(&r, 4u * n) : NULL;
+
+	if (!r.err && st) {
+		uint32_t prev = st->render_mode;
+		/* the finished mode's results land in the app's buffer */
+		if (words && prev == GB_RM_SELECT && st->sel_ptr)
+			memcpy(st->sel_ptr, words,
+			       4u * (n < (uint32_t)st->sel_size
+					     ? n : (uint32_t)st->sel_size));
+		else if (words && prev == GB_RM_FEEDBACK && st->fb_ptr)
+			memcpy(st->fb_ptr, words,
+			       4u * (n < (uint32_t)st->fb_size
+					     ? n : (uint32_t)st->fb_size));
+		st->render_mode = newmode == 0x1C00 ? 0 : newmode;
+	}
+	gb_in_release(&in);
+	return ret;
+}
+
 /* ---- glInterleavedArrays ----------------------------------------------------------------- */
 
 GB_API void glInterleavedArrays(GLenum format, GLsizei stride,
