@@ -588,6 +588,149 @@ bad:
 	gb_sv_proto_error(t, h);
 }
 
+/* ---- EGL_KHR_debug ------------------------------------------------------------------ */
+
+static void egl_dbg_cb(EGLenum error, const char *command, EGLint type,
+		       EGLLabelKHR thread_label, EGLLabelKHR object_label,
+		       const char *message)
+{
+	struct gb_sth *t = gb_sv_this_thread();
+	uint8_t buf[40 + 256 + 1024 + 16];
+
+	if (!t)
+		return;
+	uint32_t clen = command ? (uint32_t)strlen(command) : 0;
+	uint32_t mlen = message ? (uint32_t)strlen(message) : 0;
+	if (clen > 255)
+		clen = 255;
+	if (mlen > 1023)
+		mlen = 1023;
+	uint32_t hdr[4] = { (uint32_t)error, (uint32_t)type, clen, mlen };
+	uint64_t lab[2] = { (uint64_t)(uintptr_t)thread_label,
+			    (uint64_t)(uintptr_t)object_label };
+	size_t off = 0;
+
+	memcpy(buf + off, hdr, 16);
+	off += 16;
+	memcpy(buf + off, lab, 16);
+	off += 16;
+	if (clen)
+		memcpy(buf + off, command, clen);
+	off = GB_ALIGN_UP(off + clen, 8u);
+	if (mlen)
+		memcpy(buf + off, message, mlen);
+	off += mlen;
+	gb_sv_upcall_post(t, GB_UP_EglDebug, buf, (uint32_t)off);
+}
+
+static void *egl_object(uint32_t type, uint32_t id)
+{
+	switch (type) {
+	case 0x33B1: return gb_h2p(HK_DISPLAY, id);
+	case 0x33B2: return gb_h2p(HK_CONTEXT, id);
+	case 0x33B3: return gb_h2p(HK_SURFACE, id);
+	case 0x33B4: return gb_h2p(HK_IMAGE, id);
+	case 0x33B5: return gb_h2p(HK_SYNC, id);
+	case 0x33B6: return gb_h2p(HK_STREAM, id);
+	default: return NULL; /* EGL_OBJECT_THREAD_KHR */
+	}
+}
+
+static void h_egl_debug(struct gb_sth *t, const struct gb_cmd_hdr *h,
+			struct gb_r *r)
+{
+	uint32_t sub = gb_r_u32(r), nw = gb_r_u32(r), w[17];
+
+	if (r->err || sub > 2 || nw > 17)
+		goto bad;
+	for (uint32_t i = 0; i < nw; i++)
+		w[i] = gb_r_u32(r);
+	uint64_t label = gb_r_u64(r);
+	if (r->err)
+		goto bad;
+
+	GB_NATIVE(eglDebugMessageControlKHR, EGLint,
+		  (void *, const EGLAttrib *));
+	GB_NATIVE(eglQueryDebugKHR, EGLBoolean, (EGLint, EGLAttrib *));
+	GB_NATIVE(eglLabelObjectKHR, EGLint,
+		  (EGLDisplay, EGLenum, void *, void *));
+	int64_t res = -1;
+	uint64_t value = 0;
+
+	if (sub == 0 && nw >= 1 && fn_eglDebugMessageControlKHR) {
+		EGLAttrib at[18];
+		unsigned k = 0;
+
+		for (uint32_t i = 1; i + 1 < nw; i += 2) {
+			at[k++] = (EGLAttrib)w[i];
+			at[k++] = (EGLAttrib)w[i + 1];
+		}
+		at[k] = EGL_NONE;
+		res = fn_eglDebugMessageControlKHR(w[0] ? (void *)egl_dbg_cb
+						       : NULL, at);
+	} else if (sub == 1 && nw == 3 && fn_eglLabelObjectKHR) {
+		res = fn_eglLabelObjectKHR(
+			(EGLDisplay)gb_h2p(HK_DISPLAY, w[0]), (EGLenum)w[1],
+			egl_object(w[1], w[2]), (void *)(uintptr_t)label);
+	} else if (sub == 2 && nw == 1 && fn_eglQueryDebugKHR) {
+		EGLAttrib v = 0;
+
+		res = fn_eglQueryDebugKHR((EGLint)w[0], &v) ? 1 : 0;
+		value = (uint64_t)v;
+	}
+	if (h->flags & GB_CMD_F_WANT_REPLY) {
+		struct gb_out o;
+		struct gb_w wr;
+
+		if (!gb_sv_reply_begin(t, h, &o, 32)) {
+			gb_w_init(&wr, o.p);
+			gb_w_u32(&wr, (uint32_t)res);
+			gb_w_u32(&wr, 0);
+			gb_w_u64(&wr, value);
+			gb_sv_reply_end(t, &o);
+		}
+	}
+	return;
+bad:
+	gb_sv_proto_error(t, h);
+}
+
+static void h_obj_ptr_label(struct gb_sth *t, const struct gb_cmd_hdr *h,
+			    struct gb_r *r)
+{
+	uint32_t ptr = gb_r_u32(r), bufsize = gb_r_u32(r);
+
+	if (r->err || bufsize > (1u << 16)) {
+		gb_sv_proto_error(t, h);
+		return;
+	}
+	GB_NATIVE(glGetObjectPtrLabel, void,
+		  (const void *, GLsizei, GLsizei *, GLchar *));
+	GLsizei len = 0;
+	char *buf = gb_tmp_zero(t, bufsize + 8);
+
+	if (fn_glGetObjectPtrLabel && buf && bufsize)
+		fn_glGetObjectPtrLabel(gb_h2p(HK_GLSYNC, ptr), (GLsizei)bufsize,
+				       &len, buf);
+	if (len < 0 || (uint32_t)len > bufsize)
+		len = 0;
+	if (h->flags & GB_CMD_F_WANT_REPLY) {
+		struct gb_out o;
+		struct gb_w w;
+		uint32_t total = GB_ALIGN_UP(GB_ALIGN_UP(16 + 8, 8u) + (uint32_t)len, 8u);
+
+		if (!gb_sv_reply_begin(t, h, &o, total)) {
+			gb_w_init(&w, o.p);
+			gb_w_u32(&w, (uint32_t)len);
+			gb_w_u32(&w, 0);
+			if (len)
+				memcpy(gb_w_blob(&w, (uint32_t)len), buf,
+				       (size_t)len);
+			gb_sv_reply_end(t, &o);
+		}
+	}
+}
+
 /* ---- EGL_ANDROID_blob_cache upcalls -------------------------------------------------- */
 
 static void blob_set_cb(const void *key, EGLsizeiANDROID ksz, const void *val,
@@ -1262,6 +1405,8 @@ void gb_srv_manual_dispatch(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	case GB_OPX_EglDevice: h_egl_device(t, h, r); break;
 	case GB_OPX_Ping: h_ping(t, h, r); break;
 	case GB_OPX_BlobFuncs: h_blob_funcs(t, h, r); break;
+	case GB_OPX_EglDebug: h_egl_debug(t, h, r); break;
+	case GB_OPX_ObjPtrLabel: h_obj_ptr_label(t, h, r); break;
 	case GB_OPX_DebugCallback: h_debug_callback(t, h, r); break;
 	case GB_OPX_DebugStr: h_debug_str(t, h, r); break;
 	case GB_OPX_SelectBuffer: h_select_buffer(t, h, r); break;

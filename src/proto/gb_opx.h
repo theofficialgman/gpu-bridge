@@ -17,6 +17,7 @@ enum gb_up {
 	GB_UP_DebugMessage,   /* source,type,id,severity,len, message */
 	GB_UP_BlobSet,        /* keysize, valuesize, key, value */
 	GB_UP_BlobGet,        /* keysize, valuemax, key -> n, value (blocking) */
+	GB_UP_EglDebug,       /* error, type, labels, command, message */
 	GB_UP_END
 };
 
@@ -40,6 +41,8 @@ enum gb_opx {
 	GB_OPX_DebugCallback,     /* enable (1) / disable (0) debug upcalls */
 	GB_OPX_DebugStr,          /* sub, a, b, c, length, string */
 	GB_OPX_BlobFuncs,         /* dpy, enable: EGL_ANDROID_blob_cache */
+	GB_OPX_EglDebug,          /* sub: 0 control, 1 label, 2 query (EGL_KHR_debug) */
+	GB_OPX_ObjPtrLabel,       /* sync handle, bufsize -> len, label */
 	GB_OPX_ElementMax,        /* itype, count, byte off -> max index (i64, -1 = out of range) */
 	GB_OPX_END
 };

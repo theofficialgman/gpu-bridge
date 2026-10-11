@@ -297,6 +297,102 @@ GB_API EGLImageKHR eglCreateImageKHR(EGLDisplay dpy, EGLContext ctx,
 	return gbx_eglCreateImageKHR(dpy, ctx, target, buffer, attrib_list);
 }
 
+/* ---- EGL_KHR_debug --------------------------------------------------------------- */
+
+static EGLDEBUGPROCKHR g_egl_dbg;
+
+void gb_cl_egl_debug_dispatch(uint32_t error, const char *command,
+			      uint32_t type, uint64_t thread_label,
+			      uint64_t object_label, const char *message)
+{
+	if (g_egl_dbg)
+		g_egl_dbg((EGLenum)error, command, (EGLint)type,
+			  (EGLLabelKHR)(uintptr_t)thread_label,
+			  (EGLLabelKHR)(uintptr_t)object_label, message);
+}
+
+/* one request/reply on OPX_EglDebug: returns the EGLint result (or -1) */
+static int64_t egl_debug_call(uint32_t sub, const uint32_t *w, unsigned nw,
+			      uint64_t label, uint64_t *value)
+{
+	struct gb_cl *cx = gb_cl_get();
+	struct gb_out o;
+	struct gb_w wr;
+
+	if (!cx || gb_cl_msg_begin(cx, &o, &wr, GB_OPX_EglDebug,
+				   16 + 8 + 4 * nw + 8 + 8,
+				   GB_CMD_F_WANT_REPLY))
+		return -1;
+	gb_w_u32(&wr, sub);
+	gb_w_u32(&wr, nw);
+	for (unsigned i = 0; i < nw; i++)
+		gb_w_u32(&wr, w[i]);
+	gb_w_u64(&wr, label);
+	gb_cl_end(cx, &o);
+
+	struct gb_in in;
+	if (gb_cl_wait_reply(cx, &in, GB_OPX_EglDebug))
+		return -1;
+	struct gb_r r;
+	gb_r_init(&r, in.p, in.size);
+	int64_t res = (int32_t)gb_r_u32(&r);
+	(void)gb_r_u32(&r);
+	uint64_t v = gb_r_u64(&r);
+	if (value)
+		*value = v;
+	gb_in_release(&in);
+	return res;
+}
+
+GB_API EGLint eglDebugMessageControlKHR(EGLDEBUGPROCKHR callback,
+					const EGLAttrib *attrib_list)
+{
+	uint32_t w[17];
+	unsigned nw = 1;
+
+	w[0] = callback ? 1u : 0u;
+	for (int i = 0; attrib_list && i < 16 &&
+	     attrib_list[i] != (EGLAttrib)EGL_NONE && nw < 16; i += 2) {
+		w[nw++] = (uint32_t)attrib_list[i];
+		w[nw++] = (uint32_t)attrib_list[i + 1];
+	}
+	g_egl_dbg = callback;
+	int64_t r = egl_debug_call(0, w, nw, 0, NULL);
+
+	return r < 0 ? EGL_BAD_ALLOC : (EGLint)r;
+}
+
+GB_API EGLBoolean eglQueryDebugKHR(EGLint attribute, EGLAttrib *value)
+{
+	uint64_t v = 0;
+
+	if (!value) {
+		gb_cl_egl_error(EGL_BAD_PARAMETER);
+		return EGL_FALSE;
+	}
+	if (attribute == 0x33B8 /* EGL_DEBUG_CALLBACK_KHR */) {
+		*value = (EGLAttrib)(uintptr_t)g_egl_dbg;
+		return EGL_TRUE;
+	}
+	uint32_t a = (uint32_t)attribute;
+	int64_t r = egl_debug_call(2, &a, 1, 0, &v);
+
+	if (r != 1)
+		return EGL_FALSE;
+	*value = (EGLAttrib)v;
+	return EGL_TRUE;
+}
+
+GB_API EGLint eglLabelObjectKHR(EGLDisplay display, EGLenum objectType,
+				EGLObjectKHR object, EGLLabelKHR label)
+{
+	uint32_t w[3] = { (uint32_t)(uintptr_t)display, (uint32_t)objectType,
+			  (uint32_t)(uintptr_t)object };
+	int64_t r = egl_debug_call(1, w, 3, (uint64_t)(uintptr_t)label, NULL);
+
+	return r < 0 ? EGL_BAD_ALLOC : (EGLint)r;
+}
+
 /* ---- EGL_ANDROID_blob_cache ------------------------------------------------------ */
 
 static EGLSetBlobFuncANDROID g_blob_set;

@@ -103,6 +103,9 @@ _MANUAL = {
         # EGL_ANDROID_blob_cache: the driver's callbacks run on the server and
         # reach the application's functions as upcalls
         "eglSetBlobCacheFuncsANDROID",
+        # EGL_KHR_debug: callbacks are upcalls; object arguments are handles
+        "eglDebugMessageControlKHR", "eglQueryDebugKHR", "eglLabelObjectKHR",
+        "glGetObjectPtrLabel", "glGetObjectPtrLabelKHR",
         # EGL_EXT_device_*: device handles are bridge ids; see OPX_EglDevice
         "eglQueryDevicesEXT", "eglQueryDeviceStringEXT",
         "eglQueryDeviceAttribEXT", "eglQueryDisplayAttribEXT",
@@ -400,6 +403,7 @@ ALIASES = {
     "glArrayElementEXT": "glArrayElement",
     "glDrawArraysEXT": "glDrawArrays",
     "glGetPointervEXT": "glGetPointerv",
+    "glGetPointervKHR": "glGetPointerv",
     "glFogCoordPointerEXT": "glFogCoordPointer",
     "glSecondaryColorPointerEXT": "glSecondaryColorPointer",
     "glMapBufferRangeEXT": "glMapBufferRange",

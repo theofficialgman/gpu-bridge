@@ -157,3 +157,47 @@ GB_API void glObjectPtrLabelKHR(const void *ptr, GLsizei length,
 {
 	glObjectPtrLabel(ptr, length, label);
 }
+
+GB_API void glGetObjectPtrLabel(const void *ptr, GLsizei bufSize,
+				GLsizei *length, GLchar *label)
+{
+	struct gb_cl *cx = gb_cl_get();
+	struct gb_out o;
+	struct gb_w w;
+
+	if (length)
+		*length = 0;
+	if (!cx || bufSize < 0)
+		return;
+	if (gb_cl_msg_begin(cx, &o, &w, GB_OPX_ObjPtrLabel, 24,
+			    GB_CMD_F_WANT_REPLY))
+		return;
+	gb_w_u32(&w, (uint32_t)(uintptr_t)ptr);
+	gb_w_u32(&w, (uint32_t)bufSize);
+	gb_cl_end(cx, &o);
+
+	struct gb_in in;
+	if (gb_cl_wait_reply(cx, &in, GB_OPX_ObjPtrLabel))
+		return;
+	struct gb_r r;
+	gb_r_init(&r, in.p, in.size);
+	uint32_t n = gb_r_u32(&r);
+	(void)gb_r_u32(&r);
+	const char *s = n ? gb_r_blob(&r, n) : "";
+
+	if (!r.err && s && label && bufSize > 0) {
+		uint32_t c = n < (uint32_t)bufSize - 1 ? n : (uint32_t)bufSize - 1;
+
+		memcpy(label, s, c);
+		label[c] = 0;
+		if (length)
+			*length = (GLsizei)c;
+	}
+	gb_in_release(&in);
+}
+
+GB_API void glGetObjectPtrLabelKHR(const void *ptr, GLsizei bufSize,
+				   GLsizei *length, GLchar *label)
+{
+	glGetObjectPtrLabel(ptr, bufSize, length, label);
+}

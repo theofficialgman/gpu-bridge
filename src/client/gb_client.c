@@ -293,6 +293,7 @@ static const char *stat_name(unsigned slot)
 		"Opx_GLXFBConfigs", "Opx_BufferRead", "Opx_EglDevice", "Opx_DeviceString",
 		"Opx_SelectBuffer", "Opx_RenderMode", "Opx_Ping",
 		"Opx_DebugCallback", "Opx_DebugStr", "Opx_BlobFuncs",
+		"Opx_EglDebug", "Opx_ObjPtrLabel",
 		"Opx_ElementMax" };
 	if (slot < GB_OP_COUNT)
 		return gb_op_names[slot];
@@ -403,6 +404,9 @@ static void upcall_reply(struct gb_cl *cx, uint32_t id, uint32_t seq,
 /* blob cache callbacks, set with eglSetBlobCacheFuncsANDROID (gb_client_gl.c) */
 void gb_cl_blob_set(const void *key, long ksz, const void *val, long vsz);
 long gb_cl_blob_get(const void *key, long ksz, void *val, long vmax);
+void gb_cl_egl_debug_dispatch(uint32_t error, const char *command, uint32_t type,
+			      uint64_t thread_label, uint64_t object_label,
+			      const char *message);
 
 static void dispatch_upcall(struct gb_cl *cx, const struct gb_in *in)
 {
@@ -426,6 +430,17 @@ static void dispatch_upcall(struct gb_cl *cx, const struct gb_in *in)
 		if (!r.err && msg && st && st->debug_cb)
 			st->debug_cb(src, type, id, sev, (GLsizei)n, msg,
 				     st->debug_user);
+		break;
+	}
+	case GB_UP_EglDebug: {
+		uint32_t error = gb_r_u32(&r), type = gb_r_u32(&r),
+			 clen = gb_r_u32(&r), mlen = gb_r_u32(&r);
+		uint64_t tl = gb_r_u64(&r), ol = gb_r_u64(&r);
+		const char *cmd = gb_r_blob(&r, clen);
+		const char *msg = gb_r_blob(&r, mlen);
+
+		if (!r.err && cmd && msg)
+			gb_cl_egl_debug_dispatch(error, cmd, type, tl, ol, msg);
 		break;
 	}
 	case GB_UP_BlobSet: {
