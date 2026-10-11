@@ -24,6 +24,7 @@
 /* ES-only types the generated decoders mention (gl2ext.h cannot be included
  * next to the desktop headers). */
 typedef void *GLeglImageOES;
+typedef int GLclampx; /* GLES1 fixed point */
 
 #include "gb_carr.h"
 #include "gb_chan.h"

@@ -1718,7 +1718,8 @@ static const uint8_t *elem(const struct gb_carray *a, uint32_t i, int eb)
 
 GB_API void glArrayElement(GLint i)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	/* valid between glBegin and glEnd, so the raw state is needed */
+	struct gb_ctxstate *st = gb_cur_state_raw();
 	const struct gb_carray *a;
 	int eb;
 

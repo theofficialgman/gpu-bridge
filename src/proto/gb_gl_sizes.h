@@ -27,9 +27,46 @@ typedef int (*gb_geti_fn)(void *ctx, uint32_t pname);
 /* Element count for the pname-sized commands of class `cls`. A too-small
  * answer is made harmless server-side (512 bytes of slack) and a too-large
  * one just wastes a few bytes: unknown pnames return 1. */
+#include "gb_pname_measured.h"
+
+/* Binary search of a measured table; 0 when the pname was not measurable. */
+static inline int gb_pname_measured(const struct gb_pname_m *t, int n,
+				    uint32_t pname)
+{
+	int lo = 0, hi = n - 1;
+
+	while (lo <= hi) {
+		int mid = (lo + hi) / 2;
+
+		if (t[mid].pname == pname)
+			return t[mid].n;
+		if (t[mid].pname < pname)
+			lo = mid + 1;
+		else
+			hi = mid - 1;
+	}
+	return 0;
+}
+
 static inline int gb_pname_count_class(int cls, uint32_t pname,
 				       gb_geti_fn geti, void *ctx)
 {
+	/*
+	 * glGet*v / glGet*i_v counts come from what native drivers actually
+	 * wrote (tools/audit/pname_audit.c); the hand-written rules below are
+	 * the fallback for enums no audited driver exposes. The three
+	 * state-dependent counts stay dynamic.
+	 */
+	if ((cls == GB_PNC_getv || cls == GB_PNC_geti_v) &&
+	    pname != 0x86A3 && pname != 0x87FF && pname != 0x8DF8) {
+		int m = cls == GB_PNC_getv
+			? gb_pname_measured(gb_pname_measured_getv,
+					    GB_PNAME_MEASURED_getv_N, pname)
+			: gb_pname_measured(gb_pname_measured_geti_v,
+					    GB_PNAME_MEASURED_geti_v_N, pname);
+		if (m)
+			return m;
+	}
 	switch (cls) {
 	case GB_PNC_getv:
 		switch (pname) {
@@ -87,9 +124,7 @@ static inline int gb_pname_count_class(int cls, uint32_t pname,
 			return 4;
 		case 0x0B70: /* DEPTH_RANGE */
 			return 2;
-		case 0x91BE: case 0x91BF: /* compute work group count/size */
-			return 3;
-		default:
+		default: /* includes MAX_COMPUTE_WORK_GROUP_COUNT/SIZE: 1 per index */
 			return 1;
 		}
 	case GB_PNC_light:

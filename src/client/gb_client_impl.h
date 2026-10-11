@@ -33,6 +33,14 @@
 /* ES-only types the generated stubs mention (gl2ext.h cannot be included
  * next to the desktop headers). */
 typedef void *GLeglImageOES;
+/* Types that only appear in stubs for commands we cannot marshal (GLES1 fixed
+ * point, SGI video/dm extensions), or in ES1 prototypes. */
+typedef int GLclampx;
+typedef void *DMparams;
+typedef void *DMbuffer;
+typedef void *VLNode;
+typedef void *VLPath;
+typedef void *VLServer;
 typedef void (*GLDEBUGPROCKHR)(GLenum, GLenum, GLuint, GLenum, GLsizei,
 			       const GLchar *, const void *);
 

@@ -225,7 +225,10 @@ def parse_len(cmd, pname, expr, params):
             return ("compsize", key, args)
         return None
     ids = ID_RE.findall(expr)
-    if any(i not in pnames for i in ids):
+    # a length may only depend on by-value parameters (never on the contents
+    # of another pointer, which the decoder does not have yet)
+    valnames = {p["name"] for p in params if "*" not in p["ctype"]}
+    if any(i not in valnames for i in ids):
         return None
     if not re.match(r"^[A-Za-z0-9_\s\*\+\-\(\)/]+$", expr):
         return None

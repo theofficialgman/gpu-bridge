@@ -10,7 +10,8 @@ MANUAL for a library is reported as unsupported (stub that logs + errors).
 # Libraries (one client .so each; they share the server and opcode space)
 # --------------------------------------------------------------------------
 EGL_VERSIONS = {"1.0", "1.1", "1.2", "1.3", "1.4", "1.5"}
-GLES_VERSIONS = {"2.0", "3.0"}
+GLES_VERSIONS = {"2.0", "3.0", "3.1", "3.2"}
+GLES1_VERSIONS = {"1.0"}
 GL_VERSIONS = {"1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "2.0", "2.1", "3.0",
                "3.1", "3.2", "3.3", "4.0", "4.1", "4.2", "4.3", "4.4", "4.5",
                "4.6"}
@@ -70,17 +71,19 @@ GLX_EXTENSIONS = {
 LIBS = {
     "all": {
         "features": [("egl", "egl", EGL_VERSIONS),
+                     ("gl", "gles1", GLES1_VERSIONS),
                      ("gl", "gles2", GLES_VERSIONS),
                      ("glx", "glx", GLX_VERSIONS),
                      ("gl", "gl", GL_VERSIONS)],
-        "extensions": [("egl", ["egl"], (EGL_EXTENSIONS, ())),
-                       ("gl", ["gles2"], (GLES_EXTENSIONS | GLES_NV_ALIASES,
-                                          ("GL_OES_", "GL_EXT_", "GL_KHR_"))),
-                       ("glx", ["glx"], (GLX_EXTENSIONS, ())),
-                       ("gl", ["gl", "glcore"],
-                        (set(), ("GL_ARB_", "GL_KHR_", "GL_EXT_")))],
+        # Everything the registries list; what cannot be marshalled is
+        # classified unsupported and its extensions are hidden from the
+        # advertised strings, so over-selecting is safe.
+        "extensions": [("egl", ["egl"], (set(), ("EGL_",))),
+                       ("gl", ["gles1", "gles2"], (set(), ("GL_",))),
+                       ("glx", ["glx"], (set(), ("GLX_",))),
+                       ("gl", ["gl", "glcore"], (set(), ("GL_",)))],
         # extension -> commands table used to filter advertised strings
-        "ext_filter": [("egl", ["egl"], None), ("gl", ["gles2"], None),
+        "ext_filter": [("egl", ["egl"], None), ("gl", ["gles1", "gles2"], None),
                        ("glx", ["glx"], None),
                        ("gl", ["gl", "glcore"], None)],
     },
