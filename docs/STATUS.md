@@ -35,9 +35,9 @@ What it cannot validate is anything NVIDIA-specific (see "Phase 0" below).
 | Control protocol | `src/proto/gb_ctl.[ch]` | socketpair + SCM_RIGHTS; server lifetime tied to client; version + op-table hash check at HELLO |
 | Codec | `src/proto/gb_codec.h` | bounds-checked reader/writer, fixed-width only |
 | Size rules | `src/proto/gb_gl_sizes.h` | pname counts, pixel rectangle sizes, EGL attrib list validation; unknown -> -1, never a guess |
-| Generator | `tools/gb-gen/` | Two client libraries over one opcode space. `gles`: EGL 1.0-1.5 + GLES 2.0/3.0 (263 generated, 22 wrapped, 12 manual, 9 unsupported). `gl`: GLX 1.0-1.4 + GL 1.0-4.6 compat/core + ARB/KHR/EXT (~1,860 generated, 55 wrapped, 18 manual, ~97 unsupported). Explicit list via `gb_gen.py --report` |
+| Generator | `tools/gb-gen/` | One library, one opcode space: EGL 1.0-1.5, GLES 2.0/3.0, GLX 1.0-1.4, GL 1.0-4.6 compat/core + ARB/KHR/EXT. 2,089 commands: 1,890 generated, 64 wrapped, 45 manual, 90 unsupported (explicit list via `gb_gen.py --report`) |
 | Server `gbd` | `src/server/` | loads real libEGL/libGLESv2/**libGL**, one worker thread per client thread, handle tables, scratch buffers for client arrays, own X connection(s) with `XInitThreads` + an error handler, server-side size rules that query native GL state |
-| Client libs | `src/client/` | `libgb{32,64}_gl.so` = EGL + GLES; **`libGL.so.1` (built into `build/shim{32,64}/`) = GLX + desktop GL**, a drop-in replacement for the system libGL |
+| Client library | `src/client/` | **one** library exporting EGL + GLES + GLX + desktop GL, built as `libGL.so.1` in `build/shim{32,64}/` with symlinks for `libEGL.so.1`, `libGLESv2.so.2`, `libGLESv1_CM.so.1`, `libGLX.so.0`, `libOpenGL.so.0` (one bridge connection per process, so mixed-API apps such as eglgears work) |
 
 ## GLX and desktop OpenGL
 
@@ -150,14 +150,23 @@ None of this is a Tegra number. Re-run `bench_b32` on the device in Phase 0.
    results were all llvmpipe (Xvfb); only the real-display runs say anything
    about acceleration.
 
+## Real applications
+
+See `docs/target-report.md` for the armhf `glmark2` (96.1% of native, all 33
+scenes) and `mesa-utils-bin` results on the Tegra, and the profiling that
+found and fixed the client-array upload path. `GB_STATS=1` prints per-opcode
+client call/stall counts and the server's busy/idle/native-driver-time split.
+`GB_SPIN_US=<n>` sets a time-bounded spin before sleeping on a reply.
+
 ## Known limitations / not yet done
 
 Correctness-affecting (the app gets an error or a logged "unsupported", never
 a crash or silent wrong answer):
 
-* **No `glMapBufferRange`/`glMapBuffer`** (mapped buffers need shared
-  memory with write-back semantics; Phase 2), **no client arrays combined with
-  buffer-backed indices**. Full list: `gb_gen.py --report`.
+* **Mapped buffers are shadow copies** (`gb_client_map.c`): correct for
+  map/write/unmap, flush-explicit and read maps; **persistent/coherent
+  mappings are refused** (they need GPU-shared memory). **No client arrays
+  combined with buffer-backed indices**. Full list: `gb_gen.py --report`.
 * **`glXUseXFont`**, **GL debug callbacks/labels**, evaluator getters,
   vendor extensions beyond ARB/KHR/EXT.
 * **No EGLImage / dma-buf import** (`eglCreateImage*` is unsupported), so no

@@ -130,3 +130,53 @@ LD_LIBRARY_PATH=$PWD/build32/shim32 ./some-armhf-gl-app     # GLX / desktop GL
 
 The armhf side currently has only Mesa's software GLVND stack, so 32-bit GL
 applications run on llvmpipe today; with the shim they run on the GPU.
+
+## Real applications on the Tegra (unmodified distribution binaries)
+
+Without the bridge, the stock armhf stack cannot do GL at all on this X
+server: the server's GLX vendor is NVIDIA, there is no 32-bit NVIDIA GLX
+library, so GLVND finds no vendor (`glXChooseFBConfig() failed`, `couldn't
+find RGB GLX visual`, `eglInitialize() failed`). Through the bridge (one
+library under `libGL.so.1`/`libEGL.so.1`/`libGLESv2.so.2`/`libGLX.so.0`/
+`libOpenGL.so.0`):
+
+| Binary (armhf, from Ubuntu) | Result |
+|---|---|
+| `glxinfo -B` | `NVIDIA Tegra X1 (nvgpu)`; core 4.6, compat 4.6, ES 3.2 profiles |
+| `glxgears` | 60.0 fps (vsync) |
+| `es2gears_x11` | 60.0 fps (EGL + GLES2) |
+| `eglgears_x11` | renders (EGL + *desktop GL* in one process; window capture verified) |
+| `glxdemo`, `es2tri`, `egltri_x11`, `es2_info` | run; `es2_info` reports `EGL 1.5 NVIDIA`, `ES 3.2` |
+| **`glmark2`** (armhf, 33 scenes) | **score 2342 vs 2436 native arm64 = 96.1%** |
+
+glmark2 per scene: most scenes are within a few percent of native (several
+are marginally faster: the app logic and the driver run on separate cores).
+The slow ones, and why (measured with `GB_STATS=1`):
+
+| Scene | % of native | Cause |
+|---|---|---|
+| `buffer ... update-method=map` (x2) | 28-33% | each map fetches the buffer's current contents (a round trip + copy), then uploads on unmap |
+| `build use-vbo=false` | 37% | a large mesh is copied from client memory every frame; the server idles waiting for the client |
+| `desktop shadow` | 68% | many tiny state changes + client-array uploads; the server thread is ~93% busy |
+| `ideas` | 76% | very high call rate (~750k calls/s) |
+
+Findings from profiling this:
+
+* **Time was hiding outside the timed native call.** Wall busy time (5.8 s)
+  matched CPU time, but only 2.0 s was in the driver; the rest was my
+  client-array upload path (context queries, buffer-binding queries and a
+  `glBufferData` allocation per attribute per draw). One persistent scratch
+  buffer with sub-data at a running offset, a cached context key and
+  client-supplied bindings gave desktop/shadow +34%.
+* **A futex wake per message was *not* the problem** (hypothesis tested and
+  rejected with `strace -c`); wake hysteresis was kept anyway.
+* **Spinning longer helps a little** (`GB_SPIN_US=1000`: +6% / +13% on the
+  two slowest non-map scenes) at a battery cost on a handheld, so it is an
+  opt-in knob, not the default.
+* The overall score barely moves from optimising the slow scenes: it is a
+  mean of FPS dominated by the fast ones.
+
+Flakiness found on the way (test bug, not a bridge bug): drawing into a window
+before the X server has exposed it is undefined by the pixel-ownership rule
+and NVIDIA discards the fragments. Tests now wait for MapNotify + Expose
+(0 failures in 130 runs afterwards).
