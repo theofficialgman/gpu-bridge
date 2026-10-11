@@ -210,7 +210,7 @@ and NVIDIA discards the fragments. Tests now wait for MapNotify + Expose
 ## Conformance: piglit (arm64 native baseline vs armhf through the bridge)
 
 Same Ubuntu piglit package for both architectures, `-p x11_egl`, one process
-per test, on the live display. Selection of 614 tests: GL 1.x/2.x, EGL, FBO
+per test, on the live display. Selection of 614 tests (613 after the exclusion below): GL 1.x/2.x, EGL, FBO
 and buffer-object groups. The arm64 run is the baseline; only differences
 from it are candidates for bridge bugs.
 
@@ -241,9 +241,19 @@ Remaining 28 differences and their status are listed in STATUS.md
 fence-sync/colorspace/drawpixels differences that are not yet understood, and
 a client crash in `egl_ext_platform_device` (native fails that test too).
 
-The native baseline is not fully deterministic (4 tests flipped in the
-bridge's favour with no relevant change), so treat single-test differences of
-that kind as noise until a second baseline run confirms them.
+The native baseline was repeated four times (613 tests after excluding
+`max-texture-size`): 610 tests give identical results every time; the three
+that vary are multisample depth/stencil tests. The earlier "4 tests flipped in
+the bridge's favour" were `max-texture-size` (native timeout, see below), the
+Intel-only `ppgtt_memory_alignment` (stable native crash) and two of those
+flaky multisample tests. Real differences from the stable baseline: 25.
+
+**Operational hazard:** native arm64 `max-texture-size` stalls this 4 GB
+device for ~100 s and triggered the OOM killer twice (plasmashell, konsole,
+kded5, kwin killed; the invoking process was the test itself, RSS only ~29 MB:
+the memory is GPU/nvmap or swap-thrashed, not visible as process RSS). The
+bridged armhf run passes it in 7.4 s. The test is excluded, test processes get
+`oom_score_adj=1000`, and a `MemAvailable` watchdog kills test binaries.
 
 Triage tooling kept on the device (`~/gb/pg`, `~/gb/gbd_gdb.sh`, `gbd_mc.sh`,
 `gbd_reg.sh`, `gbd_sz.sh`): `run.sh <arm64|armhf> <outdir> <regex>` runs the

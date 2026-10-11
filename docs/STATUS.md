@@ -186,20 +186,41 @@ None of this is a Tegra number. Re-run `bench_b32` on the device in Phase 0.
 
 Rule (from the project owner): **always run the arm64 build against the native
 driver first** and treat only differences from that baseline as bridge bugs.
-Selection: 614 piglit tests (`-p x11_egl`, GL 1.x/2.x, EGL, FBO,
+Selection: 613 piglit tests (`-p x11_egl`, GL 1.x/2.x, EGL, FBO,
 buffer-object groups; armhf and arm64 builds of the same Ubuntu piglit
-package; the armhf run goes through the bridge).
+package; the armhf run goes through the bridge). Runner and triage scripts
+live on the device in `~/gb/pg`.
 
-| Run | pass | fail | skip | crash | timeout | differs from native |
+**Hazard: native `max-texture-size` thrashes the 4 GB device** (101 s, then
+the OOM killer took out plasmashell/konsole/kded5/kwin, twice). The bridged
+armhf run passes it in 7.4 s (probably because the 32-bit process cannot
+allocate the huge host buffers; not verified). It is excluded from every run so
+that results compare, the runner makes test processes the preferred OOM victims
+(`oom_score_adj=1000`), and a watchdog SIGKILLs test binaries when
+`MemAvailable` < 350 MB. Run heavyweight conformance suites with these guards.
+
+### Native baseline (4 runs of the same 613 tests)
+
+| Run | pass | fail | skip | crash | warn |
+|---|---|---|---|---|---|
+| native 0 | 519 | 23 | 69 | 1 | 1 |
+| native 1 | 521 | 21 | 69 | 1 | 1 |
+| native 2 | 521 | 21 | 69 | 1 | 1 |
+| native 3 | 520 | 22 | 69 | 1 | 1 |
+
+610 of 613 tests give the same result in all four runs. The three that vary
+are all multisample depth/stencil: `depthstencil-default_fb-clear`,
+`...-clear samples=4`, `...-copypixels samples=8` (flaky natively; ignore any
+bridge difference there). One stable native crash: `ppgtt_memory_alignment`
+(an Intel-specific test; the bridge "passes" it, so it is not informative).
+
+### Bridge vs the stable native result
+
+| Bridge run | pass | fail | skip | crash | timeout | differs from native |
 |---|---|---|---|---|---|---|
-| native arm64 (baseline) | 519 | 23 | 69 | 1 | 1 | - |
-| bridge, first run | 446 | 78 | 80 | 9 | 1 | 92 |
+| first run | 446 | 78 | 80 | 9 | 1 | 92 |
 | after the fixes below, run 2 | 492 | 35 | 80 | 6 | 1 | 46 |
-| run 3 (current) | 503 | 26 | 83 | 1 | 1 | 28 |
-
-The native baseline is not perfectly deterministic: 4 tests changed result in
-the bridge's favour (fail/crash/timeout -> pass) for no bridge-related reason,
-so single-run differences of that kind are noise.
+| run 3 (current) | 503 | 26 | 83 | 1 | 1 | 25 (excluding flaky and the excluded test) |
 
 Bugs found and fixed by this sweep: see lessons 10-14, plus
 `GL_BITMAP`/BGR/packed-type size tables, array state queries answered from the
@@ -207,15 +228,13 @@ shadow, client arrays with buffer-object indices, deleting mapped buffers,
 `eglCreatePixmapSurface` and platform pixmap surfaces, `eglCreateImage`, and the
 ES extension coverage.
 
-Remaining differences (28) in groups:
+Remaining 25 real differences, in groups:
 
 * **Unimplemented (known):** 5x `gl_select` and `gl-1.0-rendermode-feedback`
   (`glSelectBuffer`/`glFeedbackBuffer`).
 * **Not yet investigated:** `depth-clear-precision-check` (timeout, probably
-  per-call cost); `depthstencil-default_fb-drawpixels-24_8 samples=8` (new in
-  run 3: flaky or a regression from the size-table change, needs a re-run);
-  `egl_khr_fence_sync` and `egl_khr_gl_colorspace linear` (fail now, were
-  pass/skip).
+  per-call cost); `depthstencil-default_fb-drawpixels-24_8 samples=8`;
+  `egl_khr_fence_sync` and `egl_khr_gl_colorspace linear`.
 * **Extension skips:** `EGL_EXT_device_*`, dma-buf modifiers, wait_sync,
   `EGL_MESA_device_software`, `egl-blob-cache`, `egl_ext_egl_image_storage`,
   `egl_gl_oes_egl_image`, ES debug-flag context tests: the extension is hidden
