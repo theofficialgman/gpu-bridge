@@ -298,6 +298,8 @@ static void *worker_main(void *arg)
 
 	if (stats < 0)
 		stats = getenv("GB_STATS") != NULL;
+	/* GB_TRACE_OPS: one line per request on stderr (debugging aid) */
+	int trace_ops = getenv("GB_TRACE_OPS") != NULL;
 
 	for (;;) {
 		struct gb_in in;
@@ -321,6 +323,14 @@ static void *worker_main(void *arg)
 
 		t_recent_cur = h.opcode;
 		t_recent[t_recent_n++ % RECENT_OPS] = h.opcode;
+		if (trace_ops) {
+			char tb[96];
+			int tn = snprintf(tb, sizeof(tb), "op %s\n",
+					  h.opcode && h.opcode < GB_OP_COUNT
+						  ? gb_op_names[h.opcode]
+						  : "opx");
+			(void)!write(2, tb, (size_t)tn);
+		}
 		if (h.size != in.size) {
 			gb_sv_proto_error(t, &h);
 		} else if (h.opcode > 0 && h.opcode < GB_OP_COUNT &&

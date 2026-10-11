@@ -220,7 +220,7 @@ bridge difference there). One stable native crash: `ppgtt_memory_alignment`
 |---|---|---|---|---|---|---|
 | first run | 446 | 78 | 80 | 9 | 1 | 92 |
 | after the fixes below, run 2 | 492 | 35 | 80 | 6 | 1 | 46 |
-| run 3 (current) | 503 | 26 | 83 | 1 | 1 | 25 (excluding flaky and the excluded test) |
+| run 3 (current) | 503 | 26 | 83 | 1 | 1 | 24 real (excluding flaky, the excluded test, and one 32-bit test-program hang) |
 
 Bugs found and fixed by this sweep: see lessons 10-14, plus
 `GL_BITMAP`/BGR/packed-type size tables, array state queries answered from the
@@ -228,13 +228,35 @@ shadow, client arrays with buffer-object indices, deleting mapped buffers,
 `eglCreatePixmapSurface` and platform pixmap surfaces, `eglCreateImage`, and the
 ES extension coverage.
 
-Remaining 25 real differences, in groups:
+**A 32-bit-only failure is not automatically a bridge bug.** Reproduce it with
+the same armhf binary on software Mesa (no bridge, no NVIDIA):
+`PIGLIT_PLATFORM=surfaceless_egl EGL_PLATFORM=surfaceless LIBGL_ALWAYS_SOFTWARE=1`
+with `shim32` removed from `LD_LIBRARY_PATH`. This is how
+`depth-clear-precision-check` was classified (below).
+
+Remaining differences, in groups:
 
 * **Unimplemented (known):** 5x `gl_select` and `gl-1.0-rendermode-feedback`
   (`glSelectBuffer`/`glFeedbackBuffer`).
-* **Not yet investigated:** `depth-clear-precision-check` (timeout, probably
-  per-call cost); `depthstencil-default_fb-drawpixels-24_8 samples=8`;
-  `egl_khr_fence_sync` and `egl_khr_gl_colorspace linear`.
+* **Not a bridge bug:** `depth-clear-precision-check` never terminates in the
+  armhf build of the test: it passes `depth16` and `depth24`, then loops
+  forever on `depth32` (the depth values go to garbage like -83886080.0,
+  consistent with a 32-bit integer loop/overflow in the test program). The
+  same armhf binary does the same on plain Mesa llvmpipe with no bridge; the
+  arm64 build finishes in 1.2 s. (Found by measuring: the bridged run executed
+  ~5k iterations/s, i.e. the transport was fine; it was running far more
+  iterations than the native 1,536.)
+* **Flaky, passes alone:** `depthstencil-default_fb-drawpixels-24_8 samples=8`
+  (passes in isolation natively and bridged; multisample depth/stencil tests
+  vary run to run natively too).
+* **Understood, modelling gap:** `egl_khr_fence_sync`: the bridge maps two
+  `Display*` of the same X display to one server EGLDisplay, whereas natively
+  NVIDIA fails the second `eglInitialize`, so the test takes a path that is
+  never reached natively. Fix: key server displays by the application's
+  `Display*`, not by the display name.
+* **Understood, missing API:** `egl_khr_gl_colorspace linear` needs GLES1
+  (`glOrthof` not found in libGLESv1_CM): the bridge does not implement the
+  GLES 1.x API (only the entry points it shares with desktop GL).
 * **Extension skips:** `EGL_EXT_device_*`, dma-buf modifiers, wait_sync,
   `EGL_MESA_device_software`, `egl-blob-cache`, `egl_ext_egl_image_storage`,
   `egl_gl_oes_egl_image`, ES debug-flag context tests: the extension is hidden
@@ -254,6 +276,9 @@ scenes) and `mesa-utils-bin` results on the Tegra, and the profiling that
 found and fixed the client-array upload path. `GB_STATS=1` prints per-opcode
 client call/stall counts and the server's busy/idle/native-driver-time split.
 `GB_SPIN_US=<n>` sets a time-bounded spin before sleeping on a reply.
+`GB_TRACE_OPS=1` makes the server print one line per request (op name) on
+stderr: useful for comparing a bridged call sequence with what the app does
+natively.
 
 ## Known limitations / not yet done
 

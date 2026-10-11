@@ -275,16 +275,20 @@ What the sweep found (details and the generalised lessons are in
 
 Remaining 28 differences and their status are listed in STATUS.md
 ("Conformance"). The notable open ones: `glSelectBuffer`/`glFeedbackBuffer`
-(6 tests, known gap), `depth-clear-precision-check` timeout, three
-fence-sync/colorspace/drawpixels differences that are not yet understood, and
-a client crash in `egl_ext_platform_device` (native fails that test too).
+(6 tests, known gap), the
+fence-sync difference (modelling gap: two `Display*` of one X display share one
+server EGLDisplay), the colorspace test (needs GLES1, which is not
+implemented), and a client crash in `egl_ext_platform_device` (native fails
+that test too). `depth-clear-precision-check` is **not** a bridge problem: the
+armhf test binary itself loops forever on its `depth32` case, which a plain
+Mesa llvmpipe run of the same armhf binary reproduces without any bridge.
 
 The native baseline was repeated four times (613 tests after excluding
 `max-texture-size`): 610 tests give identical results every time; the three
 that vary are multisample depth/stencil tests. The earlier "4 tests flipped in
 the bridge's favour" were `max-texture-size` (native timeout, see below), the
 Intel-only `ppgtt_memory_alignment` (stable native crash) and two of those
-flaky multisample tests. Real differences from the stable baseline: 25.
+flaky multisample tests. Real differences from the stable baseline: 24 (plus one 32-bit test-program hang that is not a bridge issue).
 
 **Operational hazard:** native arm64 `max-texture-size` stalls this 4 GB
 device for ~100 s and triggered the OOM killer twice (plasmashell, konsole,
