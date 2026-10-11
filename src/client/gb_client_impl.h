@@ -3,8 +3,8 @@
  * side): channel/connection runtime used by the generated stubs and by the
  * hand-written EGL/GLES/GLX/GL layers.
  *
- * Compiled for two libraries: libgb*_gl (EGL + GLES, default) and
- * libgb*_glx (GLX + desktop GL, -DGB_LIB_GL).
+ * Compiled into the single bridge library, which exports EGL, GLES, GLX and
+ * desktop GL and is installed under all of their sonames.
  */
 #ifndef GB_CLIENT_IMPL_H
 #define GB_CLIENT_IMPL_H
@@ -17,19 +17,20 @@
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
-#ifdef GB_LIB_GL
+/* One library exports every API; desktop-only helpers are always built. */
+#define GB_LIB_GL 1
 #define GL_GLEXT_PROTOTYPES 1
 #define GLX_GLXEXT_PROTOTYPES 1
 #include <GL/gl.h>
 #include <GL/glext.h>
 #include <GL/glx.h>
 #include <GL/glxext.h>
-#else
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <GLES3/gl3.h>
-#include <GLES2/gl2ext.h>
-#endif
+
+/* ES-only types the generated stubs mention (gl2ext.h cannot be included
+ * next to the desktop headers). */
+typedef void *GLeglImageOES;
 
 #include "gb_carr.h"
 #include "gb_chan.h"
@@ -39,11 +40,7 @@
 #include "gb_handle_kinds.h"
 #include "gb_ops.h"
 #include "gb_opx.h"
-#ifdef GB_LIB_GL
-#include "gb_client_gl_gen.h"
-#else
-#include "gb_client_gles_gen.h"
-#endif
+#include "gb_client_all_gen.h"
 
 #define GB_API __attribute__((visibility("default")))
 

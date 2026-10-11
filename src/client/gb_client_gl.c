@@ -260,19 +260,3 @@ GB_API EGLBoolean eglReleaseThread(void)
 		cx->cur = NULL;
 	return r;
 }
-
-GB_API void glGetVertexAttribPointerv(GLuint index, GLenum pname,
-				      void **pointer)
-{
-	struct gb_ctxstate *st = gb_cur_state();
-
-	if (pname != 0x8645 /* VERTEX_ATTRIB_ARRAY_POINTER */) {
-		gb_cl_gl_error(GL_INVALID_ENUM);
-		return;
-	}
-	if (index >= GB_MAX_GENERIC || !pointer) {
-		gb_cl_gl_error(GL_INVALID_VALUE);
-		return;
-	}
-	*pointer = st ? (void *)st->vao->a[CA_GENERIC0 + index].ptr : NULL;
-}

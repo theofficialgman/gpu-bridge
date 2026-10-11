@@ -91,8 +91,7 @@ set(GB_GEN_DIR ${CMAKE_BINARY_DIR}/gen)
 set(GB_GEN_OUT
     ${GB_GEN_DIR}/gb_ops.h ${GB_GEN_DIR}/gb_handle_kinds.h
     ${GB_GEN_DIR}/gb_pname_classes.h
-    ${GB_GEN_DIR}/gb_client_gles_gen.c ${GB_GEN_DIR}/gb_client_gles_gen.h
-    ${GB_GEN_DIR}/gb_client_gl_gen.c ${GB_GEN_DIR}/gb_client_gl_gen.h
+    ${GB_GEN_DIR}/gb_client_all_gen.c ${GB_GEN_DIR}/gb_client_all_gen.h
     ${GB_GEN_DIR}/gb_server_gen.c)
 add_custom_command(
   OUTPUT ${GB_GEN_OUT}
@@ -122,44 +121,44 @@ else()
   set(GB_SERVER_FILE ${GB_SERVER_PATH})
 endif()
 
-# --- client libraries ----------------------------------------------------------
-# gles: EGL + GLES2/3        (libgb{32,64}_gl.so)
-# glx : GLX + desktop GL     (built as libGL.so.1 in shim{32,64}/ so an app
-#       linked against libGL.so.1 picks it up via LD_LIBRARY_PATH/RUNPATH)
-set(GB_CLIENT_COMMON src/client/gb_client.c src/client/gb_client_arrays.c
-                     src/client/gb_client_strings.c src/client/gb_client_map.c)
-function(gb_add_gles name proto_target)
-  add_library(${name} SHARED ${GB_CLIENT_COMMON} src/client/gb_client_gl.c
-              ${GB_GEN_DIR}/gb_client_gles_gen.c)
+# --- client library ---------------------------------------------------------------
+# ONE library exports EGL + GLES + GLX + desktop GL, so a process using any mix
+# of them (eglgears, SDL, Wine, ...) has a single bridge connection. It is
+# built as libGL.so.1 in shim{32,64}/ and installed under the other sonames
+# applications link against (libEGL.so.1, libGLESv2.so.2, libGLX.so.0,
+# libOpenGL.so.0) via symlinks, like a vendor driver does.
+set(GB_CLIENT_SRC src/client/gb_client.c src/client/gb_client_arrays.c
+                  src/client/gb_client_strings.c src/client/gb_client_map.c
+                  src/client/gb_client_gl.c src/client/gb_client_glx.c
+                  ${GB_GEN_DIR}/gb_client_all_gen.c)
+set(GB_SONAME_ALIASES libEGL.so.1 libGLESv2.so.2 libGLESv1_CM.so.1
+                      libGLX.so.0 libOpenGL.so.0)
+function(gb_add_bridge name proto_target shimdir)
+  add_library(${name} SHARED ${GB_CLIENT_SRC})
   add_dependencies(${name} gb_generated)
   target_include_directories(${name} PRIVATE src/client ${GB_GEN_DIR})
-  target_link_libraries(${name} ${proto_target} Threads::Threads
-                        ${CMAKE_DL_LIBS})
-  set_target_properties(${name} PROPERTIES C_VISIBILITY_PRESET hidden)
-endfunction()
-function(gb_add_glx name proto_target shimdir)
-  add_library(${name} SHARED ${GB_CLIENT_COMMON} src/client/gb_client_glx.c
-              ${GB_GEN_DIR}/gb_client_gl_gen.c)
-  add_dependencies(${name} gb_generated)
-  target_include_directories(${name} PRIVATE src/client ${GB_GEN_DIR})
-  target_compile_definitions(${name} PRIVATE GB_LIB_GL=1)
   target_link_libraries(${name} ${proto_target} Threads::Threads
                         ${CMAKE_DL_LIBS})
   set_target_properties(${name} PROPERTIES
     C_VISIBILITY_PRESET hidden OUTPUT_NAME GL VERSION 1.7.0 SOVERSION 1
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${shimdir})
+  foreach(alias ${GB_SONAME_ALIASES})
+    add_custom_command(TARGET ${name} POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E create_symlink libGL.so.1.7.0
+              ${CMAKE_BINARY_DIR}/${shimdir}/${alias}
+      COMMENT "${shimdir}/${alias} -> libGL.so.1.7.0")
+  endforeach()
 endfunction()
-set_source_files_properties(${GB_GEN_DIR}/gb_client_gl_gen.c PROPERTIES
+set_source_files_properties(${GB_GEN_DIR}/gb_client_all_gen.c PROPERTIES
                             COMPILE_FLAGS "-Wno-unused-variable")
 if(NOT GB_PURE32)
-  gb_add_gles(gb64_gl gb_proto)
-  gb_add_glx(gb64_glx gb_proto shim64)
+  gb_add_bridge(gb64_glx gb_proto shim64)
+  add_library(gb64_gl ALIAS gb64_glx)
 endif()
 if(GB_HOST_CAN_M32)
-  gb_add_gles(gb32_gl gb_proto32)
-  gb_m32(gb32_gl)
-  gb_add_glx(gb32_glx gb_proto32 shim32)
+  gb_add_bridge(gb32_glx gb_proto32 shim32)
   gb_m32(gb32_glx)
+  add_library(gb32_gl ALIAS gb32_glx)
 endif()
 
 # --- tests -------------------------------------------------------------------

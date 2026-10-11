@@ -643,7 +643,6 @@ GB_API void glDrawRangeElements(GLenum mode, GLuint start, GLuint end,
 	gbx_glDrawRangeElements(mode, start, end, count, type, indices);
 }
 
-#ifndef GB_LIB_GL
 /* OES_vertex_array_object spells these differently. */
 GB_API void glBindVertexArrayOES(GLuint array)
 {
@@ -664,9 +663,8 @@ GB_API void glDeleteVertexArraysOES(GLsizei n, const GLuint *arrays)
 			vao_free(st, arrays[i]);
 	gbx_glDeleteVertexArraysOES(n, arrays);
 }
-#endif
 
-#ifdef GB_LIB_GL
+
 /* ============================================================================
  * Desktop GL only: fixed-function arrays, ARB/EXT aliases, immediate-mode
  * emulation of glArrayElement, glInterleavedArrays, client attrib stack.
@@ -1365,4 +1363,3 @@ GB_API void glPopClientAttrib(void)
 	}
 	gbx_glPopClientAttrib();
 }
-#endif /* GB_LIB_GL */

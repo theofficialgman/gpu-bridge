@@ -41,23 +41,26 @@ GLX_EXTENSIONS = {
     "GLX_EXT_create_context_es2_profile", "GLX_MESA_copy_sub_buffer",
 }
 
+# One client library exports every API (EGL, GLES, GLX, desktop GL): apps
+# routinely mix them (eglgears = EGL + desktop GL, SDL, Wine, ...), and a
+# context made current through one API must be usable through another, which
+# needs a single bridge connection per process. It is installed under all of
+# the usual sonames (libGL.so.1, libEGL.so.1, libGLESv2.so.2, ...).
 # (registry, feature api, versions) and (registry, ext apis, (names, prefixes))
 LIBS = {
-    "gles": {
+    "all": {
         "features": [("egl", "egl", EGL_VERSIONS),
-                     ("gl", "gles2", GLES_VERSIONS)],
-        "extensions": [("egl", ["egl"], (EGL_EXTENSIONS, ())),
-                       ("gl", ["gles2"], (GLES_EXTENSIONS, ()))],
-        # extension -> commands table used to filter advertised strings
-        "ext_filter": [("egl", ["egl"], None), ("gl", ["gles2"], None)],
-    },
-    "gl": {
-        "features": [("glx", "glx", GLX_VERSIONS),
+                     ("gl", "gles2", GLES_VERSIONS),
+                     ("glx", "glx", GLX_VERSIONS),
                      ("gl", "gl", GL_VERSIONS)],
-        "extensions": [("glx", ["glx"], (GLX_EXTENSIONS, ())),
+        "extensions": [("egl", ["egl"], (EGL_EXTENSIONS, ())),
+                       ("gl", ["gles2"], (GLES_EXTENSIONS, ())),
+                       ("glx", ["glx"], (GLX_EXTENSIONS, ())),
                        ("gl", ["gl", "glcore"],
                         (set(), ("GL_ARB_", "GL_KHR_", "GL_EXT_")))],
-        "ext_filter": [("glx", ["glx"], None),
+        # extension -> commands table used to filter advertised strings
+        "ext_filter": [("egl", ["egl"], None), ("gl", ["gles2"], None),
+                       ("glx", ["glx"], None),
                        ("gl", ["gl", "glcore"], None)],
     },
 }
@@ -67,7 +70,7 @@ LIBS = {
 # --------------------------------------------------------------------------
 # Public symbol is written by hand (client) and, where needed, a hand-written
 # server op (see gb_opx.h).
-MANUAL = {
+_MANUAL = {
     "gles": {
         "eglGetDisplay", "eglGetPlatformDisplay", "eglGetPlatformDisplayEXT",
         "eglCreateWindowSurface", "eglCreatePlatformWindowSurface",
@@ -100,7 +103,8 @@ MANUAL = {
         "glGetNamedBufferPointervEXT",
     },
 }
-ALL_MANUAL = set().union(*MANUAL.values())
+MANUAL = {"all": set().union(*_MANUAL.values())}
+ALL_MANUAL = MANUAL["all"]
 
 # Generated encoders/decoders, but the public symbol is hand-written
 # (client-side shadow state); the wrapper calls gbx_<name>().
@@ -136,7 +140,7 @@ _DRAW_FUNCS = {
     "glDrawElementsInstancedEXT", "glDrawRangeElementsEXT",
     "glDrawArraysInstancedEXT",
 }
-WRAPPED = {
+_WRAPPED = {
     "gles": _ARRAY_STATE | _POINTER_FUNCS | _DRAW_FUNCS | {
         "eglMakeCurrent", "eglReleaseThread", "eglGetError",
     },
@@ -147,6 +151,8 @@ WRAPPED = {
         "glXMakeCurrent", "glXMakeContextCurrent",
     },
 }
+
+WRAPPED = {"all": set().union(*_WRAPPED.values())}
 
 # Calls that must block even though they return nothing.
 FORCE_SYNC = {"glFinish", "glXSwapBuffers", "glXWaitGL", "glXWaitX"}
