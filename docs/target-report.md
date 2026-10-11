@@ -33,7 +33,7 @@ A 2019 NVIDIA driver on a 2024 distribution: nothing about the userland is
 | Q6 | mmap of a Tegra dma-buf from AArch32 | Not examined (matters only for the future mapped-buffer / zero-copy work) |
 | Q7 | Fences / explicit sync | Not examined (swap is a synchronous call and the X path orders presentation) |
 | Q8 | Can a second X connection render into a window another connection created? | **Yes, for both GLX and EGL, on NVIDIA's own driver.** `glx_xconn` mode 1 renders and reads back correctly; the full `x11_b32`/`glx_b32` tests pass. This was the central bet of Strategy X |
-| Q9 | Extension surface | native compat profile: 374 GL extensions; through the bridge: 297 (see below) |
+| Q9 | Extension surface | desktop GL: 369 native, 305 through the bridge; ES 3.2: 192 native, 174 bridged; EGL display extensions: 57 native, 30 bridged (see below) |
 | Q10 | Per-call cost | see below |
 
 ## What was verified end to end on the device
@@ -76,22 +76,48 @@ executable, ARM, EABI5") rendering on `NVIDIA Tegra X1 (nvgpu)` via the 64-bit
 
 ## Extension surface (Q9)
 
-Compat-profile GL extensions: **374 native, 297 through the bridge**. The
-bridge hides any extension with an unimplemented entry point so that apps never
-`dlsym` a NULL. Dropped, by prefix: 51 `NV_*`, 11 `EXT_*`, 7 `ARB_*`,
-2 `NVX_*`, and a few vendor extras. The ARB/KHR/EXT ones that matter:
+Measured with a small EGL/GL program run natively (arm64) and through the
+bridge (armhf), same display, `GL_EXTENSIONS` / `EGL_EXTENSIONS` compared by
+name. The bridge hides any extension with an unimplemented entry point (so
+apps never `dlsym` a NULL) and extensions the registry does not list for the
+APIs it serves.
 
-`GL_ARB_compatibility`, `GL_ARB_debug_output`, `GL_ARB_direct_state_access`,
-`GL_ARB_imaging`, `GL_ARB_map_buffer_range`, `GL_ARB_uniform_buffer_object`,
-`GL_ARB_vertex_buffer_object`, `GL_EXT_direct_state_access`,
-`GL_EXT_secondary_color`, `GL_EXT_fog_coord`, `GL_KHR_debug`, ...
+| List | native | bridge | native-only | bridge-only |
+|---|---|---|---|---|
+| desktop GL (compat 4.6) | 369 | 305 | 64 | 0 |
+| OpenGL ES 3.2 | 192 | 174 | 18 | 0 |
+| EGL display | 57 | 30 | 27 | 0 |
 
-Most of those are missing for the same few reasons: **mapped buffers**
-(`glMapBuffer*`, `glMapBufferRange`, named variants), **debug callbacks**,
-and a couple of string-array queries. Closing the mapped-buffer gap restores
-the bulk of them. Versions are reported as the driver's own (4.6 / ES 3.2), so
-applications that gate on the version string rather than extension strings can
-still hit the unimplemented entry points; those return a GL error (logged with
+(An earlier measurement before the ES generator coverage fix was ES 195 native
+vs 112 bridged: the generator emitted only 3 ES extensions, and
+`EGL_EXT_platform_base` was hidden because two of its entry points were
+missing, which stopped piglit from obtaining a display at all.)
+
+Dropped on desktop GL: 44 `NV_*`, 10 `EXT_*`, 3 `ARB_*`, 1 `KHR_*`, and
+vendor extras (`OVR`, `NVX`, `KTX`, `ATI`, `AMD`). The ARB/KHR/EXT ones:
+`GL_ARB_debug_output`, `GL_KHR_debug` (debug callbacks need an upcall),
+`GL_ARB_imaging`, `GL_ARB_uniform_buffer_object`, `GL_EXT_direct_state_access`,
+`GL_EXT_fog_coord`, `GL_EXT_secondary_color`, `GL_EXT_vertex_array`,
+`GL_EXT_texture_edge_clamp`, `GL_EXT_texture_lod`, `GL_EXT_transform_feedback2`,
+`GL_EXT_semaphore`, `GL_EXT_import_sync_object`, `GL_EXT_Cg_shader`. The reason
+for most of these (versus the debug callbacks, which is known) has **not** been
+determined yet: they are either missing entry points or not present in the
+registry tables used for filtering. That is a to-do, because several are old
+but widely used (`ARB_uniform_buffer_object`, `EXT_secondary_color`).
+
+Dropped on ES: `KHR_debug`, `EXT_semaphore`, `EXT_multi_draw_indirect`,
+`OVR_multiview*`, and a number of NV extensions (`path_rendering`,
+`bindless_texture`, `gpu_shader5`, `sample_locations`, ...).
+
+Dropped on EGL: the stream family (`EGL_KHR_stream*`, `EGL_NV_stream_*`),
+`EGL_KHR_wait_sync`, `EGL_KHR_partial_update`,
+`EGL_KHR_swap_buffers_with_damage`, `EGL_EXT_sync_reuse`,
+`EGL_EXT_image_dma_buf_import_modifiers`, `EGL_KHR_display_reference`,
+`EGL_NV_post_sub_buffer`, `EGL_NV_system_time`, and the Wayland ones.
+
+Versions are reported as the driver's own (4.6 / ES 3.2), so applications that
+gate on the version string rather than extension strings can still hit
+unimplemented entry points; those return a GL error (logged with
 `GB_LOG_MISSING=1`) rather than crashing.
 
 ## Findings that changed the code
@@ -180,3 +206,47 @@ Flakiness found on the way (test bug, not a bridge bug): drawing into a window
 before the X server has exposed it is undefined by the pixel-ownership rule
 and NVIDIA discards the fragments. Tests now wait for MapNotify + Expose
 (0 failures in 130 runs afterwards).
+
+## Conformance: piglit (arm64 native baseline vs armhf through the bridge)
+
+Same Ubuntu piglit package for both architectures, `-p x11_egl`, one process
+per test, on the live display. Selection of 614 tests: GL 1.x/2.x, EGL, FBO
+and buffer-object groups. The arm64 run is the baseline; only differences
+from it are candidates for bridge bugs.
+
+| Run | pass | fail | skip | crash | timeout | differs from native |
+|---|---|---|---|---|---|---|
+| native arm64 | 519 | 23 | 69 | 1 | 1 | - |
+| bridge, first run | 446 | 78 | 80 | 9 | 1 | 92 |
+| after fixes, run 2 | 492 | 35 | 80 | 6 | 1 | 46 |
+| run 3 (current) | 503 | 26 | 83 | 1 | 1 | 28 |
+
+What the sweep found (details and the generalised lessons are in
+[STATUS.md](STATUS.md), lessons 10-14):
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| ~50 `teximage-colors` / `getteximage-*` failures and crashes in `eglMakeCurrent` at teardown | desktop GL context created via EGL classified as GLES; `glGetTexImage` unsizable; driver wrote a full image into a 512-byte scratch, corrupting its state | classify by `GL_VERSION`; unsizable arrays skip the call and raise an error |
+| `draw-pixels` server SIGSEGV | NULL pixels passed to the driver for an unknown format/type | size tables extended (`GL_BITMAP`, BGR/BGRA/ABGR, packed types) |
+| `draw-elements` INVALID_OPERATION | client vertex arrays + buffer-object indices were rejected | `ElementMax` server op, `DrawClient` kind 2 |
+| `gl-1.5-get-array-attribs` | array state queries went to a driver that never saw client pointers | answered from the shadow |
+| `color-material-array`, `line-flat-clip-color` server SIGSEGV | `glEnable(GL_VERTEX_ARRAY)` alias not tracked | wrap `glEnable`/`glDisable` |
+| `shadersource-errors`, `egl-create-context-invalid-attribute-gl`, `gl-2.1-pbo` client crashes | garbage strings with an invalid shader name; unterminated EGL attrib list; stale map slot after deleting a mapped buffer | known-shader set; page-checked attrib scan; unmap on delete |
+| EGL tests "piglit_egl_get_display() failed" | `EGL_EXT_platform_base` hidden | pixmap/platform-pixmap surfaces implemented |
+| ES extension list 112 vs 195 | generator emitted 3 ES extensions | OES/EXT/KHR + NV aliases, alias wrappers |
+
+Remaining 28 differences and their status are listed in STATUS.md
+("Conformance"). The notable open ones: `glSelectBuffer`/`glFeedbackBuffer`
+(6 tests, known gap), `depth-clear-precision-check` timeout, three
+fence-sync/colorspace/drawpixels differences that are not yet understood, and
+a client crash in `egl_ext_platform_device` (native fails that test too).
+
+The native baseline is not fully deterministic (4 tests flipped in the
+bridge's favour with no relevant change), so treat single-test differences of
+that kind as noise until a second baseline run confirms them.
+
+Triage tooling kept on the device (`~/gb/pg`, `~/gb/gbd_gdb.sh`, `gbd_mc.sh`,
+`gbd_reg.sh`, `gbd_sz.sh`): `run.sh <arm64|armhf> <outdir> <regex>` runs the
+selection; gdb works on the armhf client from the arm64 gdb (the client
+processes run natively as AArch32), and a gdb wrapper as `GB_SERVER` gives
+server backtraces.
