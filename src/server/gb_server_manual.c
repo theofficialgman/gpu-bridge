@@ -1226,6 +1226,15 @@ static void set_pointer(const struct cattr *a, size_t off)
 	GB_NATIVE(glIndexPointer, void, (GLenum, GLsizei, const void *));
 	GB_NATIVE(glTexCoordPointer, void,
 		  (GLint, GLenum, GLsizei, const void *));
+	GB_NATIVE(glPointSizePointerOES, void, (GLenum, GLsizei, const void *));
+	GB_NATIVE(glMatrixIndexPointerOES, void,
+		  (GLint, GLenum, GLsizei, const void *));
+	GB_NATIVE(glMatrixIndexPointerARB, void,
+		  (GLint, GLenum, GLsizei, const void *));
+	GB_NATIVE(glWeightPointerOES, void,
+		  (GLint, GLenum, GLsizei, const void *));
+	GB_NATIVE(glWeightPointerARB, void,
+		  (GLint, GLenum, GLsizei, const void *));
 	GB_NATIVE(glClientActiveTexture, void, (GLenum));
 	GB_NATIVE(glGetIntegerv, void, (GLenum, GLint *));
 	GB_NATIVE(glVertexAttribPointer, void,
@@ -1259,6 +1268,22 @@ static void set_pointer(const struct cattr *a, size_t off)
 		break;
 	case CA_INDEX:
 		if (fn_glIndexPointer) fn_glIndexPointer(a->type, st, p);
+		break;
+	case CA_POINTSIZE:
+		if (fn_glPointSizePointerOES)
+			fn_glPointSizePointerOES(a->type, st, p);
+		break;
+	case CA_MATRIXINDEX:
+		if (fn_glMatrixIndexPointerOES)
+			fn_glMatrixIndexPointerOES(sz, a->type, st, p);
+		else if (fn_glMatrixIndexPointerARB)
+			fn_glMatrixIndexPointerARB(sz, a->type, st, p);
+		break;
+	case CA_WEIGHT:
+		if (fn_glWeightPointerOES)
+			fn_glWeightPointerOES(sz, a->type, st, p);
+		else if (fn_glWeightPointerARB)
+			fn_glWeightPointerARB(sz, a->type, st, p);
 		break;
 	default:
 		if (a->slot >= CA_TEX0 && a->slot < CA_GENERIC0) {

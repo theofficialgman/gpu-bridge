@@ -19,6 +19,9 @@ enum gb_carr_slot {
 	CA_FOGCOORD,
 	CA_EDGEFLAG,
 	CA_INDEX,
+	CA_POINTSIZE,    /* OES_point_size_array */
+	CA_MATRIXINDEX,  /* OES_matrix_palette / ARB_matrix_palette */
+	CA_WEIGHT,       /* ARB_vertex_blend / OES_matrix_palette */
 	CA_TEX0,
 	CA_GENERIC0 = CA_TEX0 + GB_MAX_TEXUNITS,
 	CA_COUNT = CA_GENERIC0 + GB_MAX_GENERIC

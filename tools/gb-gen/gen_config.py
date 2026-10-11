@@ -137,6 +137,7 @@ _MANUAL = {
         # EXT_direct_state_access: pointer getters answered from the shadow
         "glGetPointeri_vEXT", "glGetPointerIndexedvEXT",
         "glGetVertexArrayPointervEXT", "glGetVertexArrayPointeri_vEXT",
+        "glGetVertexAttribPointervNV",
         "glDebugMessageCallback", "glDebugMessageCallbackKHR",
         "glDebugMessageCallbackARB", "glDebugMessageInsert",
         "glDebugMessageInsertKHR", "glDebugMessageInsertARB", "glObjectLabel",
@@ -204,6 +205,9 @@ _POINTER_FUNCS = {
     "glEdgeFlagPointer", "glTexCoordPointer",
     "glVertexAttribIPointerEXT", "glVertexAttribLPointerEXT",
     "glMultiTexCoordPointerEXT",
+    "glPointSizePointerOES", "glMatrixIndexPointerOES",
+    "glMatrixIndexPointerARB", "glWeightPointerOES", "glWeightPointerARB",
+    "glVertexAttribPointerNV",
 }
 _DRAW_FUNCS = {
     "glDrawArrays", "glDrawArraysInstanced", "glDrawArraysInstancedARB",

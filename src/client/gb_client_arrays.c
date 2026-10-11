@@ -1059,6 +1059,23 @@ GB_API void glDeleteVertexArraysOES(GLsizei n, const GLuint *arrays)
 #define GL_FOG_COORD_ARRAY_ 0x8457
 #define GL_SECONDARY_COLOR_ARRAY_ 0x845E
 
+/* NV_vertex_program attribute aliasing: attribute index -> array slot */
+static int nv_attrib_slot(unsigned i)
+{
+	switch (i) {
+	case 0: return CA_VERTEX;
+	case 1: return CA_WEIGHT;
+	case 2: return CA_NORMAL;
+	case 3: return CA_COLOR;
+	case 4: return CA_SECONDARY;
+	case 5: return CA_FOGCOORD;
+	case 6: return CA_POINTSIZE;
+	default:
+		return i >= 8 && i < 8 + GB_MAX_TEXUNITS ? CA_TEX0 + (int)(i - 8)
+							 : -1;
+	}
+}
+
 static int cap_slot(struct gb_ctxstate *st, GLenum cap)
 {
 	switch (cap) {
@@ -1069,9 +1086,16 @@ static int cap_slot(struct gb_ctxstate *st, GLenum cap)
 	case GL_EDGE_FLAG_ARRAY_: return CA_EDGEFLAG;
 	case GL_FOG_COORD_ARRAY_: return CA_FOGCOORD;
 	case GL_SECONDARY_COLOR_ARRAY_: return CA_SECONDARY;
+	case 0x8B9C: return CA_POINTSIZE;    /* POINT_SIZE_ARRAY_OES */
+	case 0x8844: return CA_MATRIXINDEX;  /* MATRIX_INDEX_ARRAY_OES/ARB */
+	case 0x86AD: return CA_WEIGHT;       /* WEIGHT_ARRAY_OES/ARB */
 	case GL_TEXTURE_COORD_ARRAY_:
 		return CA_TEX0 + (int)(st->client_active_tex % GB_MAX_TEXUNITS);
-	default: return -1;
+	default:
+		/* NV_vertex_program: glEnable(VERTEX_ATTRIB_ARRAYi_NV) */
+		if (cap >= 0x8650 && cap <= 0x865F)
+			return nv_attrib_slot(cap - 0x8650);
+		return -1;
 	}
 }
 
@@ -1107,13 +1131,11 @@ GB_API void glEnable(GLenum cap)
 		gb_cl_debug_update_sync(gb_cl_get());
 	}
 
-	if (st && cap >= GL_VERTEX_ARRAY_ && cap <= GL_EDGE_FLAG_ARRAY_) {
+	if (st) { /* glEnable/glDisable also accept the array caps */
 		int s = cap_slot(st, cap);
+
 		if (s >= 0)
 			gb_arr_enable(st, s, 1);
-	} else if (st && (cap == GL_FOG_COORD_ARRAY_ ||
-			  cap == GL_SECONDARY_COLOR_ARRAY_)) {
-		gb_arr_enable(st, cap_slot(st, cap), 1);
 	}
 	gbx_glEnable(cap);
 }
@@ -1127,13 +1149,11 @@ GB_API void glDisable(GLenum cap)
 		gb_cl_debug_update_sync(gb_cl_get());
 	}
 
-	if (st && cap >= GL_VERTEX_ARRAY_ && cap <= GL_EDGE_FLAG_ARRAY_) {
+	if (st) { /* glEnable/glDisable also accept the array caps */
 		int s = cap_slot(st, cap);
+
 		if (s >= 0)
 			gb_arr_enable(st, s, 0);
-	} else if (st && (cap == GL_FOG_COORD_ARRAY_ ||
-			  cap == GL_SECONDARY_COLOR_ARRAY_)) {
-		gb_arr_enable(st, cap_slot(st, cap), 0);
 	}
 	gbx_glDisable(cap);
 }
@@ -1198,6 +1218,71 @@ GB_API void glIndexPointer(GLenum type, GLsizei stride, const void *pointer)
 {
 	FIXED_POINTER(CA_INDEX, 1, type, stride, pointer,
 		      gbx_glIndexPointer(type, stride, pointer));
+}
+
+GB_API void glPointSizePointerOES(GLenum type, GLsizei stride,
+				  const void *pointer)
+{
+	FIXED_POINTER(CA_POINTSIZE, 1, type, stride, pointer,
+		      gbx_glPointSizePointerOES(type, stride, pointer));
+}
+
+GB_API void glMatrixIndexPointerOES(GLint size, GLenum type, GLsizei stride,
+				    const void *pointer)
+{
+	FIXED_POINTER(CA_MATRIXINDEX, size, type, stride, pointer,
+		      gbx_glMatrixIndexPointerOES(size, type, stride, pointer));
+}
+
+GB_API void glMatrixIndexPointerARB(GLint size, GLenum type, GLsizei stride,
+				    const void *pointer)
+{
+	FIXED_POINTER(CA_MATRIXINDEX, size, type, stride, pointer,
+		      gbx_glMatrixIndexPointerARB(size, type, stride, pointer));
+}
+
+GB_API void glWeightPointerOES(GLint size, GLenum type, GLsizei stride,
+			       const void *pointer)
+{
+	FIXED_POINTER(CA_WEIGHT, size, type, stride, pointer,
+		      gbx_glWeightPointerOES(size, type, stride, pointer));
+}
+
+GB_API void glWeightPointerARB(GLint size, GLenum type, GLsizei stride,
+			       const void *pointer)
+{
+	FIXED_POINTER(CA_WEIGHT, size, type, stride, pointer,
+		      gbx_glWeightPointerARB(size, type, stride, pointer));
+}
+
+/* NV_vertex_program: attribute `index` aliases the conventional arrays */
+GB_API void glVertexAttribPointerNV(GLuint index, GLint fsize, GLenum type,
+				    GLsizei stride, const void *pointer)
+{
+	struct gb_ctxstate *st = gb_cur_state_raw();
+	int slot = nv_attrib_slot(index);
+
+	if (st && slot >= 0 &&
+	    gb_arr_pointer(st, slot, fsize, type, 0, 0, 0, stride, pointer))
+		return;
+	gbx_glVertexAttribPointerNV(index, fsize, type, stride, pointer);
+}
+
+GB_API void glGetVertexAttribPointervNV(GLuint index, GLenum pname,
+					void **pointer)
+{
+	struct gb_ctxstate *st = gb_cur_state_raw();
+	int slot = nv_attrib_slot(index);
+
+	if (!pointer)
+		return;
+	if (pname != 0x8645 /* VERTEX_ATTRIB_ARRAY_POINTER_NV */ || slot < 0 ||
+	    !st) {
+		gb_cl_gl_error(pname != 0x8645 ? 0x0500 : 0x0501);
+		*pointer = NULL;
+		return;
+	}
+	*pointer = (void *)st->vao->a[slot].ptr;
 }
 
 GB_API void glEdgeFlagPointer(GLsizei stride, const void *pointer)
