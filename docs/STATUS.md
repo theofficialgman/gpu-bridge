@@ -38,7 +38,7 @@ What it cannot validate is anything NVIDIA-specific (see "Phase 0" below).
 | Control protocol | `src/proto/gb_ctl.[ch]` | socketpair + SCM_RIGHTS; server lifetime tied to client; version + op-table hash check at HELLO |
 | Codec | `src/proto/gb_codec.h` | bounds-checked reader/writer, fixed-width only |
 | Size rules | `src/proto/gb_gl_sizes.h` | pname counts, pixel rectangle sizes, EGL attrib list validation; unknown -> -1, never a guess |
-| Generator | `tools/gb-gen/` | One library, one opcode space: EGL 1.0-1.5, GLES 2.0/3.0, GLX 1.0-1.4, GL 1.0-4.6 compat/core + ARB/KHR/EXT. 2,262 commands: 2,027 generated, 75 wrapped (generated encoder + hand-written shadow-state wrapper), 47 manual, 23 aliases (ES `EXT`/`OES`/`NV` spellings forwarding to the core wrapper), 90 unsupported (explicit list via `gb_gen.py --report`) |
+| Generator | `tools/gb-gen/` | One library, one opcode space: EGL 1.0-1.5, GLES 2.0/3.0, GLX 1.0-1.4, GL 1.0-4.6 compat/core + ARB/KHR/EXT. 2,275 commands: 2,033 generated, 75 wrapped (generated encoder + hand-written shadow-state wrapper), 60 manual, 29 aliases (ES `EXT`/`OES`/`NV` spellings forwarding to the core wrapper), 78 unsupported (explicit list via `gb_gen.py --report`) |
 | Server `gbd` | `src/server/` | loads real libEGL/libGLESv2/**libGL**, one worker thread per client thread, handle tables, scratch buffers for client arrays, own X connection(s) with `XInitThreads` + an error handler, server-side size rules that query native GL state |
 | Client library | `src/client/` | **one** library exporting EGL + GLES + GLX + desktop GL, built as `libGL.so.1` in `build/shim{32,64}/` with symlinks for `libEGL.so.1`, `libGLESv2.so.2`, `libGLESv1_CM.so.1`, `libGLX.so.0`, `libOpenGL.so.0` (one bridge connection per process, so mixed-API apps such as eglgears work) |
 
@@ -175,6 +175,12 @@ None of this is a Tegra number. Re-run `bench_b32` on the device in Phase 0.
     `glCreateShader` returned and sends an empty source for others; EGL
     attribute lists are scanned page-checked so an unterminated list raises
     `EGL_BAD_ATTRIBUTE` instead of faulting.
+15. **Transfers have dimensionality.** `GL_UNPACK_SKIP_IMAGES` and
+    `GL_UNPACK_IMAGE_HEIGHT` apply only to 3D uploads; a size rule that applied
+    them to a 2D `glTexSubImage2D` over-read the application's buffer. The
+    over-read "worked" until memory layout changed and then crashed (found as a
+    regression in a later sweep: `texsubimage-unpack`). Size rules take an
+    explicit "2D" marker now (`GB_DEPTH_2D`).
 14. **A hidden extension hides a whole feature, silently.** The generator only
     emitted 3 GLES extensions, so ES contexts advertised 112 of the native
     195 and `EGL_EXT_platform_base` was dropped because two of its three
@@ -220,7 +226,9 @@ bridge difference there). One stable native crash: `ppgtt_memory_alignment`
 |---|---|---|---|---|---|---|
 | first run | 446 | 78 | 80 | 9 | 1 | 92 |
 | after the fixes below, run 2 | 492 | 35 | 80 | 6 | 1 | 46 |
-| run 3 (current) | 503 | 26 | 83 | 1 | 1 | 24 real (excluding flaky, the excluded test, and one 32-bit test-program hang) |
+| run 3 | 503 | 26 | 83 | 1 | 1 | 24 real |
+| run 4 | 511 | 22 | 77 | 1 | 1 | 14 (one new: `texsubimage-unpack`, fixed) |
+| run 5 (current) | 515 | 22 | 74 | 0 | 1 | 10 (4 of them not defects, see below) |
 
 Bugs found and fixed by this sweep: see lessons 10-14, plus
 `GL_BITMAP`/BGR/packed-type size tables, array state queries answered from the
@@ -234,40 +242,47 @@ the same armhf binary on software Mesa (no bridge, no NVIDIA):
 with `shim32` removed from `LD_LIBRARY_PATH`. This is how
 `depth-clear-precision-check` was classified (below).
 
-Remaining differences, in groups:
+Remaining 10 differences (run 5), in groups:
 
-* **Unimplemented (known):** 5x `gl_select` and `gl-1.0-rendermode-feedback`
-  (`glSelectBuffer`/`glFeedbackBuffer`).
-* **Not a bridge bug:** `depth-clear-precision-check` never terminates in the
-  armhf build of the test: it passes `depth16` and `depth24`, then loops
-  forever on `depth32` (the depth values go to garbage like -83886080.0,
-  consistent with a 32-bit integer loop/overflow in the test program). The
-  same armhf binary does the same on plain Mesa llvmpipe with no bridge; the
-  arm64 build finishes in 1.2 s. (Found by measuring: the bridged run executed
-  ~5k iterations/s, i.e. the transport was fine; it was running far more
-  iterations than the native 1,536.)
-* **Flaky, passes alone:** `depthstencil-default_fb-drawpixels-24_8 samples=8`
-  (passes in isolation natively and bridged; multisample depth/stencil tests
-  vary run to run natively too).
-* **Understood, not a defect:** `egl_khr_fence_sync` forks a child process
-  for its second thread. Natively NVIDIA's EGL fails to initialize in the
-  forked child, so the test passes through the "failed to initialize a second
-  EGLDisplay" path. The bridge supports fork (the child reconnects to its own
-  server), so it continues into checks that only make sense within one
-  process ("sync on a display bound to another thread must fail") and reports
-  a failure. The bridge is more capable than the driver here.
-  (Server EGL displays are now also keyed by the application's `Display*`,
-  as natively; that did not change this test.)
-* **Understood, missing API:** `egl_khr_gl_colorspace linear` needs GLES1
-  (`glOrthof` not found in libGLESv1_CM): the bridge does not implement the
-  GLES 1.x API (only the entry points it shares with desktop GL).
-* **Extension skips:** `EGL_EXT_device_*`, dma-buf modifiers, wait_sync,
-  `EGL_MESA_device_software`, `egl-blob-cache`, `egl_ext_egl_image_storage`,
-  `egl_gl_oes_egl_image`, ES debug-flag context tests: the extension is hidden
-  or an entry point is missing.
-* **Crash:** `egl_ext_platform_device` crashes in the client (native itself
-  fails this test). Hypothesis, not verified: a NULL function pointer
-  (`eglQueryDevicesEXT`) while `EGL_EXT_platform_device` is advertised.
+* **Not a defect (4):**
+  * `depth-clear-precision-check`: the armhf build of the test never
+    terminates. It passes `depth16` and `depth24`, then loops forever on
+    `depth32` (the depth values go to garbage like -83886080.0, consistent
+    with a 32-bit integer loop/overflow in the test program). The same armhf
+    binary does the same on plain Mesa llvmpipe with no bridge; the arm64
+    build finishes in 1.2 s. (Found by measuring: the bridged run executed ~5k
+    iterations/s, i.e. the transport was fine; it was running far more
+    iterations than the native 1,536.)
+  * `ppgtt_memory_alignment`: crashes natively every time (Intel-specific
+    test); passes through the bridge.
+  * `egl_ext_platform_device`: fails natively (NVIDIA returns success where
+    the test expects `EGL_BAD_NATIVE_PIXMAP`); passes through the bridge.
+  * `egl_khr_fence_sync`: the test forks. Natively NVIDIA's EGL fails to
+    initialize in the forked child, so the test passes through the "failed to
+    initialize a second EGLDisplay" path. The bridge supports fork (the child
+    reconnects to its own server), so it continues into checks that only make
+    sense within one process and reports a failure.
+* **Missing feature (6):**
+  * `egl_khr_gl_colorspace linear` needs GLES1 (`glOrthof` not found in
+    libGLESv1_CM): the bridge does not implement the GLES 1.x API (only the
+    entry points it shares with desktop GL).
+  * 3x `egl_khr_create_context valid debug flag gles1/2/3`: ES needs
+    `GL_KHR_debug`, i.e. debug-message callbacks (needs a server-to-client
+    upcall mechanism).
+  * `egl-blob-cache`: needs `EGL_ANDROID_blob_cache` (callback upcalls).
+  * `egl_ext_image_dma_buf_import_modifiers`: dma-buf fd passing.
+
+Natively these EGL tests use the *default display*, which GLVND resolves to
+Mesa (llvmpipe) on this device, not NVIDIA: several "native pass" results in
+the EGL groups say nothing about the NVIDIA driver.
+
+Fixed since the first sweep, in addition to the list above: GL_BITMAP and
+packed pixel sizes, 2D transfers ignoring `GL_UNPACK_SKIP_IMAGES`, select and
+feedback mode (`glSelectBuffer`/`glFeedbackBuffer`/`glRenderMode` with
+server-retained buffers), EGL device enumeration/query and the device platform,
+EGL wait_sync/sync_reuse/swap-with-damage/partial-update/post_sub_buffer/
+system_time, the EXT_vertex_array/fog_coord/secondary_color pointer spellings
+and `glGetUniformIndices`.
 
 Not yet covered: other piglit groups (GL 3.x/4.x, GLES2/3 on the ES API,
 shaders), glew-utils, the xscreensaver GL hacks, and large applications
@@ -367,12 +382,27 @@ design choices marked `[VERIFY]` in ARCHITECTURE.md:
 
 ## Next steps (suggested order)
 
-1. Finish triage of the piglit differences above (select/feedback buffers
-   first; then the uninvestigated four; then re-run to separate flaky from
-   real), then widen the sweep to other groups with an arm64 baseline each.
-2. Decide how armhf applications are meant to pick up the bridge system-wide
+1. **Run this suite on the x86_64 dev machine** (i386 client against x86_64
+   server on Mesa): piglit `.deb`s can be downloaded and unpacked without root;
+   iteration is much faster than on the device, and marshalling/shadow-state
+   bugs (everything fixed in this sweep except driver-specific behavior) show
+   up there. Keep the same rules: native baseline first, repeated.
+2. **GLES 1.x API** (`libGLESv1_CM`): `glOrthof` & co, fixed-point `x`
+   spellings, `OES_draw_texture`, etc. Needs ES1 entry points resolved from
+   NVIDIA's `libGLESv1_CM` in the server.
+3. **Server-to-client upcalls** (debug callbacks, `EGL_ANDROID_blob_cache`):
+   the protocol has no unsolicited server messages yet; candidates are
+   piggybacking on replies or a third ring. Unlocks `GL_KHR_debug` /
+   `GL_ARB_debug_output`, which gates ES conformance tests.
+4. Remaining hidden extensions: `GL_ARB_imaging` (colour table / convolution /
+   histogram getters), `GL_EXT_direct_state_access` (10 of 255 entry points:
+   server-sized texture-image getters, pointer-array getters), EGL streams
+   (`EGL_KHR_stream*`, `EGL_NV_stream_*`), dma-buf (fd passing).
+5. Widen the sweep: other piglit groups (GL 3.x/4.x, GLES2/3, shaders),
+   glew-utils, xscreensaver GL hacks, large applications.
+6. Decide how armhf applications are meant to pick up the bridge system-wide
    (soname shims in `LD_LIBRARY_PATH` work today; an install story is open).
-3. Performance pass (Phase 2): client-allocated names, batched publish,
+7. Performance pass (Phase 2): client-allocated names, batched publish,
    shared-arena bulk transfers (readback is ~7x slower than native), persistent
    mappings.
-4. Vulkan (Phase 4): evaluate adopting the Venus protocol.
+8. Vulkan (Phase 4): evaluate adopting the Venus protocol.

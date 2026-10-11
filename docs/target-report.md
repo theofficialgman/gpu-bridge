@@ -33,7 +33,7 @@ A 2019 NVIDIA driver on a 2024 distribution: nothing about the userland is
 | Q6 | mmap of a Tegra dma-buf from AArch32 | Not examined (matters only for the future mapped-buffer / zero-copy work) |
 | Q7 | Fences / explicit sync | Not examined (swap is a synchronous call and the X path orders presentation) |
 | Q8 | Can a second X connection render into a window another connection created? | **Yes, for both GLX and EGL, on NVIDIA's own driver.** `glx_xconn` mode 1 renders and reads back correctly; the full `x11_b32`/`glx_b32` tests pass. This was the central bet of Strategy X |
-| Q9 | Extension surface | desktop GL: 369 native, 305 through the bridge; ES 3.2: 192 native, 174 bridged; EGL display extensions: 57 native, 30 bridged (see below) |
+| Q9 | Extension surface | desktop GL: 369 native, 312 through the bridge; ES 3.2: 192 native, 174 bridged; EGL display extensions: 57 native, 37 bridged (see below) |
 | Q10 | Per-call cost | see below |
 
 ## What was verified end to end on the device
@@ -84,36 +84,35 @@ APIs it serves.
 
 | List | native | bridge | native-only | bridge-only |
 |---|---|---|---|---|
-| desktop GL (compat 4.6) | 369 | 305 | 64 | 0 |
+| desktop GL (compat 4.6) | 369 | 312 | 57 | 0 |
 | OpenGL ES 3.2 | 192 | 174 | 18 | 0 |
-| EGL display | 57 | 30 | 27 | 0 |
+| EGL display | 57 | 37 | 20 | 0 |
 
 (An earlier measurement before the ES generator coverage fix was ES 195 native
 vs 112 bridged: the generator emitted only 3 ES extensions, and
 `EGL_EXT_platform_base` was hidden because two of its entry points were
 missing, which stopped piglit from obtaining a display at all.)
 
-Dropped on desktop GL: 44 `NV_*`, 10 `EXT_*`, 3 `ARB_*`, 1 `KHR_*`, and
-vendor extras (`OVR`, `NVX`, `KTX`, `ATI`, `AMD`). The ARB/KHR/EXT ones:
-`GL_ARB_debug_output`, `GL_KHR_debug` (debug callbacks need an upcall),
-`GL_ARB_imaging`, `GL_ARB_uniform_buffer_object`, `GL_EXT_direct_state_access`,
-`GL_EXT_fog_coord`, `GL_EXT_secondary_color`, `GL_EXT_vertex_array`,
-`GL_EXT_texture_edge_clamp`, `GL_EXT_texture_lod`, `GL_EXT_transform_feedback2`,
-`GL_EXT_semaphore`, `GL_EXT_import_sync_object`, `GL_EXT_Cg_shader`. The reason
-for most of these (versus the debug callbacks, which is known) has **not** been
-determined yet: they are either missing entry points or not present in the
-registry tables used for filtering. That is a to-do, because several are old
-but widely used (`ARB_uniform_buffer_object`, `EXT_secondary_color`).
+Dropped on desktop GL: 44 `NV_*`, 4 `EXT_*`, 2 `ARB_*`, and vendor extras
+(`OVR`, `NVX`, ...). The ARB/KHR/EXT ones and why: `GL_KHR_debug` and
+`GL_ARB_debug_output` (debug callbacks need a server-to-client upcall),
+`GL_ARB_imaging` (7 colour-table/convolution/histogram getters not sized),
+`GL_EXT_direct_state_access` (10 of 255 entry points: server-sized
+texture-image getters and pointer-array getters), `GL_EXT_semaphore` and
+`GL_EXT_import_sync_object` (file descriptors), `GL_EXT_transform_feedback2`
+(not in the registry; reason not examined). Since the first measurement,
+`ARB_uniform_buffer_object`, `EXT_fog_coord`, `EXT_secondary_color`,
+`EXT_vertex_array`, `EXT_texture_edge_clamp`, `EXT_texture_lod` and
+`EXT_Cg_shader` have been restored (the first three were each missing 1-7 entry
+points, e.g. the `*PointerEXT` spellings).
 
 Dropped on ES: `KHR_debug`, `EXT_semaphore`, `EXT_multi_draw_indirect`,
 `OVR_multiview*`, and a number of NV extensions (`path_rendering`,
 `bindless_texture`, `gpu_shader5`, `sample_locations`, ...).
 
 Dropped on EGL: the stream family (`EGL_KHR_stream*`, `EGL_NV_stream_*`),
-`EGL_KHR_wait_sync`, `EGL_KHR_partial_update`,
-`EGL_KHR_swap_buffers_with_damage`, `EGL_EXT_sync_reuse`,
-`EGL_EXT_image_dma_buf_import_modifiers`, `EGL_KHR_display_reference`,
-`EGL_NV_post_sub_buffer`, `EGL_NV_system_time`, and the Wayland ones.
+`EGL_EXT_image_dma_buf_import_modifiers`, `EGL_EXT_client_sync`,
+`EGL_NV_nvrm_fence_sync`, `EGL_EXT_output_base`, and the Wayland ones.
 
 Versions are reported as the driver's own (4.6 / ES 3.2), so applications that
 gate on the version string rather than extension strings can still hit
@@ -257,7 +256,9 @@ from it are candidates for bridge bugs.
 | native arm64 | 519 | 23 | 69 | 1 | 1 | - |
 | bridge, first run | 446 | 78 | 80 | 9 | 1 | 92 |
 | after fixes, run 2 | 492 | 35 | 80 | 6 | 1 | 46 |
-| run 3 (current) | 503 | 26 | 83 | 1 | 1 | 28 |
+| run 3 | 503 | 26 | 83 | 1 | 1 | 28 |
+| run 4 | 511 | 22 | 77 | 1 | 1 | 14 (one new, fixed) |
+| run 5 (current) | 515 | 22 | 74 | 0 | 1 | 10 (4 not defects) |
 
 What the sweep found (details and the generalised lessons are in
 [STATUS.md](STATUS.md), lessons 10-14):
