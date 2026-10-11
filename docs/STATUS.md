@@ -1,7 +1,8 @@
 # gpu-bridge: implementation status
 
-Last updated after the first piglit conformance sweep on the Tegra (see
-"Conformance" below). Read together with
+Last updated after the dev-machine conformance loop, the full version /
+extension generation, the upcall and fd-passing mechanisms (see "Coverage",
+"Dev-machine conformance loop" and "Conformance" below). Read together with
 [ARCHITECTURE.md](../ARCHITECTURE.md) (the design) and
 [target-report.md](target-report.md) (measurements on the real device) — this
 file records what actually exists, what was measured, and what is known to be
@@ -38,7 +39,7 @@ What it cannot validate is anything NVIDIA-specific (see "Phase 0" below).
 | Control protocol | `src/proto/gb_ctl.[ch]` | socketpair + SCM_RIGHTS; server lifetime tied to client; version + op-table hash check at HELLO |
 | Codec | `src/proto/gb_codec.h` | bounds-checked reader/writer, fixed-width only |
 | Size rules | `src/proto/gb_gl_sizes.h` | pname counts, pixel rectangle sizes, EGL attrib list validation; unknown -> -1, never a guess |
-| Generator | `tools/gb-gen/` | One library, one opcode space: EGL 1.0-1.5, GLES 2.0/3.0, GLX 1.0-1.4, GL 1.0-4.6 compat/core + ARB/KHR/EXT. 2,275 commands: 2,033 generated, 75 wrapped (generated encoder + hand-written shadow-state wrapper), 60 manual, 29 aliases (ES `EXT`/`OES`/`NV` spellings forwarding to the core wrapper), 78 unsupported (explicit list via `gb_gen.py --report`) |
+| Generator | `tools/gb-gen/` | One library, one opcode space: EGL 1.0-1.5, GLES 1.0, 2.0-3.2, GLX 1.0-1.4, GL 1.0-4.6 compat/core, plus **every extension the Khronos registries list** for those APIs. 3,593 commands: 3,204 generated, 94 wrapped (generated encoder + hand-written shadow-state wrapper), 94 manual, 34 aliases (vendor spellings forwarding to the core wrapper), 167 unsupported (explicit list via `gb_gen.py --report`) |
 | Server `gbd` | `src/server/` | loads real libEGL/libGLESv2/**libGL**, one worker thread per client thread, handle tables, scratch buffers for client arrays, own X connection(s) with `XInitThreads` + an error handler, server-side size rules that query native GL state |
 | Client library | `src/client/` | **one** library exporting EGL + GLES + GLX + desktop GL, built as `libGL.so.1` in `build/shim{32,64}/` with symlinks for `libEGL.so.1`, `libGLESv2.so.2`, `libGLESv1_CM.so.1`, `libGLX.so.0`, `libOpenGL.so.0` (one bridge connection per process, so mixed-API apps such as eglgears work) |
 
@@ -79,14 +80,98 @@ Notable behaviour/fidelity decisions:
 * **Pixel buffer objects work**: encoders consult the client-tracked
   `PIXEL_PACK/UNPACK_BUFFER` binding and send an offset instead of data.
 
-Not supported (stub + log with `GB_LOG_MISSING=1`, never a crash):
-debug-message callbacks/labels, evaluator getters (`glGetMap*`),
-`glFeedbackBuffer`/`glSelectBuffer` (the driver keeps the client pointer and
-writes through it later; design sketched, not implemented), `glXUseXFont`,
-persistent buffer mappings, vendor extensions outside ARB/KHR/EXT (desktop) and
-OES/EXT/KHR plus a short NV alias list (ES), and the 3.0 imaging-subset
-getters. Mapped buffers (`glMapBuffer*`) are supported as client-side shadow
-copies.
+Not supported (stub + log with `GB_LOG_MISSING=1`, never a crash): see
+"Known limitations"; `gb_gen.py --report` lists every unsupported command with
+its reason. An extension is advertised only if *all* of its entry points are
+implemented.
+
+## Coverage: API versions and extensions
+
+The generator takes every command of GL 1.0-4.6 (compat and core), GLES 1.0 and
+2.0-3.2, EGL 1.0-1.5 and GLX 1.0-1.4 plus every extension in the Khronos
+registries for those APIs; commands it cannot marshal safely are classified
+`unsupported`, and their extensions are hidden from the advertised strings.
+
+Measured by `tools/audit/ext_compare.c` (one line per advertised
+extension/version, native vs bridged; `tools/audit/why_missing.py` explains
+each difference):
+
+| Driver | List | native | bridge | native-only |
+|---|---|---|---|---|
+| NVIDIA / Tegra X1 (arm64 vs armhf) | desktop GL compat | 370 | 362 | 8 |
+| | ES 3.2 | 193 | 190 | 3 |
+| | ES 1.1 | 35 | 35 | 0 |
+| | EGL display | 56 | 49 | 7 |
+| Mesa radeonsi (x86_64 native vs bridge) | desktop GL compat | 322 | 322 | 0 |
+| | ES 3.2 | 165 | 165 | 0 |
+
+What is still hidden on NVIDIA, and why: `GL_NV_path_rendering` (83 entry
+points with COMPSIZE rules that need verifying on the NVIDIA driver),
+`GL_NV_draw_vulkan_image` (`glGetVkProcAddrNV` returns a function pointer),
+`GL_EXT_import_sync_object` / `GL_KTX_buffer_region` / `GL_NV_feature_query`
+(their entry points are not in the shipped registry),
+`EGL_WL_bind_wayland_display` (needs a `wl_display` from the client) and
+`EGL_NV_stream_attrib`.
+
+Counts that depend on driver state are *measured*: `tools/audit/pname_audit.c`
+probes every enum against the native driver with a sentinel buffer and
+`tools/audit/merge.py` turns the results (`tools/audit/data/*.txt`) into
+`src/proto/gb_pname_measured.h`, which `glGet*v` / `glGet*i_v` sizing consults
+before the hand-written rules (the hand tables were wrong in 21 places).
+
+## Upcalls and file descriptors
+
+* **Server-to-client upcalls** (`GB_CMD_F_UPCALL`, ids in `gb_opx.h`): driver
+  callbacks (which may run on driver threads) are queued per client thread and
+  written to the response ring by the worker thread before every reply; the
+  client delivers them in the calling thread, at the start of the next call or
+  while it waits. `GL_DEBUG_OUTPUT_SYNCHRONOUS` turns asynchronous calls into
+  round trips so the callback runs before the offending call returns. Blocking
+  upcalls (EGL blob-cache `get`) are only issued while the client waits for a
+  synchronous reply, and requests that were already queued are deferred until
+  the callback returns. Used by `KHR_debug`, `ARB_debug_output`, `EGL_KHR_debug`
+  and `EGL_ANDROID_blob_cache`.
+* **File descriptors**: an fd named in a request travels on the control socket
+  (`GB_CTL_FD_PUT`, SCM_RIGHTS) under a token that the request carries; the
+  server adopts it (`gb_sv_fd_take`) and closes it after the request unless the
+  driver took ownership. fds the server returns go back the same way
+  (`GB_CTL_FD_GIVE`). Used by dma-buf import/export, native fences, the DRM
+  master fd, `EXT_memory_object_fd`, `EXT_semaphore_fd` and EGL stream fds.
+  Tested by `fd_{native,b64,b32}` (export a dma-buf from one image, import it as
+  another, sample it; duplicate a native fence and wait on the copy).
+
+## Dev-machine conformance loop (piglit on x86_64)
+
+`~/piglit-dev` (outside the repo; recipe below) runs the Ubuntu piglit package
+natively and through the bridge against the Radeon, headless, on the DRM render
+node (`surfaceless_egl`, no windows, nothing on the desktop). The whole `quick`
+profile is 44,224 tests and takes ~15 minutes per side, against ~5 minutes for
+613 tests on the Tegra.
+
+| Run (current library) | pass | skip | fail | crash | warn |
+|---|---|---|---|---|---|
+| native x86_64 | 39,202 | 4,531 | 96 | 385 | 10 |
+| bridged | 39,202 | 4,531 | 96 | 385 | 10 |
+| **differences** | | | | | **0** |
+
+Recipe: `apt-get download piglit libwaffle-1-0 waffle-utils`, `dpkg -x` into a
+private root, then `PIGLIT_PLATFORM=surfaceless_egl EGL_PLATFORM=surfaceless`
+with `LD_LIBRARY_PATH=build/shim64 GB_SERVER=build/gbd` for the bridged side
+(snapshot the library and server first so a rebuild cannot mix versions).
+**`waffle-utils` (`wflinfo`) is required**: without it piglit assumes GL 0.0 and
+skips ~37,000 shader tests (an earlier "0 differences" over 44k tests was
+mostly skips). An i386 piglit is not available in Ubuntu, so the dev loop is a
+64-bit bridge; 32-bit-specific behaviour (widening, `EGLAttrib`, long) is
+covered by the loopback tests and by the Tegra runs.
+
+Bugs this loop found that the Tegra runs had not (all fixed): calls inside
+`glBegin`/`glEnd` did not raise `INVALID_OPERATION` when the shadow handled
+them; client pointers could be forwarded as "server addresses" in list-compile
+and Begin states (server crash); client-array draws inside display lists;
+negative counts in multi-draws; context shadow state surviving
+`eglDestroyContext` (a reused context id inherited the old arrays, bindings and
+*extension list*: every later context saw the first one's strings); indexed
+getters sized with the non-indexed table (stack overwrite in the application).
 
 ## Measured (dev machine: fast desktop CPU, Radeon RX 9060 XT, Mesa)
 
@@ -181,6 +266,25 @@ None of this is a Tegra number. Re-run `bench_b32` on the device in Phase 0.
     over-read "worked" until memory layout changed and then crashed (found as a
     regression in a later sweep: `texsubimage-unpack`). Size rules take an
     explicit "2D" marker now (`GB_DEPTH_2D`).
+16. **A conformance runner can be blind.** Without `wflinfo` piglit assumed
+    GL 0.0 and *skipped* ~37,000 tests, which then "matched" the bridge. Check
+    the skip reasons of any suspiciously clean result.
+17. **Indexed getters are not the plain getters.** `glGetIntegeri_v(
+    MAX_COMPUTE_WORK_GROUP_SIZE, i)` returns one value; sizing it with the
+    non-indexed table (3) made the client overwrite the application's stack.
+    Counts that depend on the driver are now measured from the driver
+    (pname audit), not remembered.
+18. **Destroyed contexts must take their shadow with them.** Server ids are
+    reused; a new context silently inherited the old one's arrays, mapped
+    buffers, profile and *extension strings*.
+19. **Never let a client pointer fall through to the generated forwarder.**
+    The wire carries it as a "buffer offset"; the server dereferences it as
+    its own address. Every state that cannot be handled client-side (inside
+    Begin/End, list compilation) must raise the error or drop the call
+    itself.
+20. **Replies are aligned.** `gb_w_blob` pads to 8 and the reply size has to
+    include the padding; a short buffer fails only for lengths that happen to
+    cross the boundary (select hit lists).
 14. **A hidden extension hides a whole feature, silently.** The generator only
     emitted 3 GLES extensions, so ES contexts advertised 112 of the native
     195 and `EGL_EXT_platform_base` was dropped because two of its three
@@ -323,18 +427,20 @@ a crash or silent wrong answer):
 * **Client-memory vertex arrays with a buffer-object index buffer** work but
   cost one synchronous round trip per draw (`ElementMax`: the server reads the
   index range to learn how much vertex data to upload).
-* **`glSelectBuffer` / `glFeedbackBuffer`** (picking, feedback) are
-  unsupported; `glRenderMode(GL_SELECT)` code paths fail.
-* **`glXUseXFont`**, **GL debug callbacks/labels**, evaluator getters,
-  vendor extensions beyond ARB/KHR/EXT.
-* **EGLImage:** `eglCreateImage[KHR]` works for GL objects and X pixmaps
-  (integer names are valid on both sides). **dma-buf import is refused**
-  (file descriptors are per-process; needs SCM_RIGHTS translation). Needed
-  for video/zero-copy; Phase 2.
-* **EGL streams, EGL device enumeration (`EGL_EXT_device_*`,
-  `EGL_EXT_platform_device`)** are not implemented; some of those extension
-  names are still advertised without their entry points (see
-  "Conformance").
+* **Select/feedback mode** works (server-retained buffers returned at
+  `glRenderMode`); **debug callbacks/labels**, **EGL blob cache**,
+  **EGLImage incl. dma-buf import/export**, **EGL devices and the device
+  platform**, **native fences** and **memory-object / semaphore fds** work
+  (see "Upcalls and file descriptors").
+* **`glXUseXFont`**, evaluator getters (`glGetMap*`), `GL_NV_path_rendering`,
+  `glGetVkProcAddrNV` and a tail of obsolete SGIX/IBM/APPLE/INTEL/QCOM entry
+  points remain unsupported (`gb_gen.py --report`).
+* **Display lists compile client arrays as immediate-mode vertex data**
+  (`glBegin`/`glArrayElement`/`glEnd`); a draw inside `glBegin` inside a
+  `GL_COMPILE` list is dropped silently, as the drivers accept it.
+* **Forked children** reconnect to their own server (a context is not shared
+  across `fork`); NVIDIA's own EGL fails after fork, so the bridge is the more
+  capable of the two there.
 * **Only default-VAO client arrays** are shadowed (ES3 non-default VAOs pass
   straight through, which is correct for ES3).
 * **Out-array writeback copies the whole capacity** (e.g. `glGetShaderInfoLog`
@@ -345,7 +451,8 @@ a crash or silent wrong answer):
   untested; **swap-control extensions** are passed through (the server's
   driver applies them).
 * Extension strings are filtered to entry points we implement; extensions with
-  no entry points (pure enums/behaviour) pass through unreviewed.
+  no entry points are passed through only if listed in `EXT_NO_COMMANDS`
+  (pure enums/behaviour known to be safe).
 
 Performance (by design, not yet optimised):
 
@@ -394,27 +501,16 @@ design choices marked `[VERIFY]` in ARCHITECTURE.md:
 
 ## Next steps (suggested order)
 
-1. **Run this suite on the x86_64 dev machine** (i386 client against x86_64
-   server on Mesa): piglit `.deb`s can be downloaded and unpacked without root;
-   iteration is much faster than on the device, and marshalling/shadow-state
-   bugs (everything fixed in this sweep except driver-specific behavior) show
-   up there. Keep the same rules: native baseline first, repeated.
-2. **GLES 1.x API** (`libGLESv1_CM`): `glOrthof` & co, fixed-point `x`
-   spellings, `OES_draw_texture`, etc. Needs ES1 entry points resolved from
-   NVIDIA's `libGLESv1_CM` in the server.
-3. **Server-to-client upcalls** (debug callbacks, `EGL_ANDROID_blob_cache`):
-   the protocol has no unsolicited server messages yet; candidates are
-   piggybacking on replies or a third ring. Unlocks `GL_KHR_debug` /
-   `GL_ARB_debug_output`, which gates ES conformance tests.
-4. Remaining hidden extensions: `GL_ARB_imaging` (colour table / convolution /
-   histogram getters), `GL_EXT_direct_state_access` (10 of 255 entry points:
-   server-sized texture-image getters, pointer-array getters), EGL streams
-   (`EGL_KHR_stream*`, `EGL_NV_stream_*`), dma-buf (fd passing).
-5. Widen the sweep: other piglit groups (GL 3.x/4.x, GLES2/3, shaders),
-   glew-utils, xscreensaver GL hacks, large applications.
-6. Decide how armhf applications are meant to pick up the bridge system-wide
+1. `GL_NV_path_rendering` (83 entry points): path-name types incl. UTF-8/16
+   (sized by parsing), glyph metric/spacing arrays, `COMPSIZE` rules; verify
+   each count on the NVIDIA driver with an audit program like
+   `tools/audit/pname_audit.c`.
+2. 32-bit coverage on the dev machine: an i386 build of piglit (from source)
+   would exercise the widening paths in the 44k-test loop.
+3. Persistent buffer mappings and a shared arena for bulk transfers (readback
+   is ~7x slower than native; mapped buffers are shadow copies).
+4. Decide how armhf applications are meant to pick up the bridge system-wide
    (soname shims in `LD_LIBRARY_PATH` work today; an install story is open).
-7. Performance pass (Phase 2): client-allocated names, batched publish,
-   shared-arena bulk transfers (readback is ~7x slower than native), persistent
-   mappings.
-8. Vulkan (Phase 4): evaluate adopting the Venus protocol.
+5. Performance pass (Phase 2): client-allocated names, batched publish.
+6. Larger real applications (each with a native arm64 baseline first).
+7. Vulkan (Phase 4): evaluate adopting the Venus protocol.
