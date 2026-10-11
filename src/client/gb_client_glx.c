@@ -188,3 +188,9 @@ GB_API void glShaderSourceARB(GLhandleARB shaderObj, GLsizei count,
 	glShaderSource((GLuint)shaderObj, count, (const GLchar *const *)string,
 		       length);
 }
+
+GB_API void glXDestroyContext(Display *dpy, GLXContext ctx)
+{
+	gbx_glXDestroyContext(dpy, ctx);
+	gb_state_free((uint32_t)(uintptr_t)ctx);
+}

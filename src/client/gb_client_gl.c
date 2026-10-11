@@ -297,6 +297,23 @@ GB_API EGLImageKHR eglCreateImageKHR(EGLDisplay dpy, EGLContext ctx,
 	return gbx_eglCreateImageKHR(dpy, ctx, target, buffer, attrib_list);
 }
 
+/* ---- EGL_MESA_query_driver ---------------------------------------------------------- */
+
+GB_API const char *eglGetDisplayDriverName(EGLDisplay dpy)
+{
+	return gb_cl_fetch_string(GB_OPX_DriverString,
+				  (uint32_t)(uintptr_t)dpy, 0);
+}
+
+/* The application owns (and free()s) the configuration string. */
+GB_API char *eglGetDisplayDriverConfig(EGLDisplay dpy)
+{
+	const char *s = gb_cl_fetch_string(GB_OPX_DriverString,
+					   (uint32_t)(uintptr_t)dpy, 1);
+
+	return s ? strdup(s) : NULL;
+}
+
 /* ---- EGL_KHR_debug --------------------------------------------------------------- */
 
 static EGLDEBUGPROCKHR g_egl_dbg;
@@ -570,6 +587,15 @@ GB_API EGLint eglGetError(void)
 		return e;
 	}
 	return gbx_eglGetError();
+}
+
+GB_API EGLBoolean eglDestroyContext(EGLDisplay dpy, EGLContext ctx)
+{
+	EGLBoolean r = gbx_eglDestroyContext(dpy, ctx);
+
+	if (r)
+		gb_state_free((uint32_t)(uintptr_t)ctx);
+	return r;
 }
 
 GB_API EGLBoolean eglMakeCurrent(EGLDisplay dpy, EGLSurface draw,

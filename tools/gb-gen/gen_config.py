@@ -125,6 +125,10 @@ _MANUAL = {
         # the driver retains the buffer pointer and writes at glRenderMode:
         # the server keeps a persistent buffer and returns its contents then
         "glSelectBuffer", "glFeedbackBuffer", "glRenderMode",
+        # IBM_multimode_draw_arrays: a mode per draw (loops over glDraw*)
+        "glMultiModeDrawArraysIBM", "glMultiModeDrawElementsIBM",
+        # EGL_MESA_query_driver (strings owned by the server)
+        "eglGetDisplayDriverName", "eglGetDisplayDriverConfig",
         # KHR_debug / ARB_debug_output: callbacks are upcalls; the string
         # calls take explicit lengths (gb_client_debug.c)
         "glDebugMessageCallback", "glDebugMessageCallbackKHR",
@@ -169,6 +173,8 @@ _ARRAY_STATE = {
     "glEnable", "glDisable",
     # begin/end and display-list nesting decide whether shadow state may change
     "glBegin", "glEnd", "glNewList", "glEndList",
+    # a destroyed context's shadow state must go (the id is reused)
+    "eglDestroyContext", "glXDestroyContext",
     # shader names the client has seen created (glShaderSource must not
     # read its string array for a name the driver would reject first)
     "glCreateShader", "glCreateShaderObjectARB",
@@ -325,7 +331,7 @@ COMPSIZE = {
 # state): the reply carries the byte length and the client copies exactly
 # that. (regex, key, candidate argument-name lists)
 SERVER_SIZED = [
-    (r"^glGetUniform(f|i|ui|d|i64|ui64)v(ARB|EXT)?$", "uniform",
+    (r"^glGetUniform(f|i|ui|d|i64|ui64)v(ARB|EXT|NV)?$", "uniform",
      [["program", "location"], ["programObj", "location"]]),
     (r"^glGetTexImage$", "pixels_tex", [["target", "level", "format", "type"]]),
     (r"^glGetCompressedTexImage(ARB)?$", "ctex", [["target", "level"]]),
@@ -389,9 +395,27 @@ EXT_NO_COMMANDS = {
     "GL_EXT_compressed_ETC1_RGB8_sub_texture",
     "GL_EXT_EGL_image_external_wrap_modes", "GL_NV_occlusion_query_samples",
     # EGL (behavior-only)
-    "EGL_MESA_configless_context",
+    "EGL_MESA_configless_context", "EGL_MESA_x11_native_visual_id",
+    # desktop, enum-only (advertised by Mesa; absent from the registry)
+    "GL_APPLE_packed_pixels", "GL_ATI_texture_compression_3dc",
+    "GL_EXT_demote_to_helper_invocation", "GL_EXT_shader_clock",
+    "GL_EXT_texture_rectangle", "GL_MESA_texture_signed_rgba",
+    "GL_NV_ES1_1_compatibility",
     # desktop (enum-only)
     "GL_EXT_texture_edge_clamp", "GL_EXT_texture_lod", "GL_EXT_Cg_shader",
+}
+
+# Hand-written entry points for extensions the shipped registry does not list
+# (they are advertised by real drivers): added to the proc table and to the
+# extension table so that the advertised strings keep them.
+EXTRA_PROCS = {
+    "glBlendEquationSeparateATI", "glMultiDrawArraysSUN",
+    "glMultiDrawElementsSUN",
+}
+EXT_EXTRA = {
+    "GL_ATI_blend_equation_separate": ["glBlendEquationSeparateATI"],
+    "GL_SUN_multi_draw_arrays": ["glMultiDrawArraysSUN",
+                                 "glMultiDrawElementsSUN"],
 }
 
 # Vendor-suffixed spellings of core entry points (ES extensions): the public
@@ -404,6 +428,11 @@ ALIASES = {
     "glDrawArraysEXT": "glDrawArrays",
     "glGetPointervEXT": "glGetPointerv",
     "glGetPointervKHR": "glGetPointerv",
+    # indirect multi-draw spellings
+    "glMultiDrawArraysIndirectAMD": "glMultiDrawArraysIndirect",
+    "glMultiDrawElementsIndirectAMD": "glMultiDrawElementsIndirect",
+    "glMultiDrawArraysIndirectEXT": "glMultiDrawArraysIndirect",
+    "glMultiDrawElementsIndirectEXT": "glMultiDrawElementsIndirect",
     "glFogCoordPointerEXT": "glFogCoordPointer",
     "glSecondaryColorPointerEXT": "glSecondaryColorPointer",
     "glMapBufferRangeEXT": "glMapBufferRange",

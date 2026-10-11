@@ -45,6 +45,40 @@ out:
 	return s;
 }
 
+/* A destroyed context's id is reused by the server for the next context; its
+ * shadow (array pointers, bindings, maps, profile, extension list) must not
+ * carry over. */
+void gb_state_free(uint32_t ctx_id)
+{
+	struct gb_ctxstate **pp, *s = NULL;
+
+	pthread_mutex_lock(&g_mu);
+	for (pp = &g_states; *pp; pp = &(*pp)->next)
+		if ((*pp)->ctx_id == ctx_id) {
+			s = *pp;
+			*pp = s->next;
+			break;
+		}
+	pthread_mutex_unlock(&g_mu);
+	if (!s)
+		return;
+	struct gb_cl *cx = gb_cl_get();
+	if (cx && cx->cur == s)
+		cx->cur = NULL;
+	for (int i = 0; i < GB_MAX_MAPS; i++)
+		free(s->maps[i].shadow);
+	while (s->vaos) {
+		struct gb_vao *v = s->vaos;
+
+		s->vaos = v->next;
+		free(v);
+	}
+	for (int i = 0; i < GB_CLIENT_ATTRIB_STACK; i++)
+		free(s->stack[i]);
+	free(s);
+	gb_cl_ext_list_invalidate();
+}
+
 static void trace(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static void trace(const char *fmt, ...)
 {
@@ -1507,6 +1541,60 @@ GB_API void glGetPointerv(GLenum pname, void **params)
 		return;
 	}
 	*params = st ? (void *)st->vao->a[slot].ptr : NULL;
+}
+
+/* ---- legacy multi-draw extensions the registry does not list ---------------------------- */
+
+GB_API void glBlendEquationSeparateATI(GLenum modeRGB, GLenum modeA)
+{
+	glBlendEquationSeparate(modeRGB, modeA);
+}
+
+GB_API void glMultiDrawArraysSUN(GLenum mode, GLint *first, GLsizei *count,
+				 GLsizei primcount)
+{
+	glMultiDrawArrays(mode, first, count, primcount);
+}
+
+GB_API void glMultiDrawElementsSUN(GLenum mode, const GLsizei *count,
+				   GLenum type, const void *const *indices,
+				   GLsizei primcount)
+{
+	glMultiDrawElements(mode, count, type, indices, primcount);
+}
+
+/* IBM_multimode_draw_arrays: one primitive mode per draw, `modestride` bytes
+ * apart in the mode array */
+GB_API void glMultiModeDrawArraysIBM(const GLenum *mode, const GLint *first,
+				     const GLsizei *count, GLsizei primcount,
+				     GLint modestride)
+{
+	if (primcount < 0 || modestride < 0) {
+		gb_cl_gl_error(0x0501);
+		return;
+	}
+	if (!mode || !first || !count)
+		return;
+	for (GLsizei i = 0; i < primcount; i++)
+		glDrawArrays(*(const GLenum *)((const char *)mode +
+					       (size_t)i * (size_t)modestride),
+			     first[i], count[i]);
+}
+
+GB_API void glMultiModeDrawElementsIBM(const GLenum *mode, const GLsizei *count,
+				       GLenum type, const void *const *indices,
+				       GLsizei primcount, GLint modestride)
+{
+	if (primcount < 0 || modestride < 0) {
+		gb_cl_gl_error(0x0501);
+		return;
+	}
+	if (!mode || !count || !indices)
+		return;
+	for (GLsizei i = 0; i < primcount; i++)
+		glDrawElements(*(const GLenum *)((const char *)mode +
+						 (size_t)i * (size_t)modestride),
+			       count[i], type, indices[i]);
 }
 
 /* ---- EXT_vertex_array pointer spellings (extra `count`, unused here) ------------------- */

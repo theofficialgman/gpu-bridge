@@ -293,7 +293,7 @@ static const char *stat_name(unsigned slot)
 		"Opx_GLXFBConfigs", "Opx_BufferRead", "Opx_EglDevice", "Opx_DeviceString",
 		"Opx_SelectBuffer", "Opx_RenderMode", "Opx_Ping",
 		"Opx_DebugCallback", "Opx_DebugStr", "Opx_BlobFuncs",
-		"Opx_EglDebug", "Opx_ObjPtrLabel",
+		"Opx_EglDebug", "Opx_ObjPtrLabel", "Opx_DriverString",
 		"Opx_ElementMax" };
 	if (slot < GB_OP_COUNT)
 		return gb_op_names[slot];
@@ -739,18 +739,27 @@ const char *gb_cl_filter_ext(const char *list)
 }
 
 /* Filtered GL extension list, cached per context id. */
+static unsigned g_ext_gen; /* bumped when a context is destroyed */
+
+void gb_cl_ext_list_invalidate(void)
+{
+	__atomic_add_fetch(&g_ext_gen, 1, __ATOMIC_RELAXED);
+}
+
 const struct gb_extlist *gb_cl_ext_list(void)
 {
 	static struct {
 		uint32_t ctx_id;
+		unsigned gen;
 		struct gb_extlist l;
 	} cache;
 	static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
 	struct gb_ctxstate *st = gb_cur_state();
 	uint32_t id = st ? st->ctx_id : 0;
+	unsigned gen = __atomic_load_n(&g_ext_gen, __ATOMIC_RELAXED);
 
 	pthread_mutex_lock(&mu);
-	if (cache.l.joined && cache.ctx_id == id) {
+	if (cache.l.joined && cache.ctx_id == id && cache.gen == gen) {
 		pthread_mutex_unlock(&mu);
 		return &cache.l;
 	}
@@ -782,6 +791,7 @@ const struct gb_extlist *gb_cl_ext_list(void)
 	pthread_mutex_lock(&mu);
 	free(cache.l.names);
 	cache.ctx_id = id;
+	cache.gen = gen;
 	cache.l.joined = joined;
 	cache.l.names = names;
 	cache.l.n = names ? k : 0;

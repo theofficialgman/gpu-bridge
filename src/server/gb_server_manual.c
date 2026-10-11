@@ -588,6 +588,28 @@ bad:
 	gb_sv_proto_error(t, h);
 }
 
+static void h_driver_string(struct gb_sth *t, const struct gb_cmd_hdr *h,
+			    struct gb_r *r)
+{
+	uint32_t dpy = gb_r_u32(r), which = gb_r_u32(r);
+
+	if (r->err) {
+		gb_sv_proto_error(t, h);
+		return;
+	}
+	GB_NATIVE(eglGetDisplayDriverName, const char *, (EGLDisplay));
+	GB_NATIVE(eglGetDisplayDriverConfig, char *, (EGLDisplay));
+	const char *s = NULL;
+	EGLDisplay d = (EGLDisplay)gb_h2p(HK_DISPLAY, dpy);
+
+	if (which == 0 && fn_eglGetDisplayDriverName)
+		s = fn_eglGetDisplayDriverName(d);
+	else if (which == 1 && fn_eglGetDisplayDriverConfig)
+		s = fn_eglGetDisplayDriverConfig(d); /* heap string: leaked
+						      * (once per call) */
+	reply_string(t, h, s);
+}
+
 /* ---- EGL_KHR_debug ------------------------------------------------------------------ */
 
 static void egl_dbg_cb(EGLenum error, const char *command, EGLint type,
@@ -1407,6 +1429,7 @@ void gb_srv_manual_dispatch(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	case GB_OPX_BlobFuncs: h_blob_funcs(t, h, r); break;
 	case GB_OPX_EglDebug: h_egl_debug(t, h, r); break;
 	case GB_OPX_ObjPtrLabel: h_obj_ptr_label(t, h, r); break;
+	case GB_OPX_DriverString: h_driver_string(t, h, r); break;
 	case GB_OPX_DebugCallback: h_debug_callback(t, h, r); break;
 	case GB_OPX_DebugStr: h_debug_str(t, h, r); break;
 	case GB_OPX_SelectBuffer: h_select_buffer(t, h, r); break;

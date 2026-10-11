@@ -43,6 +43,7 @@ enum gb_opx {
 	GB_OPX_BlobFuncs,         /* dpy, enable: EGL_ANDROID_blob_cache */
 	GB_OPX_EglDebug,          /* sub: 0 control, 1 label, 2 query (EGL_KHR_debug) */
 	GB_OPX_ObjPtrLabel,       /* sync handle, bufsize -> len, label */
+	GB_OPX_DriverString,      /* dpy, which (0 name, 1 config) -> str */
 	GB_OPX_ElementMax,        /* itype, count, byte off -> max index (i64, -1 = out of range) */
 	GB_OPX_END
 };

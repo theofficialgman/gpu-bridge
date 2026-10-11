@@ -137,7 +137,8 @@ for t in ("GLfloat", "GLclampf"):
 for t in ("GLdouble", "GLclampd"):
     VAL[t] = ("f64", 8)
 for t in ("GLint64", "GLint64EXT", "GLintptr", "GLsizeiptr", "GLintptrARB",
-          "GLsizeiptrARB", "EGLAttrib", "EGLnsecsANDROID", "int64_t"):
+          "GLsizeiptrARB", "EGLAttrib", "EGLAttribKHR", "EGLnsecsANDROID",
+          "int64_t"):
     VAL[t] = ("i64", 8)
 for t in ("GLuint64", "GLuint64EXT", "EGLuint64KHR", "EGLTime", "EGLTimeKHR",
           "uint64_t", "unsigned long", "EGLuint64NV"):
@@ -157,7 +158,7 @@ ELEM = {}
 for t in ("GLchar", "GLcharARB", "GLbyte", "GLubyte", "GLboolean", "char",
           "void", "GLvoid"):
     ELEM[t] = ("raw", 1)
-for t in ("GLshort", "GLushort", "GLhalf"):
+for t in ("GLshort", "GLushort", "GLhalf", "GLhalfNV"):
     ELEM[t] = ("raw", 2)
 for t in ("GLint", "GLuint", "GLenum", "GLfloat", "GLsizei", "GLfixed",
           "GLbitfield", "EGLint", "EGLBoolean", "EGLenum", "int",
@@ -166,7 +167,7 @@ for t in ("GLint", "GLuint", "GLenum", "GLfloat", "GLsizei", "GLfixed",
 for t in ("GLint64", "GLuint64", "GLdouble", "GLint64EXT", "GLuint64EXT",
           "int64_t", "uint64_t", "GLclampd"):
     ELEM[t] = ("raw", 8)
-for t in ("GLintptr", "GLsizeiptr", "EGLAttrib", "GLintptrARB",
+for t in ("GLintptr", "GLsizeiptr", "EGLAttrib", "EGLAttribKHR", "GLintptrARB",
           "GLsizeiptrARB", "unsigned long"):
     ELEM[t] = ("widen", 8)
 for t in HANDLES:
@@ -1151,10 +1152,14 @@ def main():
                             "\n}\n\n")
                 elif st == "unsupported":
                     f.write(emit_client_stub(c) + "\n\n")
+            for n in sorted(cfg.EXTRA_PROCS):
+                f.write(f"extern void {n}();\n")
             f.write("const struct gb_proc gb_proc_table[] = {\n")
             for n in order:
                 if cmds[n].status[lib] != "unsupported":
                     f.write(f'\t{{ "{n}", (void *){n} }},\n')
+            for n in sorted(cfg.EXTRA_PROCS):
+                f.write(f'\t{{ "{n}", (void *){n} }},\n')
             f.write("\t{ 0, 0 }\n};\n\n")
             f.write("const struct gb_ext gb_ext_table[] = {\n")
             spec = cfg.LIBS[lib]
@@ -1163,6 +1168,10 @@ def main():
                     items = ", ".join(f'"{c}"' for c in cl)
                     f.write(f'\t{{ "{ename}", {len(cl)}, (const char *const[])'
                             f'{{ {items}{", " if cl else ""}0 }} }},\n')
+            for ename, cl in sorted(cfg.EXT_EXTRA.items()):
+                items = ", ".join(f'"{c}"' for c in cl)
+                f.write(f'\t{{ "{ename}", {len(cl)}, (const char *const[])'
+                        f'{{ {items}, 0 }} }},\n')
             for ename in sorted(cfg.EXT_NO_COMMANDS):
                 f.write(f'\t{{ "{ename}", 0, (const char *const[]){{ 0 }} }},\n')
             f.write("\t{ 0, 0, 0 }\n};\n")
