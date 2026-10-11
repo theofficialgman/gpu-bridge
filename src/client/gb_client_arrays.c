@@ -11,6 +11,8 @@
  */
 #define _GNU_SOURCE
 #include <pthread.h>
+#include <stdarg.h>
+#include <unistd.h>
 #include <stdio.h>
 
 #include "gb_client_impl.h"
@@ -43,10 +45,102 @@ out:
 	return s;
 }
 
-struct gb_ctxstate *gb_cur_state(void)
+static void trace(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void trace(const char *fmt, ...)
+{
+	static int on = -1;
+	char buf[160];
+	va_list ap;
+	int n;
+
+	if (on < 0)
+		on = getenv("GB_TRACE_OPS") != NULL;
+	if (!on)
+		return;
+	va_start(ap, fmt);
+	n = vsnprintf(buf, sizeof(buf) - 1, fmt, ap);
+	va_end(ap);
+	buf[n++] = '\n';
+	(void)!write(2, buf, (size_t)n);
+}
+
+static struct gb_ctxstate *cur_raw(void)
 {
 	struct gb_cl *cx = gb_cl_get();
 	return cx ? cx->cur : NULL;
+}
+
+/* NULL between glBegin and glEnd: see struct gb_ctxstate::in_begin. Fine for
+ * wrappers that only mirror state and otherwise forward; anything that would
+ * forward a *client pointer* (draws, gl*Pointer) must use gb_cur_state_raw()
+ * and raise the error itself, or the server would dereference it. */
+struct gb_ctxstate *gb_cur_state(void)
+{
+	struct gb_ctxstate *st = cur_raw();
+	return st && !st->in_begin ? st : NULL;
+}
+
+struct gb_ctxstate *gb_cur_state_raw(void)
+{
+	return cur_raw();
+}
+
+GB_API void glBegin(GLenum mode)
+{
+	struct gb_ctxstate *st = cur_raw();
+
+	trace("c: glBegin(%#x) in_begin=%d list=%#x", mode, st ? st->in_begin : -1,
+	      st ? st->list_mode : 0);
+
+	/* Two kinds of "inside Begin/End": immediate (the driver executes the
+	 * glBegin: all non-compilable commands, e.g. gl*Pointer, error) and
+	 * compile-time (a list is open: compilable commands such as draws are
+	 * checked while being compiled). COMPILE_AND_EXECUTE is both. */
+	if (st && !st->in_begin && !st->save_begin && mode <= 0x000E) {
+		if (st->list_mode)
+			st->save_begin = 1;
+		if (st->list_mode != 0x1300 /* COMPILE */)
+			st->in_begin = 1;
+	}
+	gbx_glBegin(mode);
+}
+
+GB_API void glEnd(void)
+{
+	struct gb_ctxstate *st = cur_raw();
+
+	trace("c: glEnd in_begin=%d list=%#x", st ? st->in_begin : -1, st ? st->list_mode : 0);
+
+	if (st) {
+		st->save_begin = 0;
+		if (st->list_mode != 0x1300)
+			st->in_begin = 0;
+	}
+	gbx_glEnd();
+}
+
+GB_API void glNewList(GLuint list, GLenum mode)
+{
+	struct gb_ctxstate *st = cur_raw();
+
+	trace("c: glNewList(%u,%#x) list=%#x in_begin=%d", list, mode,
+	      st ? st->list_mode : 0, st ? st->in_begin : -1);
+
+	if (st && !st->in_begin && !st->list_mode && list != 0 &&
+	    (mode == 0x1300 || mode == 0x1301))
+		st->list_mode = (uint16_t)mode;
+	gbx_glNewList(list, mode);
+}
+
+GB_API void glEndList(void)
+{
+	struct gb_ctxstate *st = cur_raw();
+
+	trace("c: glEndList list=%#x in_begin=%d", st ? st->list_mode : 0, st ? st->in_begin : -1);
+
+	if (st && !st->in_begin)
+		st->list_mode = 0;
+	gbx_glEndList();
 }
 
 static struct gb_vao *vao_get(struct gb_ctxstate *st, uint32_t name, int create)
@@ -174,6 +268,10 @@ int gb_arr_pointer(struct gb_ctxstate *st, int slot, int size, uint32_t type,
 	}
 	struct gb_carray *a = &st->vao->a[slot];
 
+	if (st->in_begin) { /* the driver would raise this */
+		gb_cl_gl_error(0x0502);
+		return 1;
+	}
 	a->size = size;
 	a->type = type;
 	a->normalized = (uint8_t)normalized;
@@ -222,6 +320,39 @@ static int64_t gb_cl_element_max(uint32_t itype, uint32_t count, uintptr_t off)
 	return max;
 }
 
+/* Compile a client-array draw into a display list as vertex data. Returns 1
+ * if handled; 0 to let the call be forwarded (cases not representable). */
+static int emulate_list_draw(struct gb_ctxstate *st, uint32_t mode, int indexed,
+			     int32_t first, int32_t count, uint32_t itype,
+			     const void *indices, int32_t instances,
+			     int is_instanced, int32_t basevertex)
+{
+	int ib = itype == 0x1401 ? 1 : itype == 0x1403 ? 2 : itype == 0x1405 ? 4 : 0;
+
+	if (count < 0) {
+		gb_cl_gl_error(0x0501);
+		return 1;
+	}
+	if ((is_instanced && instances != 1) ||
+	    (indexed && (st->vao->element_buffer || !ib || !indices)))
+		return 0;
+	glBegin(mode);
+	for (int32_t i = 0; i < count; i++) {
+		int64_t e;
+
+		if (!indexed)
+			e = (int64_t)first + i;
+		else
+			e = (ib == 1 ? ((const uint8_t *)indices)[i]
+			   : ib == 2 ? ((const uint16_t *)indices)[i]
+				     : ((const uint32_t *)indices)[i]) +
+			    (int64_t)basevertex;
+		glArrayElement((GLint)e);
+	}
+	glEnd();
+	return 1;
+}
+
 int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 		   int32_t first, int32_t count, uint32_t itype,
 		   const void *indices, int32_t instances, int is_instanced,
@@ -242,6 +373,36 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 	for (int i = 0; i < CA_COUNT; i++)
 		if (v->a[i].enabled && v->a[i].buffer == 0)
 			nclient++;
+	if (st->list_mode) {
+		/*
+		 * Inside glNewList: array data is read when the list is
+		 * compiled, and the server has no client pointers to read. A
+		 * draw inside Begin/End is forwarded (the driver raises the
+		 * error immediately, before touching any array, and compiles
+		 * the command as it would natively); otherwise client arrays
+		 * are compiled as immediate-mode vertices.
+		 */
+		/* client index memory counts as client data too */
+		if (!nclient && (!indexed || v->element_buffer))
+			return 0;
+		/* Never forward client pointers: the server would dereference
+		 * them (list compilation reads array data). Inside Begin/End:
+		 * executing (COMPILE_AND_EXECUTE) is an error; compile-only is
+		 * accepted silently by the drivers. */
+		if (st->in_begin) {
+			gb_cl_gl_error(0x0502);
+			return 1;
+		}
+		if (st->save_begin)
+			return 1;
+		return emulate_list_draw(st, mode, indexed, first, count, itype,
+					 indices, instances, is_instanced,
+					 basevertex);
+	}
+	if (st->in_begin) { /* draws are invalid between glBegin and glEnd */
+		gb_cl_gl_error(0x0502);
+		return 1;
+	}
 	if (nclient && ctx_is_core(st)) {
 		/* the driver would raise this; do not be more permissive */
 		gb_cl_gl_error(0x0502 /* INVALID_OPERATION */);
@@ -755,7 +916,7 @@ GB_API void glVertexAttribPointer(GLuint index, GLint size, GLenum type,
 				  GLboolean normalized, GLsizei stride,
 				  const void *pointer)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 
 	if (st && GENERIC_POINTER(index) >= 0 &&
 	    gb_arr_pointer(st, GENERIC_POINTER(index), size, type, normalized,
@@ -768,7 +929,7 @@ GB_API void glVertexAttribPointer(GLuint index, GLint size, GLenum type,
 GB_API void glVertexAttribIPointer(GLuint index, GLint size, GLenum type,
 				   GLsizei stride, const void *pointer)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 
 	if (st && GENERIC_POINTER(index) >= 0 &&
 	    gb_arr_pointer(st, GENERIC_POINTER(index), size, type, 0, 1, 0,
@@ -779,7 +940,7 @@ GB_API void glVertexAttribIPointer(GLuint index, GLint size, GLenum type,
 
 GB_API void glDrawArrays(GLenum mode, GLint first, GLsizei count)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 
 	if (st && gb_draw_client(st, mode, 0, first, count, 0, NULL, 0, 0, 0, 0))
 		return;
@@ -789,7 +950,7 @@ GB_API void glDrawArrays(GLenum mode, GLint first, GLsizei count)
 GB_API void glDrawArraysInstanced(GLenum mode, GLint first, GLsizei count,
 				  GLsizei instancecount)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 
 	if (st && gb_draw_client(st, mode, 0, first, count, 0, NULL,
 				 instancecount, 1, 0, 0))
@@ -800,7 +961,7 @@ GB_API void glDrawArraysInstanced(GLenum mode, GLint first, GLsizei count,
 GB_API void glDrawElements(GLenum mode, GLsizei count, GLenum type,
 			   const void *indices)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 
 	if (st && gb_draw_client(st, mode, 1, 0, count, type, indices, 0, 0, 0, 0))
 		return;
@@ -810,7 +971,7 @@ GB_API void glDrawElements(GLenum mode, GLsizei count, GLenum type,
 GB_API void glDrawElementsInstanced(GLenum mode, GLsizei count, GLenum type,
 				    const void *indices, GLsizei instancecount)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 
 	if (st && gb_draw_client(st, mode, 1, 0, count, type, indices,
 				 instancecount, 1, 0, 0))
@@ -821,7 +982,7 @@ GB_API void glDrawElementsInstanced(GLenum mode, GLsizei count, GLenum type,
 GB_API void glDrawRangeElements(GLenum mode, GLuint start, GLuint end,
 				GLsizei count, GLenum type, const void *indices)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 
 	if (st && gb_draw_client(st, mode, 1, 0, count, type, indices, 0, 0, 0, 0))
 		return;
@@ -1004,7 +1165,7 @@ GB_API void glEdgeFlagPointer(GLsizei stride, const void *pointer)
 GB_API void glTexCoordPointer(GLint size, GLenum type, GLsizei stride,
 			      const void *pointer)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 	int slot = CA_TEX0 + (st ? (int)(st->client_active_tex %
 					 GB_MAX_TEXUNITS) : 0);
 	FIXED_POINTER(slot, size, type, stride, pointer,
@@ -1014,7 +1175,7 @@ GB_API void glTexCoordPointer(GLint size, GLenum type, GLsizei stride,
 GB_API void glVertexAttribLPointer(GLuint index, GLint size, GLenum type,
 				   GLsizei stride, const void *pointer)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 
 	if (st && GENERIC_POINTER(index) >= 0 &&
 	    gb_arr_pointer(st, GENERIC_POINTER(index), size, type, 0, 0, 1,
@@ -1089,7 +1250,7 @@ GB_API void glDrawArraysInstancedARB(GLenum mode, GLint first, GLsizei count,
 GB_API void glDrawArraysInstancedEXT(GLenum mode, GLint start, GLsizei count,
 				     GLsizei primcount)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 
 	if (st && gb_draw_client(st, mode, 0, start, count, 0, NULL, primcount,
 				 1, 0, 0))
@@ -1102,7 +1263,7 @@ GB_API void glDrawArraysInstancedBaseInstance(GLenum mode, GLint first,
 					      GLsizei instancecount,
 					      GLuint baseinstance)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 
 	if (st && gb_draw_client(st, mode, 0, first, count, 0, NULL,
 				 instancecount, 1, 0, baseinstance))
@@ -1120,7 +1281,7 @@ GB_API void glDrawElementsInstancedARB(GLenum mode, GLsizei count, GLenum type,
 GB_API void glDrawElementsInstancedEXT(GLenum mode, GLsizei count, GLenum type,
 				       const void *indices, GLsizei primcount)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 
 	if (st && gb_draw_client(st, mode, 1, 0, count, type, indices, primcount,
 				 1, 0, 0))
@@ -1132,7 +1293,7 @@ GB_API void glDrawRangeElementsEXT(GLenum mode, GLuint start, GLuint end,
 				   GLsizei count, GLenum type,
 				   const void *indices)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 
 	if (st && gb_draw_client(st, mode, 1, 0, count, type, indices, 0, 0, 0, 0))
 		return;
@@ -1142,7 +1303,7 @@ GB_API void glDrawRangeElementsEXT(GLenum mode, GLuint start, GLuint end,
 GB_API void glDrawElementsBaseVertex(GLenum mode, GLsizei count, GLenum type,
 				     const void *indices, GLint basevertex)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 
 	if (st && gb_draw_client(st, mode, 1, 0, count, type, indices, 0, 0,
 				 basevertex, 0))
@@ -1155,7 +1316,7 @@ GB_API void glDrawRangeElementsBaseVertex(GLenum mode, GLuint start,
 					  GLenum type, const void *indices,
 					  GLint basevertex)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 
 	if (st && gb_draw_client(st, mode, 1, 0, count, type, indices, 0, 0,
 				 basevertex, 0))
@@ -1169,7 +1330,7 @@ GB_API void glDrawElementsInstancedBaseVertex(GLenum mode, GLsizei count,
 					      GLsizei instancecount,
 					      GLint basevertex)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 
 	if (st && gb_draw_client(st, mode, 1, 0, count, type, indices,
 				 instancecount, 1, basevertex, 0))
@@ -1184,7 +1345,7 @@ GB_API void glDrawElementsInstancedBaseInstance(GLenum mode, GLsizei count,
 						GLsizei instancecount,
 						GLuint baseinstance)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 
 	if (st && gb_draw_client(st, mode, 1, 0, count, type, indices,
 				 instancecount, 1, 0, baseinstance))
@@ -1197,7 +1358,7 @@ GB_API void glDrawElementsInstancedBaseVertexBaseInstance(
 	GLenum mode, GLsizei count, GLenum type, const void *indices,
 	GLsizei instancecount, GLint basevertex, GLuint baseinstance)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 
 	if (st && gb_draw_client(st, mode, 1, 0, count, type, indices,
 				 instancecount, 1, basevertex, baseinstance))
@@ -1207,11 +1368,29 @@ GB_API void glDrawElementsInstancedBaseVertexBaseInstance(
 		baseinstance);
 }
 
+/* A multi-draw with a negative primcount or any negative count is an
+ * INVALID_VALUE error that draws nothing (not "draw the valid ones"). */
+static int multidraw_counts_ok(GLsizei drawcount, const GLsizei *count)
+{
+	if (drawcount < 0) {
+		gb_cl_gl_error(0x0501);
+		return 0;
+	}
+	for (GLsizei i = 0; count && i < drawcount; i++)
+		if (count[i] < 0) {
+			gb_cl_gl_error(0x0501);
+			return 0;
+		}
+	return 1;
+}
+
 GB_API void glMultiDrawArrays(GLenum mode, const GLint *first,
 			      const GLsizei *count, GLsizei drawcount)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 
+	if (st && !multidraw_counts_ok(drawcount, count))
+		return;
 	if (st && drawcount > 0 && first && count) {
 		int client = 0;
 		for (int i = 0; i < CA_COUNT; i++)
@@ -1229,6 +1408,8 @@ GB_API void glMultiDrawArrays(GLenum mode, const GLint *first,
 GB_API void glMultiDrawElements(GLenum mode, const GLsizei *count, GLenum type,
 				const void *const *indices, GLsizei drawcount)
 {
+	if (!multidraw_counts_ok(drawcount, count))
+		return;
 	if (!count || !indices)
 		return;
 	for (GLsizei i = 0; i < drawcount; i++)
@@ -1248,6 +1429,8 @@ GB_API void glMultiDrawElementsBaseVertex(GLenum mode, const GLsizei *count,
 					  GLsizei drawcount,
 					  const GLint *basevertex)
 {
+	if (!multidraw_counts_ok(drawcount, count))
+		return;
 	if (!count || !indices || !basevertex)
 		return;
 	for (GLsizei i = 0; i < drawcount; i++)
@@ -1258,7 +1441,7 @@ GB_API void glMultiDrawElementsBaseVertex(GLenum mode, const GLsizei *count,
 GB_API void glGetVertexAttribPointerv(GLuint index, GLenum pname,
 				      void **pointer)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 
 	if (pname != 0x8645 /* VERTEX_ATTRIB_ARRAY_POINTER */) {
 		gb_cl_gl_error(0x0500);
@@ -1281,11 +1464,15 @@ GB_API void glGetVertexAttribPointervARB(GLuint index, GLenum pname,
 
 GB_API void glGetPointerv(GLenum pname, void **params)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 	int slot = -1;
 
 	if (!params)
 		return;
+	if (st && st->in_begin) {
+		gb_cl_gl_error(0x0502);
+		return;
+	}
 	switch (pname) {
 	case 0x808E: slot = CA_VERTEX; break;
 	case 0x808F: slot = CA_NORMAL; break;

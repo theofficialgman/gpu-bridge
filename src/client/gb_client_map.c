@@ -122,11 +122,15 @@ static uint32_t legacy_access_to_flags(GLenum access)
 static void *do_map(uint32_t target, uint32_t named, int64_t offset,
 		    int64_t length, uint32_t flags, int whole, int legacy)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 	uint32_t buf = named;
 
 	if (!st)
 		return NULL;
+	if (st->in_begin) {
+		gb_cl_gl_error(0x0502);
+		return NULL;
+	}
 	if (target)
 		buf = gb_state_bound(st, target);
 	if (!buf) {
@@ -206,12 +210,16 @@ static void *do_map(uint32_t target, uint32_t named, int64_t offset,
 
 static GLboolean do_unmap(uint32_t target, uint32_t named)
 {
-	struct gb_ctxstate *st = gb_cur_state();
+	struct gb_ctxstate *st = gb_cur_state_raw();
 	uint32_t buf = named;
 	struct gb_map *m;
 
 	if (!st)
 		return GL_FALSE;
+	if (st->in_begin) {
+		gb_cl_gl_error(0x0502);
+		return GL_FALSE;
+	}
 	if (target)
 		buf = gb_state_bound(st, target);
 	m = buf ? gb_state_map(st, buf) : NULL;

@@ -434,6 +434,9 @@ void gb_cl_unsupported(const char *what)
 void gb_cl_gl_error(uint32_t e)
 {
 	struct gb_cl *cx = gb_cl_get();
+	if (getenv("GB_TRACE_OPS"))
+		fprintf(stderr, "c: local GL error %#x (pending %#x)\n", e,
+			cx ? cx->gl_error : 0);
 	if (cx && !cx->gl_error)
 		cx->gl_error = e;
 }

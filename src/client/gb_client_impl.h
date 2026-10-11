@@ -106,6 +106,14 @@ struct gb_ctxstate {
 	struct gb_pixstore pack, unpack;
 	uint32_t client_active_tex; /* texture unit index */
 	int8_t core;                /* -1 unknown, 0 compat/ES, 1 core profile */
+	/* Between glBegin and glEnd nearly every other command is an error and
+	 * must not touch the shadow: gb_cur_state() hides the state then, so
+	 * wrappers forward the call and the driver raises INVALID_OPERATION.
+	 * list_mode: GL_COMPILE / GL_COMPILE_AND_EXECUTE while a list is open
+	 * (a glBegin that is only compiled does not start immediate mode). */
+	uint8_t in_begin;
+	uint8_t save_begin;  /* a glBegin was seen while compiling a list */
+	uint16_t list_mode;
 	/* glRenderMode(GL_SELECT / GL_FEEDBACK): the application's buffers */
 	uint32_t render_mode;       /* 0 = GL_RENDER */
 	GLuint *sel_ptr;
@@ -190,6 +198,7 @@ void gb_cl_xsync(Display *dpy);
 /* ---- shadow state (gb_client_arrays.c) ------------------------------------------ */
 struct gb_ctxstate *gb_state_for(uint32_t ctx_id);
 struct gb_ctxstate *gb_cur_state(void);
+struct gb_ctxstate *gb_cur_state_raw(void); /* even between glBegin/glEnd */
 int gb_cl_buf_bound(struct gb_cl *cx, int which);
 /* Buffer currently bound to a generic target (0 if none/unknown target). */
 uint32_t gb_state_bound(struct gb_ctxstate *st, uint32_t target);

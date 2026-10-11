@@ -151,6 +151,8 @@ _ARRAY_STATE = {
     "glGetFloatv", "glGetDoublev", "glGetBooleanv", "glGetInteger64v",
     # glEnable(GL_VERTEX_ARRAY) etc. is a legal alias of glEnableClientState
     "glEnable", "glDisable",
+    # begin/end and display-list nesting decide whether shadow state may change
+    "glBegin", "glEnd", "glNewList", "glEndList",
     # shader names the client has seen created (glShaderSource must not
     # read its string array for a name the driver would reject first)
     "glCreateShader", "glCreateShaderObjectARB",
