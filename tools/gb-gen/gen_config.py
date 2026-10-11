@@ -27,6 +27,20 @@ GLES_EXTENSIONS = {
     "GL_OES_vertex_array_object",
     "GL_EXT_discard_framebuffer",
 }
+# NVIDIA's ES builds expose NV-suffixed spellings of core entry points; apps
+# written for Tegra use them. All are plain aliases of well-annotated core
+# commands (no retained pointers).
+GLES_NV_ALIASES = {
+    "GL_NV_draw_buffers", "GL_NV_framebuffer_blit",
+    "GL_NV_framebuffer_multisample", "GL_NV_instanced_arrays",
+    "GL_NV_draw_instanced", "GL_NV_read_buffer", "GL_NV_copy_buffer",
+    "GL_NV_non_square_matrices", "GL_NV_viewport_array",
+    "GL_NV_polygon_mode", "GL_NV_texture_barrier",
+    "GL_NV_conditional_render", "GL_NV_copy_image",
+    "GL_NV_blend_equation_advanced", "GL_NV_internalformat_sample_query",
+    "GL_NV_timer_query",
+}
+
 GLX_EXTENSIONS = {
     "GLX_ARB_create_context", "GLX_ARB_create_context_profile",
     "GLX_ARB_create_context_robustness", "GLX_ARB_create_context_no_error",
@@ -54,7 +68,8 @@ LIBS = {
                      ("glx", "glx", GLX_VERSIONS),
                      ("gl", "gl", GL_VERSIONS)],
         "extensions": [("egl", ["egl"], (EGL_EXTENSIONS, ())),
-                       ("gl", ["gles2"], (GLES_EXTENSIONS, ())),
+                       ("gl", ["gles2"], (GLES_EXTENSIONS | GLES_NV_ALIASES,
+                                          ("GL_OES_", "GL_EXT_", "GL_KHR_"))),
                        ("glx", ["glx"], (GLX_EXTENSIONS, ())),
                        ("gl", ["gl", "glcore"],
                         (set(), ("GL_ARB_", "GL_KHR_", "GL_EXT_")))],
@@ -75,6 +90,7 @@ _MANUAL = {
         "eglGetDisplay", "eglGetPlatformDisplay", "eglGetPlatformDisplayEXT",
         "eglCreateWindowSurface", "eglCreatePlatformWindowSurface",
         "eglCreatePlatformWindowSurfaceEXT",
+        "eglCreatePlatformPixmapSurface", "eglCreatePlatformPixmapSurfaceEXT",
         "eglQueryString", "eglGetProcAddress",
         "glGetString", "glGetStringi",
         "glShaderSource", "glGetVertexAttribPointerv",
@@ -123,6 +139,8 @@ _ARRAY_STATE = {
     # shader names the client has seen created (glShaderSource must not
     # read its string array for a name the driver would reject first)
     "glCreateShader", "glCreateShaderObjectARB",
+    # pixmap XIDs belong to the application's X connection (ordered by XSync)
+    "eglCreatePixmapSurface",
     # generic buffer bindings (needed to resolve glMapBuffer(target))
     "glBindBufferBase", "glBindBufferRange",
     # BUFFER_MAPPED / ACCESS / MAP_* describe the client-side mapping
@@ -323,6 +341,48 @@ UNSUPPORTED = {
     "glDebugMessageInsert": "string with explicit length parameter",
     "glObjectLabel": "string with explicit length parameter",
     "glPushDebugGroup": "string with explicit length parameter",
+}
+
+# Extensions that add no entry points (behavior / enums only) and that the
+# registry does not list for the APIs we serve: safe to pass through.
+EXT_NO_COMMANDS = {
+    "GL_OES_EGL_sync", "GL_EXT_frag_depth", "GL_NV_bgr", "GL_NV_packed_float",
+    "GL_NV_packed_float_linear", "GL_NV_texture_array",
+    "GL_NV_texture_compression_latc", "GL_NV_texture_compression_s3tc",
+    "GL_OES_depth_texture_cube_map", "GL_EXT_multisample_compatibility",
+    "GL_EXT_compressed_ETC1_RGB8_sub_texture",
+    "GL_EXT_EGL_image_external_wrap_modes", "GL_NV_occlusion_query_samples",
+}
+
+# Vendor-suffixed spellings of core entry points (ES extensions): the public
+# symbol forwards to the core function so that the client-side shadow state
+# (client arrays, mapped buffers, divisors) sees every call.
+ALIASES = {
+    "glMapBufferRangeEXT": "glMapBufferRange",
+    "glFlushMappedBufferRangeEXT": "glFlushMappedBufferRange",
+    "glMapBufferOES": "glMapBuffer",
+    "glUnmapBufferOES": "glUnmapBuffer",
+    "glGetBufferPointervOES": "glGetBufferPointerv",
+    "glDrawElementsBaseVertexEXT": "glDrawElementsBaseVertex",
+    "glDrawElementsBaseVertexOES": "glDrawElementsBaseVertex",
+    "glDrawRangeElementsBaseVertexEXT": "glDrawRangeElementsBaseVertex",
+    "glDrawRangeElementsBaseVertexOES": "glDrawRangeElementsBaseVertex",
+    "glDrawElementsInstancedBaseVertexEXT": "glDrawElementsInstancedBaseVertex",
+    "glDrawElementsInstancedBaseVertexOES": "glDrawElementsInstancedBaseVertex",
+    "glMultiDrawElementsBaseVertexEXT": "glMultiDrawElementsBaseVertex",
+    "glDrawArraysInstancedNV": "glDrawArraysInstanced",
+    "glDrawElementsInstancedNV": "glDrawElementsInstanced",
+    "glDrawArraysInstancedBaseInstanceEXT": "glDrawArraysInstancedBaseInstance",
+    "glDrawElementsInstancedBaseInstanceEXT":
+        "glDrawElementsInstancedBaseInstance",
+    "glDrawElementsInstancedBaseVertexBaseInstanceEXT":
+        "glDrawElementsInstancedBaseVertexBaseInstance",
+    "glVertexAttribDivisorNV": "glVertexAttribDivisor",
+    "glVertexAttribDivisorEXT": "glVertexAttribDivisor",
+    "glViewportArrayvOES": "glViewportArrayv",
+    "glViewportArrayvNV": "glViewportArrayv",
+    "glScissorArrayvOES": "glScissorArrayv",
+    "glScissorArrayvNV": "glScissorArrayv",
 }
 
 # Calls after which the server's cached "current native context" is stale.

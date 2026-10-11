@@ -117,6 +117,15 @@ GB_API EGLDisplay eglGetPlatformDisplayEXT(EGLenum platform,
 	return platform_display(platform, native_display);
 }
 
+/* The server draws through its own X connection: make the application's
+ * requests (window/pixmap creation, resizes) visible first. */
+static void sync_x_for(EGLDisplay dpy)
+{
+	for (int i = 0; i < 8; i++)
+		if (g_egl_x[i].egl == dpy && g_egl_x[i].x)
+			gb_cl_xsync(g_egl_x[i].x);
+}
+
 static EGLSurface create_window_surface(EGLDisplay dpy, EGLConfig cfg,
 					uint32_t xid, const EGLint *attribs)
 {
@@ -129,9 +138,7 @@ static EGLSurface create_window_surface(EGLDisplay dpy, EGLConfig cfg,
 
 	if (!cx)
 		return EGL_NO_SURFACE;
-	for (int i = 0; i < 8; i++)
-		if (g_egl_x[i].egl == dpy && g_egl_x[i].x)
-			gb_cl_xsync(g_egl_x[i].x);
+	sync_x_for(dpy);
 	if (attribs && n < 0) {
 		gb_cl_egl_error(EGL_BAD_ATTRIBUTE);
 		return EGL_NO_SURFACE;
@@ -202,6 +209,52 @@ GB_API EGLSurface eglCreatePlatformWindowSurface(EGLDisplay dpy,
 		p = tmp;
 	}
 	return eglCreatePlatformWindowSurfaceEXT(dpy, config, native_window, p);
+}
+
+GB_API EGLSurface eglCreatePixmapSurface(EGLDisplay dpy, EGLConfig config,
+					 EGLNativePixmapType pixmap,
+					 const EGLint *attrib_list)
+{
+	sync_x_for(dpy);
+	return gbx_eglCreatePixmapSurface(dpy, config, pixmap, attrib_list);
+}
+
+GB_API EGLSurface eglCreatePlatformPixmapSurfaceEXT(EGLDisplay dpy,
+						    EGLConfig config,
+						    void *native_pixmap,
+						    const EGLint *attrib_list)
+{
+	/* EGL_EXT_platform_x11: native_pixmap points at a Pixmap. */
+	if (!native_pixmap) {
+		gb_cl_egl_error(EGL_BAD_NATIVE_PIXMAP);
+		return EGL_NO_SURFACE;
+	}
+	return eglCreatePixmapSurface(dpy, config,
+				      (EGLNativePixmapType)*(unsigned long *)
+					      native_pixmap,
+				      attrib_list);
+}
+
+GB_API EGLSurface eglCreatePlatformPixmapSurface(EGLDisplay dpy,
+						 EGLConfig config,
+						 void *native_pixmap,
+						 const EGLAttrib *attrib_list)
+{
+	EGLint tmp[GB_ATTRIB_MAX + 1];
+	const EGLint *p = NULL;
+
+	if (attrib_list) {
+		int64_t n = gb_attrib_count_EGLAttrib(
+			(const intptr_t *)attrib_list);
+		if (n < 0 || n > GB_ATTRIB_MAX) {
+			gb_cl_egl_error(EGL_BAD_ATTRIBUTE);
+			return EGL_NO_SURFACE;
+		}
+		for (int64_t i = 0; i < n; i++)
+			tmp[i] = (EGLint)attrib_list[i];
+		p = tmp;
+	}
+	return eglCreatePlatformPixmapSurfaceEXT(dpy, config, native_pixmap, p);
 }
 
 /* ---- strings -------------------------------------------------------------------------- */

@@ -33,6 +33,8 @@
 /* ES-only types the generated stubs mention (gl2ext.h cannot be included
  * next to the desktop headers). */
 typedef void *GLeglImageOES;
+typedef void (*GLDEBUGPROCKHR)(GLenum, GLenum, GLuint, GLenum, GLsizei,
+			       const GLchar *, const void *);
 
 /* Is the byte at p readable? (probe without faulting; see gb_gl_sizes.h) */
 static inline int gb_cl_addr_readable(const void *p)

@@ -124,6 +124,7 @@ for t in ("GLenum", "GLbitfield", "GLuint", "GLubyte", "GLushort", "GLboolean",
           "GLhalf", "GLhalfNV", "GLchar", "GLcharARB", "EGLBoolean", "EGLenum",
           "unsigned int", "uint32_t", "GLhandleARB",
           # X11 / GLX XIDs: 32-bit on the wire (client long may be 32-bit)
+          "EGLNativePixmapType", "EGLNativeWindowType",
           "XID", "Window", "Pixmap", "Font", "Colormap", "GLXDrawable",
           "GLXWindow", "GLXPixmap", "GLXPbuffer", "GLXContextID",
           "GLXPbufferSGIX", "GLXVideoSourceSGIX", "GLXVideoDeviceNV"):
@@ -1048,7 +1049,9 @@ def main():
         wrapped = cfg.WRAPPED[lib]
         for n in order:
             c = cmds[n]
-            if n in manual:
+            if n in cfg.ALIASES and cfg.ALIASES[n] in cmds:
+                c.status[lib] = "alias"
+            elif n in manual:
                 c.status[lib] = "manual"
             elif not c.gen:
                 c.status[lib] = "unsupported"
@@ -1115,7 +1118,8 @@ def main():
                     " * stock Khronos headers */\n")
             for n in order:
                 c = cmds[n]
-                if c.status[lib] in ("generated", "wrapped", "manual"):
+                if c.status[lib] in ("generated", "wrapped", "manual",
+                                     "alias"):
                     pl = ", ".join(f"{p['ctype']} {p['name']}"
                                    for p in c.params) or "void"
                     f.write('__attribute__((visibility("default"))) '
@@ -1129,6 +1133,15 @@ def main():
                     f.write(emit_client(c, True, op) + "\n\n")
                 elif st == "wrapped":
                     f.write(emit_client(c, False, op) + "\n\n")
+                elif st == "alias":
+                    args = ", ".join(p["name"] for p in c.params)
+                    pl = ", ".join(f"{p['ctype']} {p['name']}"
+                                   for p in c.params) or "void"
+                    core = cfg.ALIASES[n]
+                    ret = "" if c.ret.strip() == "void" else "return "
+                    f.write('__attribute__((visibility("default"))) '
+                            f"{c.ret} {n}({pl})\n{{\n\t{ret}{core}({args});"
+                            "\n}\n\n")
                 elif st == "unsupported":
                     f.write(emit_client_stub(c) + "\n\n")
             f.write("const struct gb_proc gb_proc_table[] = {\n")
@@ -1143,6 +1156,8 @@ def main():
                     items = ", ".join(f'"{c}"' for c in cl)
                     f.write(f'\t{{ "{ename}", {len(cl)}, (const char *const[])'
                             f'{{ {items}{", " if cl else ""}0 }} }},\n')
+            for ename in sorted(cfg.EXT_NO_COMMANDS):
+                f.write(f'\t{{ "{ename}", 0, (const char *const[]){{ 0 }} }},\n')
             f.write("\t{ 0, 0, 0 }\n};\n")
 
         with open(outdir / f"gb_client_{lib}_gen.h", "w") as f:
