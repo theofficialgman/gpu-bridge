@@ -259,12 +259,16 @@ static inline int64_t gb_pixel_bytes(uint32_t format, uint32_t type, int64_t w,
 	return off + stride * (h - 1) + w * bpp;
 }
 
-/* Bytes touched by a w x h x d volume (d = 1 for 2D). -1 if unknown. */
+/* Depth value meaning "this is a 1D/2D transfer": GL_UNPACK_SKIP_IMAGES and
+ * GL_UNPACK_IMAGE_HEIGHT only apply to 3D transfers and must be ignored. */
+#define GB_DEPTH_2D (-1)
+
+/* Bytes touched by a w x h x d volume. -1 if unknown. */
 static inline int64_t gb_pixel_bytes3(uint32_t format, uint32_t type,
 				      int64_t w, int64_t h, int64_t d,
 				      const struct gb_pixstore *ps)
 {
-	if (d <= 1 && ps->skip_images == 0)
+	if (d == GB_DEPTH_2D || (d == 1 && ps->skip_images == 0))
 		return gb_pixel_bytes(format, type, w, h, ps);
 	if (w < 0 || h < 0 || d < 0)
 		return -1;

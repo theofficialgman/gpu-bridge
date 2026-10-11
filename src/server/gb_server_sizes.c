@@ -171,7 +171,11 @@ int64_t gb_sv_sz_pixels_tex(struct gb_sth *t, uint32_t target, int32_t level,
 	fn_glGetTexLevelParameteriv(target, level, 0x1000 /* WIDTH */, &w);
 	fn_glGetTexLevelParameteriv(target, level, 0x1001 /* HEIGHT */, &h);
 	fn_glGetTexLevelParameteriv(target, level, 0x8071 /* DEPTH */, &d);
-	return gb_sv_pixel_bytes(GB_PM_PACK, format, type, w, h, d);
+	/* skip-images / image-height apply to 3D-like targets only */
+	int vol = target == 0x806F || target == 0x8C1A || target == 0x9009;
+
+	return gb_sv_pixel_bytes(GB_PM_PACK, format, type, w, h,
+				 vol ? d : GB_DEPTH_2D);
 }
 
 int64_t gb_sv_sz_ctex(struct gb_sth *t, uint32_t target, int32_t level)

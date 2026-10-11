@@ -110,15 +110,16 @@ int64_t gb_sv_sz_progstring(struct gb_sth *t, uint32_t target,
 #define GB_COUNT_PNAME(op, cls, pname) \
 	gb_pname_count_class((cls), (uint32_t)(pname), gb_sv_geti, NULL)
 #define GB_BYTES_pixels1(m, f, t, w) \
-	gb_sv_pixel_bytes((m), (uint32_t)(f), (uint32_t)(t), (int64_t)(w), 1, 1)
+	gb_sv_pixel_bytes((m), (uint32_t)(f), (uint32_t)(t), (int64_t)(w), 1, GB_DEPTH_2D)
 #define GB_BYTES_pixels2(m, f, t, w, h) \
 	gb_sv_pixel_bytes((m), (uint32_t)(f), (uint32_t)(t), (int64_t)(w), \
-			  (int64_t)(h), 1)
+			  (int64_t)(h), GB_DEPTH_2D)
 #define GB_BYTES_pixels3(m, f, t, w, h, d) \
 	gb_sv_pixel_bytes((m), (uint32_t)(f), (uint32_t)(t), (int64_t)(w), \
 			  (int64_t)(h), (int64_t)(d))
 #define GB_BYTES_pixel1(m, f, t) \
-	gb_sv_pixel_bytes(GB_PM_UNPACK, (uint32_t)(f), (uint32_t)(t), 1, 1, 1)
+	gb_sv_pixel_bytes(GB_PM_UNPACK, (uint32_t)(f), (uint32_t)(t), 1, 1, \
+			GB_DEPTH_2D)
 #define GB_BYTES_bitmap(m, w, h) \
 	gb_sv_bitmap_bytes((m), (int64_t)(w), (int64_t)(h))
 
