@@ -19,6 +19,7 @@ enum gb_opx {
 	GB_OPX_OpenXDisplay,      /* str                  -> handle */
 	GB_OPX_GLXString,         /* kind, dpy, screen, name -> str */
 	GB_OPX_GLXFBConfigs,      /* kind, dpy, screen, attribs -> n, ids[] */
+	GB_OPX_BufferRead,        /* mode, target|buffer, off64, len64 -> bytes */
 	GB_OPX_END
 };
 

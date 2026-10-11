@@ -435,6 +435,115 @@ static void test_core(void)
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glViewport(0, 0, W, H);
 
+	/* ---- mapped buffers (client-side shadow copy) ---- */
+	{
+		GLuint mb;
+		unsigned char init[64], back[64];
+		for (int i = 0; i < 64; i++)
+			init[i] = (unsigned char)(i * 3 + 1);
+		glGenBuffers(1, &mb);
+		glBindBuffer(GL_COPY_WRITE_BUFFER, mb);
+		glBufferData(GL_COPY_WRITE_BUFFER, sizeof(init), init,
+			     GL_DYNAMIC_DRAW);
+
+		/* read mapping sees the server's data */
+		unsigned char *p = glMapBuffer(GL_COPY_WRITE_BUFFER,
+					       GL_READ_ONLY);
+		CHECK(p != NULL, "glMapBuffer READ_ONLY");
+		if (p) {
+			CHECK(!memcmp(p, init, 64), "mapped read contents");
+			GLint mapped = 0, access = 0;
+			glGetBufferParameteriv(GL_COPY_WRITE_BUFFER,
+					       GL_BUFFER_MAPPED, &mapped);
+			glGetBufferParameteriv(GL_COPY_WRITE_BUFFER,
+					       GL_BUFFER_ACCESS, &access);
+			CHECK(mapped == 1 && access == GL_READ_ONLY,
+			      "BUFFER_MAPPED %d ACCESS 0x%x", mapped, access);
+			void *ptr = NULL;
+			glGetBufferPointerv(GL_COPY_WRITE_BUFFER,
+					    GL_BUFFER_MAP_POINTER, &ptr);
+			CHECK(ptr == p, "GL_BUFFER_MAP_POINTER");
+			/* mapping twice is an error */
+			CHECK(glMapBuffer(GL_COPY_WRITE_BUFFER,
+					  GL_READ_ONLY) == NULL &&
+			      glGetError() == GL_INVALID_OPERATION,
+			      "double map");
+			CHECK(glUnmapBuffer(GL_COPY_WRITE_BUFFER) == GL_TRUE,
+			      "unmap");
+		}
+		GLint mapped = 1;
+		glGetBufferParameteriv(GL_COPY_WRITE_BUFFER, GL_BUFFER_MAPPED,
+				       &mapped);
+		CHECK(mapped == 0, "unmapped state");
+
+		/* WRITE_ONLY keeps the bytes the app does not touch */
+		p = glMapBuffer(GL_COPY_WRITE_BUFFER, GL_WRITE_ONLY);
+		CHECK(p != NULL, "glMapBuffer WRITE_ONLY");
+		if (p) {
+			p[0] = 200;
+			p[63] = 201;
+			glUnmapBuffer(GL_COPY_WRITE_BUFFER);
+		}
+		glGetBufferSubData(GL_COPY_WRITE_BUFFER, 0, 64, back);
+		CHECK(back[0] == 200 && back[63] == 201 && back[10] == init[10] &&
+		      back[40] == init[40], "partial write keeps the rest "
+		      "(%d %d %d %d)", back[0], back[63], back[10], back[40]);
+
+		/* range mapping with explicit flush: only flushed bytes land */
+		p = glMapBufferRange(GL_COPY_WRITE_BUFFER, 16, 32,
+				     GL_MAP_WRITE_BIT |
+				     GL_MAP_FLUSH_EXPLICIT_BIT);
+		CHECK(p != NULL, "glMapBufferRange explicit flush");
+		if (p) {
+			memset(p, 0x77, 32);
+			glFlushMappedBufferRange(GL_COPY_WRITE_BUFFER, 8, 8);
+			glUnmapBuffer(GL_COPY_WRITE_BUFFER);
+		}
+		glGetBufferSubData(GL_COPY_WRITE_BUFFER, 0, 64, back);
+		/* only the flushed bytes (map offset 8..15 = buffer 24..31)
+		 * are defined to land; the rest is undefined by the spec */
+		CHECK(back[24] == 0x77 && back[31] == 0x77,
+		      "flushed bytes landed: %02x %02x", back[24], back[31]);
+
+		/* invalidate-range write replaces the whole mapped range */
+		p = glMapBufferRange(GL_COPY_WRITE_BUFFER, 0, 64,
+				     GL_MAP_WRITE_BIT |
+				     GL_MAP_INVALIDATE_BUFFER_BIT);
+		if (p) {
+			memset(p, 0x11, 64);
+			glUnmapBuffer(GL_COPY_WRITE_BUFFER);
+		}
+		glGetBufferSubData(GL_COPY_WRITE_BUFFER, 0, 64, back);
+		CHECK(back[0] == 0x11 && back[63] == 0x11, "invalidate write");
+
+		/* mapped data feeds rendering: update a vertex buffer by map */
+		glBindBuffer(GL_ARRAY_BUFFER, vbo);
+		GLfloat *vp = glMapBufferRange(GL_ARRAY_BUFFER, 0,
+					       sizeof(quad),
+					       GL_MAP_WRITE_BIT |
+					       GL_MAP_INVALIDATE_RANGE_BIT);
+		CHECK(vp != NULL, "map vertex buffer");
+		if (vp) {
+			memcpy(vp, quad, sizeof(quad));
+			glUnmapBuffer(GL_ARRAY_BUFFER);
+		}
+		glUniform4f(loc, 1.f, 0.f, 0.f, 1.f);
+		clear(0, 0, 0);
+		glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+		center(px);
+		CHECK(near_px(px, 255, 0, 0), "draw from mapped-updated VBO "
+		      "%d %d %d", px[0], px[1], px[2]);
+
+		/* persistent mappings are refused, not silently stale */
+		while (glGetError() != GL_NO_ERROR)
+			;
+		p = glMapBufferRange(GL_COPY_WRITE_BUFFER, 0, 64,
+				     GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT);
+		CHECK(p == NULL && glGetError() == GL_INVALID_OPERATION,
+		      "persistent mapping refused");
+		glDeleteBuffers(1, &mb);
+	}
+
 	/* glGetIntegeri_v: indexed query (3.1+) */
 	GLint ub = -1;
 	glGetIntegeri_v(GL_UNIFORM_BUFFER_BINDING, 0, &ub);

@@ -377,18 +377,68 @@ GB_API void glGetIntegerv(GLenum pname, GLint *data)
 	gbx_glGetIntegerv(pname, data);
 }
 
+/* Generic buffer targets other than the four with dedicated fields. */
+static int target_slot(uint32_t target)
+{
+	switch (target) {
+	case 0x8F36: return 0;   /* COPY_READ */
+	case 0x8F37: return 1;   /* COPY_WRITE */
+	case 0x8A11: return 2;   /* UNIFORM */
+	case 0x8C8E: return 3;   /* TRANSFORM_FEEDBACK */
+	case 0x90D2: return 4;   /* SHADER_STORAGE */
+	case 0x8C2A: return 5;   /* TEXTURE */
+	case 0x8F3F: return 6;   /* DRAW_INDIRECT */
+	case 0x90EE: return 7;   /* DISPATCH_INDIRECT */
+	case 0x92C0: return 8;   /* ATOMIC_COUNTER */
+	case 0x9192: return 9;   /* QUERY */
+	case 0x80EE: return 10;  /* PARAMETER */
+	default: return -1;
+	}
+}
+
+uint32_t gb_state_bound(struct gb_ctxstate *st, uint32_t target)
+{
+	switch (target) {
+	case GL_ARRAY_BUFFER_: return st->array_buffer;
+	case GL_ELEMENT_ARRAY_BUFFER_: return st->vao->element_buffer;
+	case GL_PIXEL_PACK_BUFFER_: return st->pack_buffer;
+	case GL_PIXEL_UNPACK_BUFFER_: return st->unpack_buffer;
+	default: {
+		int s = target_slot(target);
+		return s >= 0 ? st->bound[s] : 0;
+	}
+	}
+}
+
+void gb_state_bind(struct gb_ctxstate *st, uint32_t target, uint32_t buffer)
+{
+	switch (target) {
+	case GL_ARRAY_BUFFER_: st->array_buffer = buffer; return;
+	case GL_ELEMENT_ARRAY_BUFFER_: st->vao->element_buffer = buffer; return;
+	case GL_PIXEL_PACK_BUFFER_: st->pack_buffer = buffer; return;
+	case GL_PIXEL_UNPACK_BUFFER_: st->unpack_buffer = buffer; return;
+	default: {
+		int s = target_slot(target);
+		if (s >= 0)
+			st->bound[s] = buffer;
+	}
+	}
+}
+
+struct gb_map *gb_state_map(struct gb_ctxstate *st, uint32_t buffer)
+{
+	for (int i = 0; i < GB_MAX_MAPS; i++)
+		if (st->maps[i].buffer && st->maps[i].buffer == buffer)
+			return &st->maps[i];
+	return NULL;
+}
+
 static void bind_buffer(GLenum target, GLuint buffer)
 {
 	struct gb_ctxstate *st = gb_cur_state();
 
-	if (!st)
-		return;
-	switch (target) {
-	case GL_ARRAY_BUFFER_: st->array_buffer = buffer; break;
-	case GL_ELEMENT_ARRAY_BUFFER_: st->vao->element_buffer = buffer; break;
-	case GL_PIXEL_PACK_BUFFER_: st->pack_buffer = buffer; break;
-	case GL_PIXEL_UNPACK_BUFFER_: st->unpack_buffer = buffer; break;
-	}
+	if (st)
+		gb_state_bind(st, target, buffer);
 }
 
 static void delete_buffers(GLsizei n, const GLuint *buffers)
@@ -409,6 +459,9 @@ static void delete_buffers(GLsizei n, const GLuint *buffers)
 			st->unpack_buffer = 0;
 		if (st->vao->element_buffer == b)
 			st->vao->element_buffer = 0;
+		for (int t = 0; t < GB_BUF_TARGETS; t++)
+			if (st->bound[t] == b)
+				st->bound[t] = 0;
 		for (int a = 0; a < CA_COUNT; a++)
 			if (st->vao->a[a].buffer == b)
 				st->vao->a[a].buffer = 0;
@@ -425,6 +478,19 @@ GB_API void glDeleteBuffers(GLsizei n, const GLuint *buffers)
 {
 	delete_buffers(n, buffers);
 	gbx_glDeleteBuffers(n, buffers);
+}
+
+GB_API void glBindBufferBase(GLenum target, GLuint index, GLuint buffer)
+{
+	bind_buffer(target, buffer);
+	gbx_glBindBufferBase(target, index, buffer);
+}
+
+GB_API void glBindBufferRange(GLenum target, GLuint index, GLuint buffer,
+			      GLintptr offset, GLsizeiptr size)
+{
+	bind_buffer(target, buffer);
+	gbx_glBindBufferRange(target, index, buffer, offset, size);
 }
 
 GB_API void glPixelStorei(GLenum pname, GLint param)

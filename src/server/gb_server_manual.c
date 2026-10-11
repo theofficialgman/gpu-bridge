@@ -399,6 +399,68 @@ bad:
 	gb_sv_proto_error(t, h);
 }
 
+/*
+ * BufferRead: contents of a buffer range, for client-side mapping shadows.
+ *   u32 mode (0 = by target binding, 1 = by buffer name), u32 target|name,
+ *   u64 offset, u64 length  ->  u32 length + blob
+ * Desktop GL: glGetBufferSubData / glGetNamedBufferSubData. ES has neither,
+ * so a GL ES context reads through a transient READ mapping.
+ */
+static void h_buffer_read(struct gb_sth *t, const struct gb_cmd_hdr *h,
+			  struct gb_r *r)
+{
+	uint32_t mode = gb_r_u32(r), id = gb_r_u32(r);
+	uint64_t off = gb_r_u64(r), len = gb_r_u64(r);
+
+	if (r->err || len == 0 || len > GB_MAX_ARRAY_BYTES ||
+	    off > (1ull << 40) || mode > 1)
+		goto bad;
+
+	GB_NATIVE(eglGetCurrentContext, EGLContext, (void));
+	GB_NATIVE(glGetBufferSubData, void, (GLenum, GLintptr, GLsizeiptr, void *));
+	GB_NATIVE(glGetNamedBufferSubData, void,
+		  (GLuint, GLintptr, GLsizeiptr, void *));
+	GB_NATIVE(glMapBufferRange, void *,
+		  (GLenum, GLintptr, GLsizeiptr, GLbitfield));
+	GB_NATIVE(glUnmapBuffer, GLboolean, (GLenum));
+	void *buf = gb_tmp_zero(t, (size_t)len + 8);
+	if (!buf)
+		goto bad;
+	int es = fn_eglGetCurrentContext &&
+		 fn_eglGetCurrentContext() != EGL_NO_CONTEXT;
+
+	if (!es && mode == 0 && fn_glGetBufferSubData) {
+		fn_glGetBufferSubData(id, (GLintptr)off, (GLsizeiptr)len, buf);
+	} else if (!es && mode == 1 && fn_glGetNamedBufferSubData) {
+		fn_glGetNamedBufferSubData(id, (GLintptr)off, (GLsizeiptr)len,
+					   buf);
+	} else if (mode == 0 && fn_glMapBufferRange && fn_glUnmapBuffer) {
+		const void *p = fn_glMapBufferRange(id, (GLintptr)off,
+						    (GLsizeiptr)len,
+						    0x0001 /* MAP_READ_BIT */);
+		if (p) {
+			memcpy(buf, p, (size_t)len);
+			fn_glUnmapBuffer(id);
+		}
+	}
+
+	if (h->flags & GB_CMD_F_WANT_REPLY) {
+		struct gb_out o;
+		struct gb_w w;
+		uint32_t total = GB_ALIGN_UP(20, 8u) + (uint32_t)len;
+		total = GB_ALIGN_UP(total, 8u);
+		if (!gb_sv_reply_begin(t, h, &o, total)) {
+			gb_w_init(&w, o.p);
+			gb_w_u32(&w, (uint32_t)len);
+			memcpy(gb_w_blob(&w, (uint32_t)len), buf, (size_t)len);
+			gb_sv_reply_end(t, &o);
+		}
+	}
+	return;
+bad:
+	gb_sv_proto_error(t, h);
+}
+
 /* ---- client-memory vertex arrays ------------------------------------------------ */
 
 static int index_type_bytes(uint32_t type)
@@ -675,6 +737,7 @@ void gb_srv_manual_dispatch(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	case GB_OPX_OpenXDisplay: h_open_xdisplay(t, h, r); break;
 	case GB_OPX_GLXString: h_glx_string(t, h, r); break;
 	case GB_OPX_GLXFBConfigs: h_glx_fbconfigs(t, h, r); break;
+	case GB_OPX_BufferRead: h_buffer_read(t, h, r); break;
 	default: gb_sv_proto_error(t, h); break;
 	}
 }

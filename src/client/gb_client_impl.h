@@ -68,11 +68,24 @@ struct gb_vao {
 };
 
 #define GB_CLIENT_ATTRIB_STACK 16
+#define GB_MAX_MAPS 16
+#define GB_BUF_TARGETS 16
+
+/* One live glMapBuffer*(): the client holds a shadow copy of the range. */
+struct gb_map {
+	uint32_t buffer;     /* buffer object name (0 = free slot) */
+	uint32_t target;     /* target it was mapped through (0 = named API) */
+	int64_t offset, length;
+	uint32_t flags;      /* GL_MAP_* bits (legacy glMapBuffer translated) */
+	void *shadow;
+};
 
 struct gb_ctxstate {
 	struct gb_ctxstate *next;
 	uint32_t ctx_id;
 	uint32_t array_buffer, pack_buffer, unpack_buffer;
+	uint32_t bound[GB_BUF_TARGETS]; /* other generic buffer targets */
+	struct gb_map maps[GB_MAX_MAPS];
 	struct gb_vao *vao;     /* current VAO (&vao0 for the default) */
 	struct gb_vao vao0;
 	struct gb_vao *vaos;    /* named VAOs seen so far */
@@ -158,6 +171,12 @@ void gb_cl_xsync(Display *dpy);
 struct gb_ctxstate *gb_state_for(uint32_t ctx_id);
 struct gb_ctxstate *gb_cur_state(void);
 int gb_cl_buf_bound(struct gb_cl *cx, int which);
+/* Buffer currently bound to a generic target (0 if none/unknown target). */
+uint32_t gb_state_bound(struct gb_ctxstate *st, uint32_t target);
+/* Record a binding to a generic buffer target. */
+void gb_state_bind(struct gb_ctxstate *st, uint32_t target, uint32_t buffer);
+/* Active mapping of `buffer`, or NULL. */
+struct gb_map *gb_state_map(struct gb_ctxstate *st, uint32_t buffer);
 
 /* Returns 1 if the draw was handled (client arrays/indices involved or an
  * error was raised); 0 means: issue the ordinary generated call (any pointer

@@ -127,7 +127,7 @@ endif()
 # glx : GLX + desktop GL     (built as libGL.so.1 in shim{32,64}/ so an app
 #       linked against libGL.so.1 picks it up via LD_LIBRARY_PATH/RUNPATH)
 set(GB_CLIENT_COMMON src/client/gb_client.c src/client/gb_client_arrays.c
-                     src/client/gb_client_strings.c)
+                     src/client/gb_client_strings.c src/client/gb_client_map.c)
 function(gb_add_gles name proto_target)
   add_library(${name} SHARED ${GB_CLIENT_COMMON} src/client/gb_client_gl.c
               ${GB_GEN_DIR}/gb_client_gles_gen.c)

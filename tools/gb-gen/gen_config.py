@@ -75,6 +75,9 @@ MANUAL = {
         "eglQueryString", "eglGetProcAddress",
         "glGetString", "glGetStringi",
         "glShaderSource", "glGetVertexAttribPointerv",
+        # mapped buffers: client-side shadow copy (gb_client_map.c)
+        "glMapBufferRange", "glUnmapBuffer", "glFlushMappedBufferRange",
+        "glGetBufferPointerv",
     },
     "gl": {
         "glXQueryExtensionsString", "glXGetClientString",
@@ -86,6 +89,15 @@ MANUAL = {
         "glGetVertexAttribPointerv", "glGetVertexAttribPointervARB",
         "glMultiDrawElements", "glMultiDrawElementsBaseVertex",
         "glMultiDrawElementsEXT",
+        # mapped buffers: client-side shadow copy (gb_client_map.c)
+        "glMapBuffer", "glMapBufferARB", "glMapBufferRange", "glUnmapBuffer",
+        "glUnmapBufferARB", "glFlushMappedBufferRange",
+        "glGetBufferPointerv", "glGetBufferPointervARB",
+        "glMapNamedBuffer", "glMapNamedBufferEXT", "glMapNamedBufferRange",
+        "glMapNamedBufferRangeEXT", "glUnmapNamedBuffer",
+        "glUnmapNamedBufferEXT", "glFlushMappedNamedBufferRange",
+        "glFlushMappedNamedBufferRangeEXT", "glGetNamedBufferPointerv",
+        "glGetNamedBufferPointervEXT",
     },
 }
 ALL_MANUAL = set().union(*MANUAL.values())
@@ -100,6 +112,10 @@ _ARRAY_STATE = {
     "glDeleteVertexArraysOES", "glVertexAttribDivisor",
     "glVertexAttribDivisorARB",
     "glPixelStorei", "glGetError", "glGetIntegerv",
+    # generic buffer bindings (needed to resolve glMapBuffer(target))
+    "glBindBufferBase", "glBindBufferRange",
+    # BUFFER_MAPPED / ACCESS / MAP_* describe the client-side mapping
+    "glGetBufferParameteriv", "glGetBufferParameteri64v",
 }
 _POINTER_FUNCS = {
     "glVertexAttribPointer", "glVertexAttribPointerARB",

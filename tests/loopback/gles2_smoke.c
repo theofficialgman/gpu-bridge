@@ -272,8 +272,8 @@ int main(void)
 	/* The bridge must not hand out entry points it does not implement
 	 * (a driver may legally return non-NULL for anything). */
 	CHECK(eglGetProcAddress("glNotARealFunction") == NULL, "proc unknown");
-	CHECK(eglGetProcAddress("glMapBufferRange") == NULL,
-	      "unsupported entry point must be hidden");
+	CHECK(eglGetProcAddress("glMapBufferRange") != NULL,
+	      "implemented entry point must be advertised");
 	CHECK(eglGetProcAddress("glGetUniformfv") != NULL,
 	      "server-sized query must be advertised");
 #endif
