@@ -22,6 +22,8 @@ EGL_EXTENSIONS = {
     "EGL_KHR_reusable_sync",
     "EGL_ANDROID_native_fence_sync",
     "EGL_KHR_image_base",
+    "EGL_EXT_device_base", "EGL_EXT_device_enumeration",
+    "EGL_EXT_device_query", "EGL_KHR_display_reference",
 }
 GLES_EXTENSIONS = {
     "GL_OES_EGL_image",
@@ -92,6 +94,9 @@ _MANUAL = {
         "eglCreateWindowSurface", "eglCreatePlatformWindowSurface",
         "eglCreatePlatformWindowSurfaceEXT",
         "eglCreatePlatformPixmapSurface", "eglCreatePlatformPixmapSurfaceEXT",
+        # EGL_EXT_device_*: device handles are bridge ids; see OPX_EglDevice
+        "eglQueryDevicesEXT", "eglQueryDeviceStringEXT",
+        "eglQueryDeviceAttribEXT", "eglQueryDisplayAttribEXT",
         "eglQueryString", "eglGetProcAddress",
         "glGetString", "glGetStringi",
         "glShaderSource", "glGetVertexAttribPointerv",
@@ -362,6 +367,7 @@ EXT_NO_COMMANDS = {
 # symbol forwards to the core function so that the client-side shadow state
 # (client arrays, mapped buffers, divisors) sees every call.
 ALIASES = {
+    "eglQueryDisplayAttribKHR": "eglQueryDisplayAttribEXT",
     "glMapBufferRangeEXT": "glMapBufferRange",
     "glFlushMappedBufferRangeEXT": "glFlushMappedBufferRange",
     "glMapBufferOES": "glMapBuffer",

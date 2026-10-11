@@ -103,6 +103,12 @@ static EGLDisplay platform_display(EGLenum platform, void *native)
 		return x11_display_from_native(native);
 	case 0x31DD: /* EGL_PLATFORM_SURFACELESS_MESA */
 		return get_display_kind(2, 0, NULL);
+	case 0x313F: /* EGL_PLATFORM_DEVICE_EXT: native is a device handle */
+		if (!native) {
+			gb_cl_egl_error(EGL_BAD_ATTRIBUTE);
+			return EGL_NO_DISPLAY;
+		}
+		return get_display_kind(3, (uint32_t)(uintptr_t)native, NULL);
 	default:
 		gb_cl_egl_error(EGL_BAD_PARAMETER);
 		return EGL_NO_DISPLAY;
@@ -289,6 +295,103 @@ GB_API EGLImageKHR eglCreateImageKHR(EGLDisplay dpy, EGLContext ctx,
 		return EGL_NO_IMAGE_KHR;
 	}
 	return gbx_eglCreateImageKHR(dpy, ctx, target, buffer, attrib_list);
+}
+
+/* ---- EGL_EXT_device_* ----------------------------------------------------------------- */
+
+/* One request/reply; fills ok/n/value and up to `nmax` handles. */
+static int device_call(uint32_t sub, uint32_t a, uint32_t b, uint32_t *ok,
+		       uint32_t *n, uint64_t *value, uint32_t *hs,
+		       uint32_t nmax)
+{
+	struct gb_cl *cx = gb_cl_get();
+	struct gb_out o;
+	struct gb_w w;
+
+	if (!cx || gb_cl_msg_begin(cx, &o, &w, GB_OPX_EglDevice, 32,
+				   GB_CMD_F_WANT_REPLY))
+		return -1;
+	gb_w_u32(&w, sub);
+	gb_w_u32(&w, a);
+	gb_w_u32(&w, b);
+	gb_cl_end(cx, &o);
+
+	struct gb_in in;
+	if (gb_cl_wait_reply(cx, &in, GB_OPX_EglDevice))
+		return -1;
+	struct gb_r r;
+	gb_r_init(&r, in.p, in.size);
+	*ok = gb_r_u32(&r);
+	*n = gb_r_u32(&r);
+	*value = gb_r_u64(&r);
+	for (uint32_t i = 0; *ok && i < *n && i < nmax; i++)
+		hs[i] = gb_r_u32(&r);
+	int bad = r.err;
+	gb_in_release(&in);
+	return bad ? -1 : 0;
+}
+
+GB_API EGLBoolean eglQueryDevicesEXT(EGLint max_devices,
+				     EGLDeviceEXT *devices, EGLint *num_devices)
+{
+	uint32_t ok = 0, n = 0, hs[16];
+	uint64_t v;
+
+	/* EGL_EXT_device_enumeration: BAD_PARAMETER if max_devices <= 0 and
+	 * devices is not NULL, or if num_devices is NULL. */
+	if ((max_devices <= 0 && devices) || !num_devices) {
+		gb_cl_egl_error(EGL_BAD_PARAMETER);
+		return EGL_FALSE;
+	}
+	if (!devices)
+		max_devices = 0;
+	if (device_call(0, (uint32_t)max_devices, 0, &ok, &n, &v, hs, 16) ||
+	    !ok)
+		return EGL_FALSE;
+	*num_devices = (EGLint)n;
+	for (uint32_t i = 0; i < n && i < 16 && (EGLint)i < max_devices; i++)
+		devices[i] = (EGLDeviceEXT)(uintptr_t)hs[i];
+	return EGL_TRUE;
+}
+
+GB_API const char *eglQueryDeviceStringEXT(EGLDeviceEXT device, EGLint name)
+{
+	return gb_cl_fetch_string(GB_OPX_DeviceString,
+				  (uint32_t)(uintptr_t)device, (uint32_t)name);
+}
+
+GB_API EGLBoolean eglQueryDeviceAttribEXT(EGLDeviceEXT device, EGLint attribute,
+					  EGLAttrib *value)
+{
+	uint32_t ok = 0, n = 0;
+	uint64_t v = 0;
+
+	if (!value) {
+		gb_cl_egl_error(EGL_BAD_PARAMETER);
+		return EGL_FALSE;
+	}
+	if (device_call(2, (uint32_t)(uintptr_t)device, (uint32_t)attribute,
+			&ok, &n, &v, NULL, 0) || !ok)
+		return EGL_FALSE;
+	*value = (EGLAttrib)v;
+	return EGL_TRUE;
+}
+
+GB_API EGLBoolean eglQueryDisplayAttribEXT(EGLDisplay dpy, EGLint attribute,
+					   EGLAttrib *value)
+{
+	uint32_t ok = 0, n = 0;
+	uint64_t v = 0;
+
+	if (!value) {
+		gb_cl_egl_error(EGL_BAD_PARAMETER);
+		return EGL_FALSE;
+	}
+	if (device_call(3, (uint32_t)(uintptr_t)dpy, (uint32_t)attribute, &ok,
+			&n, &v, NULL, 0) || !ok)
+		return EGL_FALSE;
+	*value = (EGLAttrib)v;
+	return EGL_TRUE;
 }
 
 /* ---- strings -------------------------------------------------------------------------- */

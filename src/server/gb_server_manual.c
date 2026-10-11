@@ -156,6 +156,9 @@ static void h_get_display(struct gb_sth *t, const struct gb_cmd_hdr *h,
 							NULL);
 		if (x && d == EGL_NO_DISPLAY && fn_eglGetDisplay)
 			d = fn_eglGetDisplay((EGLNativeDisplayType)x);
+	} else if (kind == 3 && fn_eglGetPlatformDisplayEXT) {
+		d = fn_eglGetPlatformDisplayEXT(0x313F /* PLATFORM_DEVICE_EXT */,
+						gb_h2p(HK_DEVICE, inst), NULL);
 	} else if (kind == 0 || kind == 2) {
 		const char *plat = getenv("GB_EGL_PLATFORM");
 		if ((kind == 2 || (plat && !strcmp(plat, "surfaceless"))) &&
@@ -467,6 +470,111 @@ static void h_buffer_read(struct gb_sth *t, const struct gb_cmd_hdr *h,
 			gb_w_init(&w, o.p);
 			gb_w_u32(&w, (uint32_t)len);
 			memcpy(gb_w_blob(&w, (uint32_t)len), buf, (size_t)len);
+			gb_sv_reply_end(t, &o);
+		}
+	}
+	return;
+bad:
+	gb_sv_proto_error(t, h);
+}
+
+/*
+ * EglDevice: EGL_EXT_device_{base,enumeration,query}. Device pointers are
+ * translated to bridge handles in both directions.
+ *   sub 0 QueryDevices(max)           -> u32 ok, u32 num, u64 -, u32 h[n]
+ *   sub 2 DeviceAttrib(device, attr)  -> u32 ok, u32 0, u64 value
+ *   sub 3 DisplayAttrib(display, attr)-> u32 ok, u32 0, u64 value
+ * (EGL_DEVICE_EXT, the display's device, comes back as a handle.)
+ */
+static void h_device_string(struct gb_sth *t, const struct gb_cmd_hdr *h,
+			    struct gb_r *r)
+{
+	uint32_t dev = gb_r_u32(r), name = gb_r_u32(r);
+
+	if (r->err) {
+		gb_sv_proto_error(t, h);
+		return;
+	}
+	GB_NATIVE(eglQueryDeviceStringEXT, const char *, (EGLDeviceEXT, EGLint));
+	const char *str = NULL;
+
+	if (fn_eglQueryDeviceStringEXT)
+		str = fn_eglQueryDeviceStringEXT(
+			(EGLDeviceEXT)gb_h2p(HK_DEVICE, dev), (EGLint)name);
+	reply_string(t, h, str);
+}
+
+#define EGL_DEVICE_EXT_ATTR 0x322C
+#define GB_MAX_DEVICES 16
+
+static void h_egl_device(struct gb_sth *t, const struct gb_cmd_hdr *h,
+			 struct gb_r *r)
+{
+	uint32_t sub = gb_r_u32(r), a = gb_r_u32(r), b = gb_r_u32(r);
+
+	if (r->err || sub > 3 || sub == 1)
+		goto bad;
+
+	GB_NATIVE(eglQueryDevicesEXT, EGLBoolean,
+		  (EGLint, EGLDeviceEXT *, EGLint *));
+	GB_NATIVE(eglQueryDeviceAttribEXT, EGLBoolean,
+		  (EGLDeviceEXT, EGLint, EGLAttrib *));
+	GB_NATIVE(eglQueryDisplayAttribEXT, EGLBoolean,
+		  (EGLDisplay, EGLint, EGLAttrib *));
+
+	uint32_t ok = 0, n = 0;
+	uint64_t value = 0;
+	uint32_t hs[GB_MAX_DEVICES];
+
+	if (sub == 0) {
+		EGLDeviceEXT devs[GB_MAX_DEVICES];
+		EGLint num = 0, max = (EGLint)a > GB_MAX_DEVICES
+					      ? GB_MAX_DEVICES : (EGLint)a;
+
+		if (fn_eglQueryDevicesEXT &&
+		    fn_eglQueryDevicesEXT(max, max ? devs : NULL, &num)) {
+			ok = 1;
+			n = (uint32_t)num;
+			if (max > 0 && n > (uint32_t)max)
+				n = (uint32_t)max;
+			for (uint32_t i = 0; i < n; i++)
+				hs[i] = gb_p2h(HK_DEVICE, devs[i]);
+			/* total count may exceed what was asked for */
+			if (max == 0 || (EGLint)a == 0)
+				n = (uint32_t)num;
+		}
+	} else {
+		EGLAttrib v = 0;
+		EGLBoolean rc = 0;
+
+		if (sub == 2 && fn_eglQueryDeviceAttribEXT)
+			rc = fn_eglQueryDeviceAttribEXT(
+				(EGLDeviceEXT)gb_h2p(HK_DEVICE, a), (EGLint)b, &v);
+		else if (sub == 3 && fn_eglQueryDisplayAttribEXT)
+			rc = fn_eglQueryDisplayAttribEXT(
+				(EGLDisplay)gb_h2p(HK_DISPLAY, a), (EGLint)b, &v);
+		if (rc) {
+			ok = 1;
+			if (sub == 3 && b == EGL_DEVICE_EXT_ATTR)
+				value = gb_p2h(HK_DEVICE, (void *)v);
+			else
+				value = (uint64_t)v;
+		}
+	}
+
+	if (h->flags & GB_CMD_F_WANT_REPLY) {
+		struct gb_out o;
+		struct gb_w w;
+		uint32_t nh = sub == 0 && n <= GB_MAX_DEVICES && ok ? n : 0;
+		uint32_t total = GB_ALIGN_UP(16 + 16 + 4 * nh, 8u);
+
+		if (!gb_sv_reply_begin(t, h, &o, total)) {
+			gb_w_init(&w, o.p);
+			gb_w_u32(&w, ok);
+			gb_w_u32(&w, n);
+			gb_w_u64(&w, value);
+			for (uint32_t i = 0; i < nh; i++)
+				gb_w_u32(&w, hs[i]);
 			gb_sv_reply_end(t, &o);
 		}
 	}
@@ -875,6 +983,8 @@ void gb_srv_manual_dispatch(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	case GB_OPX_GLXFBConfigs: h_glx_fbconfigs(t, h, r); break;
 	case GB_OPX_BufferRead: h_buffer_read(t, h, r); break;
 	case GB_OPX_ElementMax: h_element_max(t, h, r); break;
+	case GB_OPX_EglDevice: h_egl_device(t, h, r); break;
+	case GB_OPX_DeviceString: h_device_string(t, h, r); break;
 	default: gb_sv_proto_error(t, h); break;
 	}
 }
