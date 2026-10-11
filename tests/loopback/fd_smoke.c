@@ -49,9 +49,29 @@ int main(void)
 {
 	PFNEGLGETPLATFORMDISPLAYEXTPROC gpd =
 		(void *)eglGetProcAddress("eglGetPlatformDisplayEXT");
-	EGLDisplay d = gpd ? gpd(EGL_PLATFORM_SURFACELESS_MESA,
-				 EGL_DEFAULT_DISPLAY, NULL) : EGL_NO_DISPLAY;
+	EGLDisplay d = EGL_NO_DISPLAY;
 	EGLint maj, min;
+
+	if (gpd && getenv("FD_PLATFORM") && !strcmp(getenv("FD_PLATFORM"), "device")) {
+		/* first hardware device (NVIDIA has no surfaceless platform) */
+		PFNEGLQUERYDEVICESEXTPROC qd =
+			(void *)eglGetProcAddress("eglQueryDevicesEXT");
+		PFNEGLQUERYDEVICESTRINGEXTPROC qs =
+			(void *)eglGetProcAddress("eglQueryDeviceStringEXT");
+		EGLDeviceEXT devs[8];
+		EGLint nd = 0;
+
+		if (qd && qs && qd(8, devs, &nd))
+			for (int i = 0; i < nd && d == EGL_NO_DISPLAY; i++) {
+				const char *de = qs(devs[i], EGL_EXTENSIONS);
+
+				if (de && strstr(de, "EGL_MESA_device_software"))
+					continue;
+				d = gpd(EGL_PLATFORM_DEVICE_EXT, devs[i], NULL);
+			}
+	} else if (gpd) {
+		d = gpd(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, NULL);
+	}
 
 	if (d == EGL_NO_DISPLAY || !eglInitialize(d, &maj, &min)) {
 		printf("SKIP: no display\n");
