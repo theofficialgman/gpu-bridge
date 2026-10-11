@@ -118,6 +118,11 @@ _ARRAY_STATE = {
     "glPixelStorei", "glGetError", "glGetIntegerv",
     # client-array state (size/type/stride/binding) lives in the shadow
     "glGetFloatv", "glGetDoublev", "glGetBooleanv", "glGetInteger64v",
+    # glEnable(GL_VERTEX_ARRAY) etc. is a legal alias of glEnableClientState
+    "glEnable", "glDisable",
+    # shader names the client has seen created (glShaderSource must not
+    # read its string array for a name the driver would reject first)
+    "glCreateShader", "glCreateShaderObjectARB",
     # generic buffer bindings (needed to resolve glMapBuffer(target))
     "glBindBufferBase", "glBindBufferRange",
     # BUFFER_MAPPED / ACCESS / MAP_* describe the client-side mapping

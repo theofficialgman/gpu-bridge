@@ -630,6 +630,12 @@ static void delete_buffers(GLsizei n, const GLuint *buffers)
 		GLuint b = buffers[i];
 		if (!b)
 			continue;
+		/* deleting a mapped buffer unmaps it */
+		for (int m = 0; m < GB_MAX_MAPS; m++)
+			if (st->maps[m].buffer == b) {
+				free(st->maps[m].shadow);
+				memset(&st->maps[m], 0, sizeof(st->maps[m]));
+			}
 		if (st->array_buffer == b)
 			st->array_buffer = 0;
 		if (st->pack_buffer == b)
@@ -894,6 +900,37 @@ GB_API void glDisableClientState(GLenum array)
 			gb_arr_enable(st, s, 0);
 	}
 	gbx_glDisableClientState(array);
+}
+
+/* The array enables are also accepted by glEnable/glDisable (GL 1.1). */
+GB_API void glEnable(GLenum cap)
+{
+	struct gb_ctxstate *st = gb_cur_state();
+
+	if (st && cap >= GL_VERTEX_ARRAY_ && cap <= GL_EDGE_FLAG_ARRAY_) {
+		int s = cap_slot(st, cap);
+		if (s >= 0)
+			gb_arr_enable(st, s, 1);
+	} else if (st && (cap == GL_FOG_COORD_ARRAY_ ||
+			  cap == GL_SECONDARY_COLOR_ARRAY_)) {
+		gb_arr_enable(st, cap_slot(st, cap), 1);
+	}
+	gbx_glEnable(cap);
+}
+
+GB_API void glDisable(GLenum cap)
+{
+	struct gb_ctxstate *st = gb_cur_state();
+
+	if (st && cap >= GL_VERTEX_ARRAY_ && cap <= GL_EDGE_FLAG_ARRAY_) {
+		int s = cap_slot(st, cap);
+		if (s >= 0)
+			gb_arr_enable(st, s, 0);
+	} else if (st && (cap == GL_FOG_COORD_ARRAY_ ||
+			  cap == GL_SECONDARY_COLOR_ARRAY_)) {
+		gb_arr_enable(st, cap_slot(st, cap), 0);
+	}
+	gbx_glDisable(cap);
 }
 
 GB_API void glClientActiveTexture(GLenum texture)

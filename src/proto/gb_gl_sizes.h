@@ -389,20 +389,51 @@ static inline int gb_attrib_elem_bytes(uint32_t type, int size)
 
 #define GB_ATTRIB_MAX 2048
 
+/*
+ * An application list that is not terminated where a driver would stop (for
+ * instance one whose first key is invalid) must not make the *client* walk off
+ * the end of its memory: the page holding each key is checked once as the scan
+ * enters it. The client defines GB_ATTRIB_PAGE_OK; elsewhere the data is
+ * already decoded and trusted.
+ */
+#ifndef GB_ATTRIB_PAGE_OK
+#define GB_ATTRIB_PAGE_OK(p) 1
+#endif
+
+static inline int gb_attrib_page_ok(const void *p, uintptr_t *last)
+{
+	uintptr_t pg = (uintptr_t)p >> 12;
+
+	if (pg == *last)
+		return 1;
+	*last = pg;
+	return GB_ATTRIB_PAGE_OK(p);
+}
+
 /* Number of elements including the terminating EGL_NONE, or -1. */
 static inline int64_t gb_attrib_count_EGLint(const int32_t *p)
 {
-	for (int64_t i = 0; i < GB_ATTRIB_MAX; i += 2)
+	uintptr_t last = ~(uintptr_t)0;
+
+	for (int64_t i = 0; i < GB_ATTRIB_MAX; i += 2) {
+		if (!gb_attrib_page_ok(p + i, &last))
+			return -1;
 		if (p[i] == GB_EGL_NONE)
 			return i + 1;
+	}
 	return -1;
 }
 
 static inline int64_t gb_attrib_count_EGLAttrib(const intptr_t *p)
 {
-	for (int64_t i = 0; i < GB_ATTRIB_MAX; i += 2)
+	uintptr_t last = ~(uintptr_t)0;
+
+	for (int64_t i = 0; i < GB_ATTRIB_MAX; i += 2) {
+		if (!gb_attrib_page_ok(p + i, &last))
+			return -1;
 		if (p[i] == (intptr_t)GB_EGL_NONE)
 			return i + 1;
+	}
 	return -1;
 }
 
@@ -417,8 +448,12 @@ static inline int gb_glx_is_bare_bool(int k)
 
 static inline int64_t gb_glx_attrib_count(const int *p, int visual)
 {
+	uintptr_t last = ~(uintptr_t)0;
 	int64_t i = 0;
+
 	while (i < GB_ATTRIB_MAX) {
+		if (!gb_attrib_page_ok(p + i, &last))
+			return -1;
 		if (p[i] == 0)
 			return i + 1;
 		i += (visual && gb_glx_is_bare_bool(p[i])) ? 1 : 2;

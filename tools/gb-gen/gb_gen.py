@@ -524,8 +524,10 @@ def emit_client(cmd, public, opname):
             else:
                 scan = f"gb_glx_attrib_count({n}, {1 if k[5] == 'visual' else 0})"
             L.append(f"\tint64_t __n_{n} = {n} ? {scan} : -1;")
-            L.append(f"\tif ({n} && __n_{n} < 0) {{ gb_cl_set_error(__cx, "
-                     f"__op); {retstmt} }}")
+            seterr = ("gb_cl_egl_error(0x3004); /* EGL_BAD_ATTRIBUTE */ "
+                      if k[4] == "egl" else "")
+            L.append(f"\tif ({n} && __n_{n} < 0) {{ {seterr}"
+                     f"gb_cl_set_error(__cx, __op); {retstmt} }}")
             L.append(f"\tuint32_t __l_{n} = {n} ? (uint32_t)(__n_{n} * "
                      f"{k[3]}) : GB_NULL_LEN;")
 

@@ -11,6 +11,8 @@
 
 #define _GNU_SOURCE
 #include <errno.h>
+#include <sys/uio.h>
+#include <unistd.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,6 +33,19 @@
 /* ES-only types the generated stubs mention (gl2ext.h cannot be included
  * next to the desktop headers). */
 typedef void *GLeglImageOES;
+
+/* Is the byte at p readable? (probe without faulting; see gb_gl_sizes.h) */
+static inline int gb_cl_addr_readable(const void *p)
+{
+	char c;
+	struct iovec l = { &c, 1 }, r = { (void *)p, 1 };
+	ssize_t n = process_vm_readv(getpid(), &l, 1, &r, 1, 0);
+
+	if (n == 1)
+		return 1;
+	return errno != EFAULT; /* EPERM/ENOSYS: cannot tell, assume fine */
+}
+#define GB_ATTRIB_PAGE_OK(p) gb_cl_addr_readable(p)
 
 #include "gb_carr.h"
 #include "gb_chan.h"
