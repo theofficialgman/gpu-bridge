@@ -124,7 +124,7 @@ for t in ("GLenum", "GLbitfield", "GLuint", "GLubyte", "GLushort", "GLboolean",
           "GLhalf", "GLhalfNV", "GLchar", "GLcharARB", "EGLBoolean", "EGLenum",
           "unsigned int", "uint32_t", "GLhandleARB",
           # X11 / GLX XIDs: 32-bit on the wire (client long may be 32-bit)
-          "EGLNativePixmapType", "EGLNativeWindowType",
+          "EGLNativePixmapType", "EGLNativeWindowType", "EGLClientBuffer",
           "XID", "Window", "Pixmap", "Font", "Colormap", "GLXDrawable",
           "GLXWindow", "GLXPixmap", "GLXPbuffer", "GLXContextID",
           "GLXPbufferSGIX", "GLXVideoSourceSGIX", "GLXVideoDeviceNV"):

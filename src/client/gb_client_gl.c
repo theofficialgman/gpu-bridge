@@ -257,6 +257,35 @@ GB_API EGLSurface eglCreatePlatformPixmapSurface(EGLDisplay dpy,
 	return eglCreatePlatformPixmapSurfaceEXT(dpy, config, native_pixmap, p);
 }
 
+/* EGLImage creation: GL objects and X pixmaps are named by integers that are
+ * the same on both sides; a dma-buf is a file descriptor of *this* process
+ * and would name an unrelated descriptor in the server. */
+#define GB_EGL_LINUX_DMA_BUF_EXT 0x3270
+
+GB_API EGLImage eglCreateImage(EGLDisplay dpy, EGLContext ctx, EGLenum target,
+			       EGLClientBuffer buffer,
+			       const EGLAttrib *attrib_list)
+{
+	if (target == GB_EGL_LINUX_DMA_BUF_EXT) {
+		gb_cl_unsupported("EGLImage from dma-buf (fd passing)");
+		gb_cl_egl_error(EGL_BAD_PARAMETER);
+		return EGL_NO_IMAGE;
+	}
+	return gbx_eglCreateImage(dpy, ctx, target, buffer, attrib_list);
+}
+
+GB_API EGLImageKHR eglCreateImageKHR(EGLDisplay dpy, EGLContext ctx,
+				     EGLenum target, EGLClientBuffer buffer,
+				     const EGLint *attrib_list)
+{
+	if (target == GB_EGL_LINUX_DMA_BUF_EXT) {
+		gb_cl_unsupported("EGLImage from dma-buf (fd passing)");
+		gb_cl_egl_error(EGL_BAD_PARAMETER);
+		return EGL_NO_IMAGE_KHR;
+	}
+	return gbx_eglCreateImageKHR(dpy, ctx, target, buffer, attrib_list);
+}
+
 /* ---- strings -------------------------------------------------------------------------- */
 
 GB_API const char *eglQueryString(EGLDisplay dpy, EGLint name)

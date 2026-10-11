@@ -21,6 +21,7 @@ EGL_EXTENSIONS = {
     "EGL_KHR_fence_sync",
     "EGL_KHR_reusable_sync",
     "EGL_ANDROID_native_fence_sync",
+    "EGL_KHR_image_base",
 }
 GLES_EXTENSIONS = {
     "GL_OES_EGL_image",
@@ -141,6 +142,9 @@ _ARRAY_STATE = {
     "glCreateShader", "glCreateShaderObjectARB",
     # pixmap XIDs belong to the application's X connection (ordered by XSync)
     "eglCreatePixmapSurface",
+    # EGLImage sources: GL object names / X pixmaps cross as integers; fds
+    # (dma-buf) are per-process and must not
+    "eglCreateImage", "eglCreateImageKHR",
     # generic buffer bindings (needed to resolve glMapBuffer(target))
     "glBindBufferBase", "glBindBufferRange",
     # BUFFER_MAPPED / ACCESS / MAP_* describe the client-side mapping
