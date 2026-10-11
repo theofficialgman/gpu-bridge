@@ -23,6 +23,7 @@ static int (*p_XFree)(void *);
 struct xconn {
 	struct xconn *next;
 	char *name;
+	uint32_t inst; /* application Display* identity, 0 = shared by name */
 	Display *dpy;
 };
 static struct xconn *g_conns;
@@ -63,13 +64,20 @@ void gb_x_init(void)
 	p_XFree = (int (*)(void *))dlsym(g_x11, "XFree");
 }
 
-Display *gb_x_open(const char *name)
+/*
+ * One server connection per (display name, instance). EGL displays are per
+ * native display handle: two Display* the application opened to the same X
+ * server are two EGLDisplays natively (and a driver may refuse to initialize
+ * the second), so each application Display* gets its own server connection.
+ * Instance 0 is the shared by-name connection (GLX, default display).
+ */
+Display *gb_x_open_inst(const char *name, uint32_t inst)
 {
 	Display *d = NULL;
 
 	pthread_mutex_lock(&g_xlock);
 	for (struct xconn *c = g_conns; c; c = c->next)
-		if (!strcmp(c->name, name)) {
+		if (c->inst == inst && !strcmp(c->name, name)) {
 			d = c->dpy;
 			break;
 		}
@@ -78,6 +86,7 @@ Display *gb_x_open(const char *name)
 		if (d) {
 			struct xconn *c = calloc(1, sizeof(*c));
 			c->name = strdup(name);
+			c->inst = inst;
 			c->dpy = d;
 			c->next = g_conns;
 			g_conns = c;
@@ -85,6 +94,11 @@ Display *gb_x_open(const char *name)
 	}
 	pthread_mutex_unlock(&g_xlock);
 	return d;
+}
+
+Display *gb_x_open(const char *name)
+{
+	return gb_x_open_inst(name, 0);
 }
 
 XVisualInfo *gb_x_visual(Display *dpy, uint32_t visualid, uint32_t screen)

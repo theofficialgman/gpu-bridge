@@ -276,8 +276,9 @@ What the sweep found (details and the generalised lessons are in
 Remaining 28 differences and their status are listed in STATUS.md
 ("Conformance"). The notable open ones: `glSelectBuffer`/`glFeedbackBuffer`
 (6 tests, known gap), the
-fence-sync difference (modelling gap: two `Display*` of one X display share one
-server EGLDisplay), the colorspace test (needs GLES1, which is not
+fence-sync difference (the test forks; natively EGL fails in the forked child
+and the test passes via an early-out, while the bridge supports fork and runs
+checks that are meaningless across processes), the colorspace test (needs GLES1, which is not
 implemented), and a client crash in `egl_ext_platform_device` (native fails
 that test too). `depth-clear-precision-check` is **not** a bridge problem: the
 armhf test binary itself loops forever on its `depth32` case, which a plain

@@ -249,11 +249,15 @@ Remaining differences, in groups:
 * **Flaky, passes alone:** `depthstencil-default_fb-drawpixels-24_8 samples=8`
   (passes in isolation natively and bridged; multisample depth/stencil tests
   vary run to run natively too).
-* **Understood, modelling gap:** `egl_khr_fence_sync`: the bridge maps two
-  `Display*` of the same X display to one server EGLDisplay, whereas natively
-  NVIDIA fails the second `eglInitialize`, so the test takes a path that is
-  never reached natively. Fix: key server displays by the application's
-  `Display*`, not by the display name.
+* **Understood, not a defect:** `egl_khr_fence_sync` forks a child process
+  for its second thread. Natively NVIDIA's EGL fails to initialize in the
+  forked child, so the test passes through the "failed to initialize a second
+  EGLDisplay" path. The bridge supports fork (the child reconnects to its own
+  server), so it continues into checks that only make sense within one
+  process ("sync on a display bound to another thread must fail") and reports
+  a failure. The bridge is more capable than the driver here.
+  (Server EGL displays are now also keyed by the application's `Display*`,
+  as natively; that did not change this test.)
 * **Understood, missing API:** `egl_khr_gl_colorspace linear` needs GLES1
   (`glOrthof` not found in libGLESv1_CM): the bridge does not implement the
   GLES 1.x API (only the entry points it shares with desktop GL).

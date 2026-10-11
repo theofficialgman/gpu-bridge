@@ -133,7 +133,7 @@ static int read_str(struct gb_r *r, uint32_t slen, const char **out)
 static void h_get_display(struct gb_sth *t, const struct gb_cmd_hdr *h,
 			  struct gb_r *r)
 {
-	uint32_t kind = gb_r_u32(r), slen = gb_r_u32(r);
+	uint32_t kind = gb_r_u32(r), inst = gb_r_u32(r), slen = gb_r_u32(r);
 	const char *s;
 
 	if (r->err || read_str(r, slen, &s))
@@ -145,7 +145,7 @@ static void h_get_display(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	EGLDisplay d = EGL_NO_DISPLAY;
 
 	if (kind == 1 && s) {
-		void *x = gb_x_open(s);
+		void *x = gb_x_open_inst(s, inst);
 		/* Ask for the X11 platform explicitly. The legacy
 		 * eglGetDisplay() *guesses* the platform from the pointer and
 		 * from the inherited EGL_PLATFORM environment variable (a

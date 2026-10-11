@@ -10,7 +10,7 @@
 
 enum gb_opx {
 	GB_OPX_BASE = 0x10000,
-	GB_OPX_GetDisplay,        /* kind, str            -> handle */
+	GB_OPX_GetDisplay,        /* kind, inst, str      -> handle */
 	GB_OPX_QueryString,       /* dpy, name            -> str   */
 	GB_OPX_GetString,         /* name, index          -> str   */
 	GB_OPX_ShaderSource,      /* shader, count, blob  (async)  */

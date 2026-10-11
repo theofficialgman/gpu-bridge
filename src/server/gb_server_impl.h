@@ -85,6 +85,7 @@ void gb_sv_proto_error(struct gb_sth *t, const struct gb_cmd_hdr *req);
 /* ---- X11 (loaded with dlopen; no link-time dependency) -------------------- */
 void gb_x_init(void);
 Display *gb_x_open(const char *name);
+Display *gb_x_open_inst(const char *name, uint32_t inst);
 XVisualInfo *gb_x_visual(Display *dpy, uint32_t visualid, uint32_t screen);
 void gb_x_free(void *p);
 

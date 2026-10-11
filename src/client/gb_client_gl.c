@@ -17,13 +17,16 @@
 
 /* ---- EGL: display / strings / proc addresses ------------------------------------- */
 
-static EGLDisplay get_display_kind(uint32_t kind, const char *str)
+/* `inst` identifies the application's Display* (0 = by name): each one is a
+ * separate EGLDisplay on the server, as natively. */
+static EGLDisplay get_display_kind(uint32_t kind, uint32_t inst,
+				   const char *str)
 {
 	struct gb_cl *cx = gb_cl_get();
 	struct gb_out o;
 	struct gb_w w;
 	uint32_t slen = str ? (uint32_t)strlen(str) + 1 : GB_NULL_LEN;
-	uint32_t sz = 16 + 8;
+	uint32_t sz = 16 + 12;
 
 	if (!cx)
 		return EGL_NO_DISPLAY;
@@ -33,6 +36,7 @@ static EGLDisplay get_display_kind(uint32_t kind, const char *str)
 			    GB_CMD_F_WANT_REPLY))
 		return EGL_NO_DISPLAY;
 	gb_w_u32(&w, kind);
+	gb_w_u32(&w, inst);
 	gb_w_u32(&w, slen);
 	if (str)
 		memcpy(gb_w_blob(&w, slen), str, slen);
@@ -72,7 +76,7 @@ static EGLDisplay x11_display_from_native(void *native)
 {
 	if (!native) {
 		const char *d = getenv("DISPLAY");
-		return get_display_kind(1, d ? d : ":0");
+		return get_display_kind(1, 0, d ? d : ":0");
 	}
 	/* The app's Display* lives in its own address space; the server opens
 	 * its own connection to the same X server by name. */
@@ -81,13 +85,14 @@ static EGLDisplay x11_display_from_native(void *native)
 		gb_cl_egl_error(EGL_BAD_PARAMETER);
 		return EGL_NO_DISPLAY;
 	}
-	return remember_x(get_display_kind(1, name), native);
+	return remember_x(get_display_kind(1, (uint32_t)(uintptr_t)native, name),
+			  native);
 }
 
 GB_API EGLDisplay eglGetDisplay(EGLNativeDisplayType display_id)
 {
 	if (display_id == EGL_DEFAULT_DISPLAY)
-		return get_display_kind(0, NULL);
+		return get_display_kind(0, 0, NULL);
 	return x11_display_from_native((void *)display_id);
 }
 
@@ -97,7 +102,7 @@ static EGLDisplay platform_display(EGLenum platform, void *native)
 	case 0x31D5: /* EGL_PLATFORM_X11_{KHR,EXT} */
 		return x11_display_from_native(native);
 	case 0x31DD: /* EGL_PLATFORM_SURFACELESS_MESA */
-		return get_display_kind(2, NULL);
+		return get_display_kind(2, 0, NULL);
 	default:
 		gb_cl_egl_error(EGL_BAD_PARAMETER);
 		return EGL_NO_DISPLAY;
