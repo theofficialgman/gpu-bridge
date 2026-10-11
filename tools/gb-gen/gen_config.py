@@ -113,6 +113,9 @@ _MANUAL = {
         # the driver retains the buffer pointer and writes at glRenderMode:
         # the server keeps a persistent buffer and returns its contents then
         "glSelectBuffer", "glFeedbackBuffer", "glRenderMode",
+        # EXT_vertex_array: the extra `count` argument is not needed here
+        "glVertexPointerEXT", "glNormalPointerEXT", "glColorPointerEXT",
+        "glIndexPointerEXT", "glTexCoordPointerEXT", "glEdgeFlagPointerEXT",
         "glInterleavedArrays", "glGetPointerv",
         "glGetVertexAttribPointerv", "glGetVertexAttribPointervARB",
         "glMultiDrawElements", "glMultiDrawElementsBaseVertex",
@@ -199,6 +202,8 @@ LEN_OVERRIDES = {
     ("eglChooseConfig", "configs"): "config_size",
     ("eglGetConfigs", "configs"): "config_size",
     # array commands whose count is the 'count' parameter (x components)
+    ("glGetUniformIndices", "uniformNames"): "uniformCount",
+    ("glGetUniformIndices", "uniformIndices"): "uniformCount",
     ("glViewportArrayv", "v"): "count*4",
     ("glScissorArrayv", "v"): "count*4",
     ("glDepthRangeArrayv", "v"): "count*2",
@@ -362,6 +367,8 @@ EXT_NO_COMMANDS = {
     "GL_OES_depth_texture_cube_map", "GL_EXT_multisample_compatibility",
     "GL_EXT_compressed_ETC1_RGB8_sub_texture",
     "GL_EXT_EGL_image_external_wrap_modes", "GL_NV_occlusion_query_samples",
+    # desktop (enum-only)
+    "GL_EXT_texture_edge_clamp", "GL_EXT_texture_lod", "GL_EXT_Cg_shader",
 }
 
 # Vendor-suffixed spellings of core entry points (ES extensions): the public
@@ -369,6 +376,12 @@ EXT_NO_COMMANDS = {
 # (client arrays, mapped buffers, divisors) sees every call.
 ALIASES = {
     "eglQueryDisplayAttribKHR": "eglQueryDisplayAttribEXT",
+    # EXT_vertex_array / EXT_fog_coord / EXT_secondary_color spellings
+    "glArrayElementEXT": "glArrayElement",
+    "glDrawArraysEXT": "glDrawArrays",
+    "glGetPointervEXT": "glGetPointerv",
+    "glFogCoordPointerEXT": "glFogCoordPointer",
+    "glSecondaryColorPointerEXT": "glSecondaryColorPointer",
     "glMapBufferRangeEXT": "glMapBufferRange",
     "glFlushMappedBufferRangeEXT": "glFlushMappedBufferRange",
     "glMapBufferOES": "glMapBuffer",

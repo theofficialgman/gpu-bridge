@@ -1306,6 +1306,44 @@ GB_API void glGetPointerv(GLenum pname, void **params)
 	*params = st ? (void *)st->vao->a[slot].ptr : NULL;
 }
 
+/* ---- EXT_vertex_array pointer spellings (extra `count`, unused here) ------------------- */
+
+GB_API void glVertexPointerEXT(GLint size, GLenum type, GLsizei stride,
+			       GLsizei count, const void *pointer)
+{
+	glVertexPointer(size, type, stride, pointer);
+}
+
+GB_API void glNormalPointerEXT(GLenum type, GLsizei stride, GLsizei count,
+			       const void *pointer)
+{
+	glNormalPointer(type, stride, pointer);
+}
+
+GB_API void glColorPointerEXT(GLint size, GLenum type, GLsizei stride,
+			      GLsizei count, const void *pointer)
+{
+	glColorPointer(size, type, stride, pointer);
+}
+
+GB_API void glIndexPointerEXT(GLenum type, GLsizei stride, GLsizei count,
+			      const void *pointer)
+{
+	glIndexPointer(type, stride, pointer);
+}
+
+GB_API void glTexCoordPointerEXT(GLint size, GLenum type, GLsizei stride,
+				 GLsizei count, const void *pointer)
+{
+	glTexCoordPointer(size, type, stride, pointer);
+}
+
+GB_API void glEdgeFlagPointerEXT(GLsizei stride, GLsizei count,
+				 const GLboolean *pointer)
+{
+	glEdgeFlagPointer(stride, pointer);
+}
+
 /* ---- selection / feedback ------------------------------------------------------------ */
 
 #define GB_RM_FEEDBACK 0x1C01
