@@ -1374,6 +1374,15 @@ GB_API GLint glRenderMode(GLenum mode)
 	uint32_t newmode = gb_r_u32(&r), n = gb_r_u32(&r);
 	const void *words = n ? gb_r_blob(&r, 4u * n) : NULL;
 
+	if (getenv("GB_TRACE_OPS")) {
+		fprintf(stderr, "glRenderMode(%#x) prev=%#x -> ret=%d new=%#x "
+			"words=%u:", mode, st ? st->render_mode : 0, ret,
+			newmode, n);
+		for (uint32_t i = 0; words && i < n && i < 24; i++)
+			fprintf(stderr, " %u", ((const uint32_t *)words)[i]);
+		fprintf(stderr, "\n");
+	}
+
 	if (!r.err && st) {
 		uint32_t prev = st->render_mode;
 		/* the finished mode's results land in the app's buffer */

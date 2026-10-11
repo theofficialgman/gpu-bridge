@@ -576,7 +576,8 @@ static void h_render_mode(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	if (h->flags & GB_CMD_F_WANT_REPLY) {
 		struct gb_out o;
 		struct gb_w w;
-		uint32_t total = GB_ALIGN_UP(16 + 12 + 4 * n, 8u);
+		/* gb_w_blob aligns to 8: account for it (header + 3 words) */
+		uint32_t total = GB_ALIGN_UP(GB_ALIGN_UP(16 + 12, 8u) + 4 * n, 8u);
 
 		if (!gb_sv_reply_begin(t, h, &o, total)) {
 			gb_w_init(&w, o.p);
