@@ -851,7 +851,8 @@ def emit_server(cmd, opname):
             L.append(f"\tif (l_{n} == GB_SRV_LEN) {{")
             L.append(f"\t\tint64_t nb_ = GB_SZS_{key}(__t, __op, {wsz}, "
                      f"{sa});")
-            L.append(f"\t\tif (nb_ < 0 || nb_ > GB_MAX_ARRAY_BYTES) nb_ = 0;")
+            L.append(f"\t\tif (nb_ < 0 || nb_ > GB_MAX_ARRAY_BYTES) "
+                     f"{{ nb_ = 0; uns_{n} = 1; }}")
             L.append(f"\t\tlr_{n} = (uint32_t)nb_; n_{n} = nb_ / {wsz};")
             L.append(f"\t\to_{n} = gb_tmp_zero(__t, (size_t)nb_ + 512);")
             L.append("\t}")
@@ -899,9 +900,13 @@ def emit_server(cmd, opname):
     # An array we could not size must not reach the driver as NULL (the
     # driver dereferences it): skip the call and raise INVALID_VALUE.
     uns = [f"uns_{p['name']}" for p in P
-           if p["k"][0] in ("arr_in", "arr_out") and p["k"][4][0] != "server"]
+           if p["k"][0] in ("arr_in", "arr_out")]
     L.append(f"\tint __skip = {' || '.join(uns) if uns else '0'};")
-    L.append("\tif (__skip) gb_sv_raise_invalid();")
+    # Format/type problems are enum errors; anything else a value error.
+    enum_err = any(p["k"][0] == "arr_out" and p["k"][4][0] == "server" and
+                   p["k"][4][1] in ("pixels_tex", "ctex") for p in P)
+    L.append("\tif (__skip) gb_sv_raise_%s();" %
+             ("enum" if enum_err else "invalid"))
     L.append("\tuint64_t __t0 = gb_stat_now();")
     L.append(f"\tif (fn_{cmd.name} && !__skip) " +
              ("ret = " if cmd.rk[0] != "void" else "") +

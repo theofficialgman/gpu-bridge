@@ -145,6 +145,7 @@ void gb_srv_scratch_free(struct gb_sth *t);
 /* Raise GL_INVALID_VALUE on the current context without side effects (used
  * when an argument cannot be sized and the call is dropped). */
 void gb_sv_raise_invalid(void);
+void gb_sv_raise_enum(void);
 
 /* GB_STATS: time spent inside the native driver call, per opcode. */
 extern int gb_stats_on;

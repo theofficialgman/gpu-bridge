@@ -216,6 +216,14 @@ void gb_sv_raise_invalid(void)
 		fn_glDeleteTextures(-1, NULL); /* INVALID_VALUE, no effect */
 }
 
+void gb_sv_raise_enum(void)
+{
+	GB_NATIVE(glBindTexture, void, (GLenum, GLuint));
+
+	if (fn_glBindTexture)
+		fn_glBindTexture(0xFFFF, 0); /* INVALID_ENUM, no effect */
+}
+
 /* The last opcodes each worker executed, dumped from a crash handler: the
  * driver crashes inside symbol-less proprietary code, so "what was the app
  * doing" is otherwise unrecoverable. */

@@ -38,13 +38,16 @@ static int flavor(void)
 		return fl;
 	e_key = e;
 	g_key = g;
-	if (e) {
-		const char *v = fn_glGetString ?
-			(const char *)fn_glGetString(GL_VERSION) : NULL;
-		fl = (v && !strncmp(v, "OpenGL ES 2", 11)) ? FL_ES2 : FL_ES3;
-	} else {
+	/* An EGL context may be desktop GL (EGL_OPENGL_API); the version string
+	 * is what tells the flavors apart ("OpenGL ES 3.2 ..." vs "4.6.0 ..."). */
+	const char *v = (e || g) && fn_glGetString ?
+		(const char *)fn_glGetString(GL_VERSION) : NULL;
+
+	if (v && !strncmp(v, "OpenGL ES", 9))
+		fl = (!strncmp(v, "OpenGL ES 2", 11) ||
+		      !strncmp(v, "OpenGL ES-CM", 12)) ? FL_ES2 : FL_ES3;
+	else
 		fl = FL_DESKTOP;
-	}
 	return fl;
 }
 
