@@ -900,6 +900,8 @@ def emit_server(cmd, opname):
              ("ret = " if cmd.rk[0] != "void" else "") +
              f"fn_{cmd.name}({args});")
     L.append("\tgb_stat_native(__op, __t0);")
+    if cmd.name in cfg.CTX_CHANGERS:
+        L.append("\t__t->ctx_valid = 0; /* current context may have changed */")
 
     if cmd.api == "egl" and cmd.rk[0] in ("val", "handle"):
         L.append(f'\tGB_EGL_TRACE("{cmd.name}", (intptr_t)ret);')

@@ -15,15 +15,27 @@
 
 /* ---- per-native-context scratch buffers for client arrays ----------------- */
 
+/*
+ * Client-memory array uploads go through one persistent scratch VBO and one
+ * scratch EBO per native context, written with glBufferSubData at a running
+ * offset (the buffer is orphaned when it wraps). The earlier version
+ * allocated a fresh store per attribute per draw with glBufferData.
+ */
+#define SCRATCH_VBO_BYTES (4u << 20)
+#define SCRATCH_EBO_BYTES (1u << 20)
+
 struct gb_scratch {
 	struct gb_scratch *next;
 	void *ctx; /* EGLContext or GLXContext (whichever is current) */
-	GLuint vbo[CA_COUNT];
-	GLuint ebo;
+	GLuint vbo, ebo;
+	size_t vbo_cap, vbo_off, ebo_cap, ebo_off;
 };
 
-static void *current_ctx_key(void)
+static void *current_ctx_key(struct gb_sth *t)
 {
+	if (t->ctx_valid)
+		return t->ctx_key;
+
 	GB_NATIVE(eglGetCurrentContext, EGLContext, (void));
 	GB_NATIVE(glXGetCurrentContext, GLXContext, (void));
 	void *k = NULL;
@@ -32,12 +44,14 @@ static void *current_ctx_key(void)
 		k = (void *)fn_eglGetCurrentContext();
 	if (!k && fn_glXGetCurrentContext)
 		k = (void *)fn_glXGetCurrentContext();
+	t->ctx_key = k;
+	t->ctx_valid = 1;
 	return k;
 }
 
 static struct gb_scratch *scratch_for(struct gb_sth *t)
 {
-	void *cur = current_ctx_key();
+	void *cur = current_ctx_key(t);
 
 	if (!cur)
 		return NULL;
@@ -474,8 +488,9 @@ struct cattr {
 
 /* Point native array state for `a` at offset 0 of the currently bound
  * ARRAY_BUFFER. */
-static void set_pointer(const struct cattr *a)
+static void set_pointer(const struct cattr *a, size_t off)
 {
+	const void *p = (const void *)(uintptr_t)off;
 	GB_NATIVE(glVertexPointer, void, (GLint, GLenum, GLsizei, const void *));
 	GB_NATIVE(glNormalPointer, void, (GLenum, GLsizei, const void *));
 	GB_NATIVE(glColorPointer, void, (GLint, GLenum, GLsizei, const void *));
@@ -499,26 +514,26 @@ static void set_pointer(const struct cattr *a)
 
 	switch (a->slot) {
 	case CA_VERTEX:
-		if (fn_glVertexPointer) fn_glVertexPointer(sz, a->type, st, NULL);
+		if (fn_glVertexPointer) fn_glVertexPointer(sz, a->type, st, p);
 		break;
 	case CA_NORMAL:
-		if (fn_glNormalPointer) fn_glNormalPointer(a->type, st, NULL);
+		if (fn_glNormalPointer) fn_glNormalPointer(a->type, st, p);
 		break;
 	case CA_COLOR:
-		if (fn_glColorPointer) fn_glColorPointer(sz, a->type, st, NULL);
+		if (fn_glColorPointer) fn_glColorPointer(sz, a->type, st, p);
 		break;
 	case CA_SECONDARY:
 		if (fn_glSecondaryColorPointer)
-			fn_glSecondaryColorPointer(sz, a->type, st, NULL);
+			fn_glSecondaryColorPointer(sz, a->type, st, p);
 		break;
 	case CA_FOGCOORD:
-		if (fn_glFogCoordPointer) fn_glFogCoordPointer(a->type, st, NULL);
+		if (fn_glFogCoordPointer) fn_glFogCoordPointer(a->type, st, p);
 		break;
 	case CA_EDGEFLAG:
-		if (fn_glEdgeFlagPointer) fn_glEdgeFlagPointer(st, NULL);
+		if (fn_glEdgeFlagPointer) fn_glEdgeFlagPointer(st, p);
 		break;
 	case CA_INDEX:
-		if (fn_glIndexPointer) fn_glIndexPointer(a->type, st, NULL);
+		if (fn_glIndexPointer) fn_glIndexPointer(a->type, st, p);
 		break;
 	default:
 		if (a->slot >= CA_TEX0 && a->slot < CA_GENERIC0) {
@@ -529,21 +544,21 @@ static void set_pointer(const struct cattr *a)
 						 &old);
 				fn_glClientActiveTexture(0x84C0 +
 							 (a->slot - CA_TEX0));
-				fn_glTexCoordPointer(sz, a->type, st, NULL);
+				fn_glTexCoordPointer(sz, a->type, st, p);
 				fn_glClientActiveTexture((GLenum)old);
 			}
 		} else if (a->slot >= CA_GENERIC0 && a->slot < CA_COUNT) {
 			GLuint idx = a->slot - CA_GENERIC0;
 			if ((a->flags & GB_CA_LONG) && fn_glVertexAttribLPointer)
-				fn_glVertexAttribLPointer(idx, sz, a->type, st, NULL);
+				fn_glVertexAttribLPointer(idx, sz, a->type, st, p);
 			else if ((a->flags & GB_CA_INTEGER) &&
 				 fn_glVertexAttribIPointer)
-				fn_glVertexAttribIPointer(idx, sz, a->type, st, NULL);
+				fn_glVertexAttribIPointer(idx, sz, a->type, st, p);
 			else if (fn_glVertexAttribPointer)
 				fn_glVertexAttribPointer(
 					idx, sz, a->type,
 					(GLboolean)!!(a->flags & GB_CA_NORMALIZED),
-					st, NULL);
+					st, p);
 		}
 		break;
 	}
@@ -555,6 +570,7 @@ static void set_pointer(const struct cattr *a)
  *   u32 nverts (vertices of each non-divisor array uploaded from vertex 0),
  *   u32 ibytes, u32 nattr, u32 instances (0 = not instanced),
  *   i32 basevertex, u32 baseinstance,
+ *   u32 old_abo, u32 old_ebo (bindings to restore afterwards),
  *   per attribute (7 x u32): slot, size, type, stride, flags, divisor, len
  *   blobs: indices (if ibytes), then each attribute's data in order.
  */
@@ -568,6 +584,7 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		 instances = gb_r_u32(r);
 	int32_t basevertex = (int32_t)gb_r_u32(r);
 	uint32_t baseinstance = gb_r_u32(r);
+	uint32_t old_abo = gb_r_u32(r), old_ebo = gb_r_u32(r);
 
 	if (r->err || kind > 1 || count < 0 || nattr > CA_COUNT ||
 	    (nattr == 0 && kind != 1) || nverts > (1u << 26) ||
@@ -642,7 +659,8 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	GB_NATIVE(glGenBuffers, void, (GLsizei, GLuint *));
 	GB_NATIVE(glBindBuffer, void, (GLenum, GLuint));
 	GB_NATIVE(glBufferData, void, (GLenum, GLsizeiptr, const void *, GLenum));
-	GB_NATIVE(glGetIntegerv, void, (GLenum, GLint *));
+	GB_NATIVE(glBufferSubData, void,
+		  (GLenum, GLintptr, GLsizeiptr, const void *));
 	GB_NATIVE(glDrawArrays, void, (GLenum, GLint, GLsizei));
 	GB_NATIVE(glDrawArraysInstanced, void, (GLenum, GLint, GLsizei, GLsizei));
 	GB_NATIVE(glDrawArraysInstancedBaseInstance, void,
@@ -658,28 +676,64 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		  (GLenum, GLsizei, GLenum, const void *, GLsizei, GLint,
 		   GLuint));
 	if (!fn_glGenBuffers || !fn_glBindBuffer || !fn_glBufferData ||
-	    !fn_glGetIntegerv)
+	    !fn_glBufferSubData)
 		return;
 
 	struct gb_scratch *s = scratch_for(t);
 	if (!s)
 		return; /* no current context: native would error anyway */
 
-	GLint old_abo = 0, old_ebo = 0;
-	fn_glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &old_abo);
-	if (kind == 1)
-		fn_glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &old_ebo);
-
-	for (uint32_t i = 0; i < nattr; i++) {
-		GLuint *vbo = &s->vbo[a[i].slot];
-		if (!*vbo)
-			fn_glGenBuffers(1, vbo);
-		fn_glBindBuffer(GL_ARRAY_BUFFER, *vbo);
-		fn_glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)a[i].len, data[i],
-				GL_STREAM_DRAW);
-		set_pointer(&a[i]);
+	/* ---- vertex data: one buffer, running offset, orphan on wrap ---- */
+	size_t vtotal = 0;
+	for (uint32_t i = 0; i < nattr; i++)
+		vtotal += GB_ALIGN_UP(a[i].len, 16u);
+	if (nattr) {
+		if (!s->vbo)
+			fn_glGenBuffers(1, &s->vbo);
+		fn_glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
+		if (s->vbo_cap < vtotal || s->vbo_off + vtotal > s->vbo_cap) {
+			size_t cap = s->vbo_cap ? s->vbo_cap : SCRATCH_VBO_BYTES;
+			if (cap < vtotal)
+				cap = vtotal;
+			fn_glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)cap, NULL,
+					GL_STREAM_DRAW); /* orphan */
+			s->vbo_cap = cap;
+			s->vbo_off = 0;
+		}
+		for (uint32_t i = 0; i < nattr; i++) {
+			fn_glBufferSubData(GL_ARRAY_BUFFER,
+					   (GLintptr)s->vbo_off,
+					   (GLsizeiptr)a[i].len, data[i]);
+			set_pointer(&a[i], s->vbo_off);
+			s->vbo_off += GB_ALIGN_UP(a[i].len, 16u);
+		}
 	}
 
+	/* ---- indices ---- */
+	size_t ioff = 0;
+	if (kind == 1) {
+		size_t itotal = GB_ALIGN_UP(ibytes, 16u);
+		if (!s->ebo)
+			fn_glGenBuffers(1, &s->ebo);
+		fn_glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s->ebo);
+		if (s->ebo_cap < itotal || s->ebo_off + itotal > s->ebo_cap) {
+			size_t cap = s->ebo_cap ? s->ebo_cap : SCRATCH_EBO_BYTES;
+			if (cap < itotal)
+				cap = itotal;
+			fn_glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)cap,
+					NULL, GL_STREAM_DRAW);
+			s->ebo_cap = cap;
+			s->ebo_off = 0;
+		}
+		if (ibytes)
+			fn_glBufferSubData(GL_ELEMENT_ARRAY_BUFFER,
+					   (GLintptr)s->ebo_off,
+					   (GLsizeiptr)ibytes, idx);
+		ioff = s->ebo_off;
+		s->ebo_off += itotal;
+	}
+
+	const void *ip = (const void *)(uintptr_t)ioff;
 	if (kind == 0) {
 		if (!instances) {
 			if (fn_glDrawArrays)
@@ -693,32 +747,28 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 						 (GLsizei)instances);
 		}
 	} else {
-		if (!s->ebo)
-			fn_glGenBuffers(1, &s->ebo);
-		fn_glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s->ebo);
-		fn_glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)ibytes,
-				idx, GL_STREAM_DRAW);
 		if (instances || baseinstance) {
 			GLsizei n = instances ? (GLsizei)instances : 1;
 			if (fn_glDrawElementsInstancedBaseVertexBaseInstance)
 				fn_glDrawElementsInstancedBaseVertexBaseInstance(
-					mode, count, itype, NULL, n, basevertex,
+					mode, count, itype, ip, n, basevertex,
 					baseinstance);
 			else if (basevertex && fn_glDrawElementsInstancedBaseVertex)
 				fn_glDrawElementsInstancedBaseVertex(
-					mode, count, itype, NULL, n, basevertex);
+					mode, count, itype, ip, n, basevertex);
 			else if (fn_glDrawElementsInstanced)
 				fn_glDrawElementsInstanced(mode, count, itype,
-							   NULL, n);
+							   ip, n);
 		} else if (basevertex && fn_glDrawElementsBaseVertex) {
-			fn_glDrawElementsBaseVertex(mode, count, itype, NULL,
+			fn_glDrawElementsBaseVertex(mode, count, itype, ip,
 						    basevertex);
 		} else if (fn_glDrawElements) {
-			fn_glDrawElements(mode, count, itype, NULL);
+			fn_glDrawElements(mode, count, itype, ip);
 		}
-		fn_glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, (GLuint)old_ebo);
+		fn_glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, old_ebo);
 	}
-	fn_glBindBuffer(GL_ARRAY_BUFFER, (GLuint)old_abo);
+	if (nattr)
+		fn_glBindBuffer(GL_ARRAY_BUFFER, old_abo);
 	return;
 bad:
 	gb_sv_proto_error(t, h);

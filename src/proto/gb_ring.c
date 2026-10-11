@@ -9,6 +9,7 @@
 #include <linux/futex.h>
 #include <poll.h>
 #include <sched.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/syscall.h>
 #include <time.h>
@@ -266,11 +267,25 @@ void *gb_ring_reserve(struct gb_ring *r, uint32_t bytes, int64_t timeout_ns)
 
 /* ---- consumer ---------------------------------------------------------- */
 
+/* Spin budget in ns for waiting on data (0 = the default pause/yield count).
+ * GB_SPIN_US overrides it; used to study wake-up latency on slow SoCs. */
+static int64_t spin_budget_ns(void)
+{
+	static int64_t v = -2;
+
+	if (v == -2) {
+		const char *e = getenv("GB_SPIN_US");
+		v = e ? atoll(e) * 1000 : 0;
+	}
+	return v;
+}
+
 int gb_ring_wait_data(struct gb_ring *r, int64_t timeout_ns)
 {
 	struct gb_ring_ctrl *c = r->ctrl;
 	int64_t deadline = 0;
 	int spin = 0;
+	int64_t budget = spin_budget_ns(), t_spin0 = 0;
 
 	for (;;) {
 		uint32_t t = atomic_load_explicit(&c->tail,
@@ -285,7 +300,15 @@ int gb_ring_wait_data(struct gb_ring *r, int64_t timeout_ns)
 		}
 		if (timeout_ns == 0)
 			return -ETIMEDOUT;
-		if (spin < SPIN_ITERATIONS) {
+		if (budget > 0) {
+			/* time-bounded spin: pause, with a yield every so often */
+			if (!t_spin0)
+				t_spin0 = now_ns();
+			if (now_ns() - t_spin0 < budget) {
+				spin_step(spin++ & 63);
+				continue;
+			}
+		} else if (spin < SPIN_ITERATIONS) {
 			spin_step(spin++);
 			continue;
 		}

@@ -310,7 +310,7 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 		na++;
 	}
 
-	uint32_t sz = 16 + 40 + 28 * na;
+	uint32_t sz = 16 + 48 + 28 * na;
 	if (ibytes)
 		sz = GB_ALIGN_UP(sz, 8u) + ibytes;
 	for (uint32_t i = 0; i < na; i++)
@@ -327,6 +327,9 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 	gb_w_u32(&w, is_instanced ? (uint32_t)instances : 0);
 	gb_w_u32(&w, (uint32_t)basevertex);
 	gb_w_u32(&w, baseinstance);
+	/* bindings the server restores afterwards (so it need not query them) */
+	gb_w_u32(&w, st->array_buffer);
+	gb_w_u32(&w, v->element_buffer);
 	for (uint32_t i = 0; i < na; i++) {
 		gb_w_u32(&w, at[i].slot);
 		gb_w_u32(&w, at[i].size);

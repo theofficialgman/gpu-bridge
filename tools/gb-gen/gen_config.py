@@ -317,3 +317,8 @@ UNSUPPORTED = {
     "glObjectLabel": "string with explicit length parameter",
     "glPushDebugGroup": "string with explicit length parameter",
 }
+
+# Calls after which the server's cached "current native context" is stale.
+CTX_CHANGERS = {"eglMakeCurrent", "eglReleaseThread", "glXMakeCurrent",
+                "glXMakeContextCurrent", "glXMakeCurrentReadSGI",
+                "glXDestroyContext", "eglDestroyContext", "eglTerminate"}
