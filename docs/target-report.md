@@ -258,7 +258,7 @@ from it are candidates for bridge bugs.
 | after fixes, run 2 | 492 | 35 | 80 | 6 | 1 | 46 |
 | run 3 | 503 | 26 | 83 | 1 | 1 | 28 |
 | run 4 | 511 | 22 | 77 | 1 | 1 | 14 (one new, fixed) |
-| run 5 (current) | 515 | 22 | 74 | 0 | 1 | 10 (4 not defects) |
+| run 5 (default vendor choice) | 515 | 22 | 74 | 0 | 1 | 10 (4 not defects) |
 
 What the sweep found (details and the generalised lessons are in
 [STATUS.md](STATUS.md), lessons 10-14):
@@ -274,17 +274,26 @@ What the sweep found (details and the generalised lessons are in
 | EGL tests "piglit_egl_get_display() failed" | `EGL_EXT_platform_base` hidden | pixmap/platform-pixmap surfaces implemented |
 | ES extension list 112 vs 195 | generator emitted 3 ES extensions | OES/EXT/KHR + NV aliases, alias wrappers |
 
-Remaining 10 differences (run 5) and their status are listed in STATUS.md
-("Conformance"). Four are not defects: `depth-clear-precision-check` (the
-armhf test binary itself loops forever on its `depth32` case; a plain Mesa
-llvmpipe run of the same armhf binary reproduces it without any bridge),
-`ppgtt_memory_alignment` (crashes natively), `egl_ext_platform_device` (fails
-natively, passes bridged) and `egl_khr_fence_sync` (the test forks; natively
-EGL fails in the forked child and the test passes via an early-out, while the
-bridge supports fork and runs checks that are meaningless across processes).
-The other six are missing features: GLES1 (`egl_khr_gl_colorspace`), the
-`GL_KHR_debug` upcall (3 context-flag tests), `EGL_ANDROID_blob_cache`
-(callbacks) and dma-buf modifiers (fd passing).
+**Native EGL tests may fall back to llvmpipe.** With the default GLVND vendor
+choice, EGL tests that use the default display resolve to Mesa (llvmpipe) on
+this device, usually because NVIDIA does not support what the test needs. Such
+tests say nothing about the layer, so the comparison is made with the vendor
+forced to NVIDIA on both sides
+(`__EGL_VENDOR_LIBRARY_FILENAMES=.../10_nvidia.json`): native NVIDIA-only 515
+pass / 21 fail / 75 skip / 1 crash; bridged NVIDIA-only 511 / 21 / 79 / 0 (+1
+timeout). Six tests change result natively when NVIDIA is forced and are
+excluded from the evaluation (`egl-blob-cache`, `egl-ext_egl_image_storage`,
+`egl-gl_oes_egl_image`, `egl_ext_device_base`, `egl_mesa_device_software`,
+`egl_mesa_platform_surfaceless`). Of the remaining 604 tests, 9 differ:
+four are not defects (`depth-clear-precision-check` is the armhf test binary
+looping forever on its `depth32` case, reproducible with plain Mesa llvmpipe
+and no bridge; `ppgtt_memory_alignment` crashes natively;
+`egl_ext_platform_device` fails natively and passes bridged;
+`egl_khr_fence_sync` forks, natively EGL fails in the child and the test exits
+early, while the bridge supports fork and runs checks that are meaningless
+across processes). Five are missing features: GLES1 (`egl_khr_gl_colorspace`),
+the `GL_KHR_debug` upcall (3 context-flag tests) and dma-buf modifiers (fd
+passing). Details are in STATUS.md ("Conformance").
 
 The native baseline was repeated four times (613 tests after excluding
 `max-texture-size`): 610 tests give identical results every time; the three

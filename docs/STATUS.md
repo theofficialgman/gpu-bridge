@@ -228,7 +228,7 @@ bridge difference there). One stable native crash: `ppgtt_memory_alignment`
 | after the fixes below, run 2 | 492 | 35 | 80 | 6 | 1 | 46 |
 | run 3 | 503 | 26 | 83 | 1 | 1 | 24 real |
 | run 4 | 511 | 22 | 77 | 1 | 1 | 14 (one new: `texsubimage-unpack`, fixed) |
-| run 5 (current) | 515 | 22 | 74 | 0 | 1 | 10 (4 of them not defects, see below) |
+| run 5 (default vendor choice) | 515 | 22 | 74 | 0 | 1 | 10 (4 of them not defects) |
 
 Bugs found and fixed by this sweep: see lessons 10-14, plus
 `GL_BITMAP`/BGR/packed-type size tables, array state queries answered from the
@@ -242,7 +242,24 @@ the same armhf binary on software Mesa (no bridge, no NVIDIA):
 with `shim32` removed from `LD_LIBRARY_PATH`. This is how
 `depth-clear-precision-check` was classified (below).
 
-Remaining 10 differences (run 5), in groups:
+### Vendor-forced comparison (current method)
+
+Tests that fall back to Mesa/llvmpipe natively say nothing about the layer
+(they usually do so because NVIDIA does not support what the test needs), so
+the evaluation is done with the EGL vendor forced to NVIDIA on **both** sides:
+`__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json`
+(GLVND; the server inherits it). Script: `~/gb/pg/vendors.sh`.
+
+* Native arm64, NVIDIA only: 515 pass / 21 fail / 75 skip / 1 crash / 1 warn.
+* Bridged armhf, NVIDIA only: 511 pass / 21 fail / 79 skip / 1 warn / 1 timeout.
+* **Excluded as native Mesa/llvmpipe fallbacks (6)**: results change when
+  NVIDIA is forced: `egl-blob-cache`, `egl-ext_egl_image_storage`,
+  `egl-gl_oes_egl_image` (all need `EGL_MESA_configless_context`),
+  `egl_ext_device_base`, `egl_mesa_device_software`,
+  `egl_mesa_platform_surfaceless`.
+* **Evaluation set: 604 tests; 9 differences**, below.
+
+Remaining 9 differences, in groups:
 
 * **Not a defect (4):**
   * `depth-clear-precision-check`: the armhf build of the test never
@@ -262,19 +279,14 @@ Remaining 10 differences (run 5), in groups:
     initialize a second EGLDisplay" path. The bridge supports fork (the child
     reconnects to its own server), so it continues into checks that only make
     sense within one process and reports a failure.
-* **Missing feature (6):**
+* **Missing feature (5):**
   * `egl_khr_gl_colorspace linear` needs GLES1 (`glOrthof` not found in
     libGLESv1_CM): the bridge does not implement the GLES 1.x API (only the
     entry points it shares with desktop GL).
   * 3x `egl_khr_create_context valid debug flag gles1/2/3`: ES needs
     `GL_KHR_debug`, i.e. debug-message callbacks (needs a server-to-client
     upcall mechanism).
-  * `egl-blob-cache`: needs `EGL_ANDROID_blob_cache` (callback upcalls).
   * `egl_ext_image_dma_buf_import_modifiers`: dma-buf fd passing.
-
-Natively these EGL tests use the *default display*, which GLVND resolves to
-Mesa (llvmpipe) on this device, not NVIDIA: several "native pass" results in
-the EGL groups say nothing about the NVIDIA driver.
 
 Fixed since the first sweep, in addition to the list above: GL_BITMAP and
 packed pixel sizes, 2D transfers ignoring `GL_UNPACK_SKIP_IMAGES`, select and
