@@ -2079,3 +2079,20 @@ GB_API void glPopClientAttrib(void)
 	}
 	gbx_glPopClientAttrib();
 }
+
+/* ---- EXT_memory_object_fd / EXT_semaphore_fd ---------------------------------------------- */
+
+/* The fd goes to the server as a token; on success the driver owns the
+ * server's copy. */
+GB_API void glImportMemoryFdEXT(GLuint memory, GLuint64 size, GLenum handleType,
+				GLint fd)
+{
+	gbx_glImportMemoryFdEXT(memory, size, handleType,
+				(GLint)gb_cl_fd_put(fd));
+}
+
+GB_API void glImportSemaphoreFdEXT(GLuint semaphore, GLenum handleType, GLint fd)
+{
+	gbx_glImportSemaphoreFdEXT(semaphore, handleType,
+				   (GLint)gb_cl_fd_put(fd));
+}

@@ -20,6 +20,8 @@ enum gb_ctl_type {
 	GB_CTL_NEW_CHANNEL,     /* c->s + fd: a[0]=region bytes */
 	GB_CTL_NEW_CHANNEL_REPLY, /* s->c: status, a[0]=channel id */
 	GB_CTL_BYE,             /* c->s */
+	GB_CTL_FD_PUT,          /* c->s + fd: a[0]=token (an fd the next requests name) */
+	GB_CTL_FD_GIVE,         /* s->c + fd: a[0]=token (an fd the server returns) */
 };
 
 struct gb_ctl_msg {

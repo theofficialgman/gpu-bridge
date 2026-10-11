@@ -12,6 +12,8 @@
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 #include "gb_client_impl.h"
 
@@ -20,13 +22,13 @@
 /* `inst` identifies the application's Display* (0 = by name): each one is a
  * separate EGLDisplay on the server, as natively. */
 static EGLDisplay get_display_kind(uint32_t kind, uint32_t inst,
-				   const char *str)
+				   uint32_t drm_tok, const char *str)
 {
 	struct gb_cl *cx = gb_cl_get();
 	struct gb_out o;
 	struct gb_w w;
 	uint32_t slen = str ? (uint32_t)strlen(str) + 1 : GB_NULL_LEN;
-	uint32_t sz = 16 + 12;
+	uint32_t sz = 16 + 16;
 
 	if (!cx)
 		return EGL_NO_DISPLAY;
@@ -37,6 +39,7 @@ static EGLDisplay get_display_kind(uint32_t kind, uint32_t inst,
 		return EGL_NO_DISPLAY;
 	gb_w_u32(&w, kind);
 	gb_w_u32(&w, inst);
+	gb_w_u32(&w, drm_tok);
 	gb_w_u32(&w, slen);
 	if (str)
 		memcpy(gb_w_blob(&w, slen), str, slen);
@@ -76,7 +79,7 @@ static EGLDisplay x11_display_from_native(void *native)
 {
 	if (!native) {
 		const char *d = getenv("DISPLAY");
-		return get_display_kind(1, 0, d ? d : ":0");
+		return get_display_kind(1, 0, 0, d ? d : ":0");
 	}
 	/* The app's Display* lives in its own address space; the server opens
 	 * its own connection to the same X server by name. */
@@ -85,30 +88,48 @@ static EGLDisplay x11_display_from_native(void *native)
 		gb_cl_egl_error(EGL_BAD_PARAMETER);
 		return EGL_NO_DISPLAY;
 	}
-	return remember_x(get_display_kind(1, (uint32_t)(uintptr_t)native, name),
+	return remember_x(get_display_kind(1, (uint32_t)(uintptr_t)native, 0,
+					   name),
 			  native);
 }
 
 GB_API EGLDisplay eglGetDisplay(EGLNativeDisplayType display_id)
 {
 	if (display_id == EGL_DEFAULT_DISPLAY)
-		return get_display_kind(0, 0, NULL);
+		return get_display_kind(0, 0, 0, NULL);
 	return x11_display_from_native((void *)display_id);
 }
 
-static EGLDisplay platform_display(EGLenum platform, void *native)
+/* EGL_DRM_MASTER_FD_EXT in the display attributes: the fd goes to the server
+ * under a token (the application keeps its own descriptor). */
+static uint32_t drm_master_token(const EGLint *a32, const EGLAttrib *a64)
+{
+	for (int i = 0; a32 && i < 32 && a32[i] != EGL_NONE; i += 2)
+		if (a32[i] == 0x333C)
+			return gb_cl_fd_put(a32[i + 1]);
+	for (int i = 0; a64 && i < 32 && a64[i] != (EGLAttrib)EGL_NONE; i += 2)
+		if (a64[i] == 0x333C)
+			return gb_cl_fd_put((int)a64[i + 1]);
+	return 0;
+}
+
+static EGLDisplay platform_display(EGLenum platform, void *native,
+				   const EGLint *attribs32,
+				   const EGLAttrib *attribs64)
 {
 	switch (platform) {
 	case 0x31D5: /* EGL_PLATFORM_X11_{KHR,EXT} */
 		return x11_display_from_native(native);
 	case 0x31DD: /* EGL_PLATFORM_SURFACELESS_MESA */
-		return get_display_kind(2, 0, NULL);
+		return get_display_kind(2, 0, 0, NULL);
 	case 0x313F: /* EGL_PLATFORM_DEVICE_EXT: native is a device handle */
 		if (!native) {
 			gb_cl_egl_error(EGL_BAD_ATTRIBUTE);
 			return EGL_NO_DISPLAY;
 		}
-		return get_display_kind(3, (uint32_t)(uintptr_t)native, NULL);
+		return get_display_kind(3, (uint32_t)(uintptr_t)native,
+					drm_master_token(attribs32, attribs64),
+					NULL);
 	default:
 		gb_cl_egl_error(EGL_BAD_PARAMETER);
 		return EGL_NO_DISPLAY;
@@ -118,14 +139,14 @@ static EGLDisplay platform_display(EGLenum platform, void *native)
 GB_API EGLDisplay eglGetPlatformDisplay(EGLenum platform, void *native_display,
 					const EGLAttrib *attrib_list)
 {
-	return platform_display(platform, native_display);
+	return platform_display(platform, native_display, NULL, attrib_list);
 }
 
 GB_API EGLDisplay eglGetPlatformDisplayEXT(EGLenum platform,
 					   void *native_display,
 					   const EGLint *attrib_list)
 {
-	return platform_display(platform, native_display);
+	return platform_display(platform, native_display, attrib_list, NULL);
 }
 
 /* The server draws through its own X connection: make the application's
@@ -268,33 +289,210 @@ GB_API EGLSurface eglCreatePlatformPixmapSurface(EGLDisplay dpy,
 	return eglCreatePlatformPixmapSurfaceEXT(dpy, config, native_pixmap, p);
 }
 
-/* EGLImage creation: GL objects and X pixmaps are named by integers that are
- * the same on both sides; a dma-buf is a file descriptor of *this* process
- * and would name an unrelated descriptor in the server. */
-#define GB_EGL_LINUX_DMA_BUF_EXT 0x3270
+/* ---- file descriptors in attribute lists ----------------------------------------------
+ * dma-buf planes, a native fence and the DRM master fd are descriptors of this
+ * process: they travel as tokens (control socket) and the server swaps in its
+ * own copies. The lists are copied; the application's list is untouched. */
+
+static int fd_attrib_key(long k)
+{
+	return k == 0x3272 || k == 0x3275 || k == 0x3278 || k == 0x3440 ||
+	       k == 0x3145 || k == 0x333C;
+}
+
+#define GB_MAX_FD_ATTRIBS 32
+
+struct fd_list {
+	int fds[GB_MAX_FD_ATTRIBS];
+	int n;
+};
+
+#define DEFINE_FD_ATTRIBS(NAME, T, NONE)                                     \
+static T *NAME(const T *a, struct fd_list *fl)                                \
+{                                                                             \
+	int n = 0;                                                            \
+	T *c;                                                                 \
+                                                                              \
+	fl->n = 0;                                                            \
+	if (!a)                                                               \
+		return NULL;                                                  \
+	while (n < 2 * GB_MAX_FD_ATTRIBS && a[n] != (T)(NONE))                \
+		n += 2;                                                       \
+	c = malloc((size_t)(n + 1) * sizeof(T));                              \
+	if (!c)                                                               \
+		return NULL;                                                  \
+	memcpy(c, a, (size_t)n * sizeof(T));                                  \
+	c[n] = (T)(NONE);                                                     \
+	for (int i = 0; i < n; i += 2) {                                      \
+		if (!fd_attrib_key((long)c[i]) || (long)c[i + 1] == -1)       \
+			continue;                                             \
+		if (fl->n < GB_MAX_FD_ATTRIBS)                                \
+			fl->fds[fl->n++] = (int)c[i + 1];                     \
+		c[i + 1] = (T)gb_cl_fd_put((int)c[i + 1]);                    \
+	}                                                                     \
+	return c;                                                             \
+}
+
+DEFINE_FD_ATTRIBS(fd_attribs_i32, EGLint, EGL_NONE)
+DEFINE_FD_ATTRIBS(fd_attribs_attrib, EGLAttrib, EGL_NONE)
 
 GB_API EGLImage eglCreateImage(EGLDisplay dpy, EGLContext ctx, EGLenum target,
 			       EGLClientBuffer buffer,
 			       const EGLAttrib *attrib_list)
 {
-	if (target == GB_EGL_LINUX_DMA_BUF_EXT) {
-		gb_cl_unsupported("EGLImage from dma-buf (fd passing)");
-		gb_cl_egl_error(EGL_BAD_PARAMETER);
-		return EGL_NO_IMAGE;
-	}
-	return gbx_eglCreateImage(dpy, ctx, target, buffer, attrib_list);
+	struct fd_list fl;
+	EGLAttrib *c = fd_attribs_attrib(attrib_list, &fl);
+	EGLImage r = gbx_eglCreateImage(dpy, ctx, target, buffer,
+					c ? c : attrib_list);
+
+	free(c);
+	return r;
 }
 
 GB_API EGLImageKHR eglCreateImageKHR(EGLDisplay dpy, EGLContext ctx,
 				     EGLenum target, EGLClientBuffer buffer,
 				     const EGLint *attrib_list)
 {
-	if (target == GB_EGL_LINUX_DMA_BUF_EXT) {
-		gb_cl_unsupported("EGLImage from dma-buf (fd passing)");
-		gb_cl_egl_error(EGL_BAD_PARAMETER);
-		return EGL_NO_IMAGE_KHR;
+	struct fd_list fl;
+	EGLint *c = fd_attribs_i32(attrib_list, &fl);
+	EGLImageKHR r = gbx_eglCreateImageKHR(dpy, ctx, target, buffer,
+					      c ? c : attrib_list);
+
+	free(c);
+	return r;
+}
+
+/* A native fence passed to sync creation is owned by the sync object on
+ * success: the application's descriptor is closed here, as the driver would
+ * have taken it. */
+static void close_fds_if(struct fd_list *fl, int success)
+{
+	if (success)
+		for (int i = 0; i < fl->n; i++)
+			if (fl->fds[i] >= 0)
+				close(fl->fds[i]);
+}
+
+GB_API EGLSync eglCreateSync(EGLDisplay dpy, EGLenum type,
+			     const EGLAttrib *attrib_list)
+{
+	struct fd_list fl;
+	EGLAttrib *c = fd_attribs_attrib(attrib_list, &fl);
+	EGLSync r = gbx_eglCreateSync(dpy, type, c ? c : attrib_list);
+
+	close_fds_if(&fl, r != EGL_NO_SYNC);
+	free(c);
+	return r;
+}
+
+GB_API EGLSyncKHR eglCreateSyncKHR(EGLDisplay dpy, EGLenum type,
+				   const EGLint *attrib_list)
+{
+	struct fd_list fl;
+	EGLint *c = fd_attribs_i32(attrib_list, &fl);
+	EGLSyncKHR r = gbx_eglCreateSyncKHR(dpy, type, c ? c : attrib_list);
+
+	close_fds_if(&fl, r != EGL_NO_SYNC_KHR);
+	free(c);
+	return r;
+}
+
+GB_API EGLSync eglCreateSync64KHR(EGLDisplay dpy, EGLenum type,
+				  const EGLAttribKHR *attrib_list)
+{
+	struct fd_list fl;
+	EGLAttrib *c = fd_attribs_attrib((const EGLAttrib *)attrib_list, &fl);
+	EGLSync r = gbx_eglCreateSync64KHR(dpy, type,
+					   c ? (const EGLAttribKHR *)c
+					     : attrib_list);
+
+	close_fds_if(&fl, r != EGL_NO_SYNC);
+	free(c);
+	return r;
+}
+
+/* ---- calls that return descriptors ---------------------------------------------------- */
+
+static int fd_op(uint32_t sub, uint32_t dpy, uint32_t obj, uint32_t *out)
+{
+	struct gb_cl *cx = gb_cl_get();
+	struct gb_out o;
+	struct gb_w w;
+
+	if (!cx || gb_cl_msg_begin(cx, &o, &w, GB_OPX_FdOp, 32,
+				   GB_CMD_F_WANT_REPLY))
+		return -1;
+	gb_w_u32(&w, sub);
+	gb_w_u32(&w, dpy);
+	gb_w_u32(&w, obj);
+	gb_cl_end(cx, &o);
+
+	struct gb_in in;
+	if (gb_cl_wait_reply(cx, &in, GB_OPX_FdOp))
+		return -1;
+	struct gb_r r;
+	gb_r_init(&r, in.p, in.size);
+	for (int i = 0; i < 16; i++)
+		out[i] = gb_r_u32(&r);
+	int bad = r.err;
+	gb_in_release(&in);
+	return bad ? -1 : 0;
+}
+
+GB_API EGLint eglDupNativeFenceFDANDROID(EGLDisplay dpy, EGLSyncKHR sync)
+{
+	uint32_t o[16];
+
+	if (fd_op(0, (uint32_t)(uintptr_t)dpy, (uint32_t)(uintptr_t)sync, o) ||
+	    (int32_t)o[0] < 0)
+		return -1; /* EGL_NO_NATIVE_FENCE_FD_ANDROID */
+	return gb_cl_fd_get(o[1]);
+}
+
+GB_API EGLBoolean eglExportDMABUFImageQueryMESA(EGLDisplay dpy, EGLImageKHR image,
+						int *fourcc, int *num_planes,
+						EGLuint64KHR *modifiers)
+{
+	uint32_t o[16];
+
+	if (fd_op(1, (uint32_t)(uintptr_t)dpy, (uint32_t)(uintptr_t)image, o) ||
+	    !o[0])
+		return EGL_FALSE;
+	if (fourcc)
+		*fourcc = (int)o[1];
+	if (num_planes)
+		*num_planes = (int)o[2];
+	for (uint32_t i = 0; modifiers && i < o[2] && i < 4; i++) {
+		uint64_t m;
+
+		memcpy(&m, &o[4 + 2 * i], 8);
+		modifiers[i] = m;
 	}
-	return gbx_eglCreateImageKHR(dpy, ctx, target, buffer, attrib_list);
+	return EGL_TRUE;
+}
+
+GB_API EGLBoolean eglExportDMABUFImageMESA(EGLDisplay dpy, EGLImageKHR image,
+					   int *fds, EGLint *strides,
+					   EGLint *offsets)
+{
+	uint32_t o[16];
+
+	if (fd_op(2, (uint32_t)(uintptr_t)dpy, (uint32_t)(uintptr_t)image, o) ||
+	    !o[0])
+		return EGL_FALSE;
+	for (int i = 0; i < 4; i++) {
+		if (!o[2 + i])
+			continue;
+		if (fds)
+			fds[i] = gb_cl_fd_get(o[2 + i]);
+		else
+			close(gb_cl_fd_get(o[2 + i]));
+		if (strides)
+			strides[i] = (EGLint)o[6 + i];
+		if (offsets)
+			offsets[i] = (EGLint)o[10 + i];
+	}
+	return EGL_TRUE;
 }
 
 /* ---- EGL_MESA_query_driver ---------------------------------------------------------- */

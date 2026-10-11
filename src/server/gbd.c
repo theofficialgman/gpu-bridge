@@ -294,6 +294,126 @@ void gb_stat_native_add(uint32_t op, uint64_t ns)
 	}
 }
 
+/* ---- fds ------------------------------------------------------------------ */
+
+static pthread_mutex_t g_fd_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_fd_cv = PTHREAD_COND_INITIALIZER;
+static struct { uint32_t token; int fd; } g_fds[64];
+static int g_ctl_sock = -1;
+static uint32_t g_give_token;
+
+static void fd_store(uint32_t token, int fd)
+{
+	pthread_mutex_lock(&g_fd_mu);
+	for (unsigned i = 0; i < 64; i++)
+		if (!g_fds[i].token) {
+			g_fds[i].token = token;
+			g_fds[i].fd = fd;
+			pthread_cond_broadcast(&g_fd_cv);
+			pthread_mutex_unlock(&g_fd_mu);
+			return;
+		}
+	pthread_mutex_unlock(&g_fd_mu);
+	close(fd); /* table full: the request will fail to find it */
+}
+
+int gb_sv_fd_take(struct gb_sth *t, uint32_t token)
+{
+	struct timespec ts;
+	int fd = -1;
+
+	if (!token)
+		return -1;
+	clock_gettime(CLOCK_REALTIME, &ts);
+	ts.tv_sec += 5;
+	pthread_mutex_lock(&g_fd_mu);
+	for (;;) {
+		for (unsigned i = 0; i < 64; i++)
+			if (g_fds[i].token == token) {
+				fd = g_fds[i].fd;
+				g_fds[i].token = 0;
+				goto done;
+			}
+		if (pthread_cond_timedwait(&g_fd_cv, &g_fd_mu, &ts))
+			break;
+	}
+done:
+	pthread_mutex_unlock(&g_fd_mu);
+	if (fd >= 0 && t && t->ntaken < 8)
+		t->taken_fds[t->ntaken++] = fd;
+	else if (fd >= 0 && t) {
+		close(fd);
+		fd = -1;
+	}
+	return fd;
+}
+
+void gb_sv_fd_keep(struct gb_sth *t, int fd)
+{
+	for (int i = 0; i < t->ntaken; i++)
+		if (t->taken_fds[i] == fd)
+			t->taken_fds[i] = -1;
+}
+
+void gb_sv_fd_release(struct gb_sth *t)
+{
+	for (int i = 0; i < t->ntaken; i++)
+		if (t->taken_fds[i] >= 0)
+			close(t->taken_fds[i]);
+	t->ntaken = 0;
+}
+
+void gb_sv_fd_keep_all(struct gb_sth *t)
+{
+	for (int i = 0; i < t->ntaken; i++)
+		t->taken_fds[i] = -1;
+}
+
+static int fd_attrib_key(int64_t k)
+{
+	return k == 0x3272 || k == 0x3275 || k == 0x3278 || k == 0x3440 ||
+	       k == 0x3145 || k == 0x333C;
+}
+
+const void *gb_sv_xlat_fd_attribs(struct gb_sth *t, const void *list,
+				  int64_t n, int wsz)
+{
+	void *c;
+
+	if (!list || n <= 0)
+		return list;
+	c = gb_tmp(t, (size_t)n * (size_t)wsz);
+	if (!c)
+		return list;
+	memcpy(c, list, (size_t)n * (size_t)wsz);
+	for (int64_t i = 0; i + 1 < n; i += 2) {
+		int64_t key = wsz == 8 ? ((int64_t *)c)[i] : ((int32_t *)c)[i];
+		int64_t val = wsz == 8 ? ((int64_t *)c)[i + 1]
+				       : ((int32_t *)c)[i + 1];
+
+		if (!fd_attrib_key(key) || val == -1)
+			continue; /* -1: EGL_NO_NATIVE_FENCE_FD_ANDROID */
+		int fd = gb_sv_fd_take(t, (uint32_t)val);
+
+		if (wsz == 8)
+			((int64_t *)c)[i + 1] = fd;
+		else
+			((int32_t *)c)[i + 1] = fd;
+	}
+	return c;
+}
+
+uint32_t gb_sv_fd_give(int fd)
+{
+	struct gb_ctl_msg m = { .magic = GB_CTL_MAGIC, .type = GB_CTL_FD_GIVE };
+	uint32_t tok = __atomic_add_fetch(&g_give_token, 1, __ATOMIC_RELAXED);
+
+	if (fd < 0 || g_ctl_sock < 0)
+		return 0;
+	m.a[0] = tok;
+	return gb_ctl_send(g_ctl_sock, &m, fd) ? 0 : tok;
+}
+
 /* ---- upcalls ---------------------------------------------------------------- */
 
 struct gb_upmsg {
@@ -502,6 +622,7 @@ static void *worker_main(void *arg)
 			gb_sv_proto_error(t, &h);
 		}
 		gb_tmp_reset(t);
+		gb_sv_fd_release(t);
 		gb_sv_upcall_flush(t); /* messages from asynchronous requests */
 		if (dcur)
 			free(dcur);
@@ -589,6 +710,8 @@ static int serve(int sock)
 	uint32_t next_id = 1;
 	int fd;
 
+	g_ctl_sock = sock;
+
 	for (;;) {
 		fd = -1;
 		int rc = gb_ctl_recv(sock, &m, &fd);
@@ -647,6 +770,10 @@ static int serve(int sock)
 			gb_ctl_send(sock, &reply, -1);
 			break;
 		}
+		case GB_CTL_FD_PUT:
+			if (fd >= 0)
+				fd_store((uint32_t)m.a[0], fd);
+			break;
 		case GB_CTL_BYE:
 			return 0;
 		default:

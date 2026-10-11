@@ -165,7 +165,7 @@ for t in ("GLint", "GLuint", "GLenum", "GLfloat", "GLsizei", "GLfixed",
           "unsigned int", "int32_t", "uint32_t", "GLhandleARB", "GLclampf"):
     ELEM[t] = ("raw", 4)
 for t in ("GLint64", "GLuint64", "GLdouble", "GLint64EXT", "GLuint64EXT",
-          "int64_t", "uint64_t", "GLclampd"):
+          "int64_t", "uint64_t", "GLclampd", "EGLuint64KHR", "EGLuint64NV"):
     ELEM[t] = ("raw", 8)
 for t in ("GLintptr", "GLsizeiptr", "EGLAttrib", "EGLAttribKHR", "GLintptrARB",
           "GLsizeiptrARB", "unsigned long"):
@@ -722,7 +722,12 @@ def emit_server(cmd, opname):
         if k[0] == "val":
             L.append(f"\t{CTYPE[k[1]]} v_{n} = "
                      f"{r_expr(k[1], WIRE_R[k[1]] + '(__r)')};")
-            L.append(f"\t{p['ctype']} a_{n} = ({p['ctype']})v_{n};")
+            if (cmd.name, n) in cfg.FD_PARAMS:
+                # the client sent a token; adopt the matching fd
+                L.append(f"\t{p['ctype']} a_{n} = "
+                         f"({p['ctype']})gb_sv_fd_take(__t, (uint32_t)v_{n});")
+            else:
+                L.append(f"\t{p['ctype']} a_{n} = ({p['ctype']})v_{n};")
         elif k[0] == "offset":
             L.append(f"\tuint64_t v_{n} = gb_r_u64(__r);")
             L.append(f"\t{p['ctype']} a_{n} = ({p['ctype']})(uintptr_t)v_{n};")
@@ -841,7 +846,12 @@ def emit_server(cmd, opname):
                          f"{1 if k[5] == 'visual' else 0})) "
                          f"goto proto_error;")
             L.append("\t}")
-            L.append(f"\t{p['ctype']} a_{n} = ({p['ctype']})b_{n};")
+            if cmd.name in cfg.FD_ATTRIB_CMDS:
+                # fd-valued attributes arrive as tokens: swap in adopted fds
+                L.append(f"\t{p['ctype']} a_{n} = ({p['ctype']})"
+                         f"gb_sv_xlat_fd_attribs(__t, b_{n}, n_{n}, {wsz});")
+            else:
+                L.append(f"\t{p['ctype']} a_{n} = ({p['ctype']})b_{n};")
         elif k[0] == "arr_out" and k[4][0] == "server":
             mode, wsz, pbo = k[2], k[3], k[5]
             key, sargs = k[4][1], k[4][2]
@@ -923,6 +933,12 @@ def emit_server(cmd, opname):
              ("ret = " if cmd.rk[0] != "void" else "") +
              f"fn_{cmd.name}({args});")
     L.append("\tgb_stat_native(__op, __t0);")
+    # descriptors the driver took ownership of (on success) stay open
+    for (cn, pn) in cfg.FD_PARAMS:
+        if cn == cmd.name:
+            L.append(f"\tif (a_{pn} >= 0) gb_sv_fd_keep(__t, a_{pn});")
+    if cfg.FD_ATTRIB_CMDS.get(cmd.name):
+        L.append("\tif (ret) gb_sv_fd_keep_all(__t);")
     if cmd.name in cfg.CTX_CHANGERS:
         L.append("\t__t->ctx_valid = 0; /* current context may have changed */")
 

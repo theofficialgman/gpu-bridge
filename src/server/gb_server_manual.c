@@ -144,7 +144,8 @@ static int read_str(struct gb_r *r, uint32_t slen, const char **out)
 static void h_get_display(struct gb_sth *t, const struct gb_cmd_hdr *h,
 			  struct gb_r *r)
 {
-	uint32_t kind = gb_r_u32(r), inst = gb_r_u32(r), slen = gb_r_u32(r);
+	uint32_t kind = gb_r_u32(r), inst = gb_r_u32(r), drm_tok = gb_r_u32(r),
+		 slen = gb_r_u32(r);
 	const char *s;
 
 	if (r->err || read_str(r, slen, &s))
@@ -168,8 +169,16 @@ static void h_get_display(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		if (x && d == EGL_NO_DISPLAY && fn_eglGetDisplay)
 			d = fn_eglGetDisplay((EGLNativeDisplayType)x);
 	} else if (kind == 3 && fn_eglGetPlatformDisplayEXT) {
+		EGLint at[3] = { 0x333C /* EGL_DRM_MASTER_FD_EXT */, 0, EGL_NONE };
+		int fd = drm_tok ? gb_sv_fd_take(t, drm_tok) : -1;
+
+		if (fd >= 0) {
+			at[1] = fd;
+			gb_sv_fd_keep(t, fd); /* the display uses it from now on */
+		}
 		d = fn_eglGetPlatformDisplayEXT(0x313F /* PLATFORM_DEVICE_EXT */,
-						gb_h2p(HK_DEVICE, inst), NULL);
+						gb_h2p(HK_DEVICE, inst),
+						fd >= 0 ? at : NULL);
 	} else if (kind == 0 || kind == 2) {
 		const char *plat = getenv("GB_EGL_PLATFORM");
 		if ((kind == 2 || (plat && !strcmp(plat, "surfaceless"))) &&
@@ -608,6 +617,93 @@ static void h_driver_string(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		s = fn_eglGetDisplayDriverConfig(d); /* heap string: leaked
 						      * (once per call) */
 	reply_string(t, h, s);
+}
+
+/*
+ * FdOp: EGL calls that return file descriptors. The fds are sent over the
+ * control socket under tokens that the reply carries.
+ *   sub 0 DupNativeFenceFD(dpy, sync)        -> i32 fd?, u32 token
+ *   sub 1 ExportDMABUFImageQuery(dpy, image) -> ok, fourcc, nplanes, mods[4]
+ *   sub 2 ExportDMABUFImage(dpy, image)      -> ok, n, tok[4], stride[4], off[4]
+ */
+static void h_fd_op(struct gb_sth *t, const struct gb_cmd_hdr *h,
+		    struct gb_r *r)
+{
+	uint32_t sub = gb_r_u32(r), dpy = gb_r_u32(r), obj = gb_r_u32(r);
+
+	if (r->err || sub > 2) {
+		gb_sv_proto_error(t, h);
+		return;
+	}
+	GB_NATIVE(eglDupNativeFenceFDANDROID, EGLint, (EGLDisplay, EGLSyncKHR));
+	GB_NATIVE(eglExportDMABUFImageQueryMESA, EGLBoolean,
+		  (EGLDisplay, EGLImageKHR, int *, int *, uint64_t *));
+	GB_NATIVE(eglExportDMABUFImageMESA, EGLBoolean,
+		  (EGLDisplay, EGLImageKHR, int *, EGLint *, EGLint *));
+	EGLDisplay d = (EGLDisplay)gb_h2p(HK_DISPLAY, dpy);
+	uint32_t out[16];
+	uint32_t nout = 0;
+
+	memset(out, 0, sizeof(out));
+	if (sub == 0) {
+		int fd = -1;
+
+		if (fn_eglDupNativeFenceFDANDROID)
+			fd = fn_eglDupNativeFenceFDANDROID(
+				d, (EGLSyncKHR)gb_h2p(HK_SYNC, obj));
+		out[0] = (uint32_t)fd;
+		if (fd >= 0) {
+			out[1] = gb_sv_fd_give(fd);
+			close(fd); /* the client has its own copy now */
+		}
+		nout = 2;
+	} else if (sub == 1) {
+		int fourcc = 0, np = 0;
+		uint64_t mods[4] = { 0 };
+
+		if (fn_eglExportDMABUFImageQueryMESA &&
+		    fn_eglExportDMABUFImageQueryMESA(
+			    d, (EGLImageKHR)gb_h2p(HK_IMAGE, obj), &fourcc, &np,
+			    mods)) {
+			out[0] = 1;
+			out[1] = (uint32_t)fourcc;
+			out[2] = (uint32_t)np;
+			memcpy(&out[4], mods, sizeof(mods));
+		}
+		nout = 12;
+	} else {
+		int fds[4] = { -1, -1, -1, -1 };
+		EGLint strides[4] = { 0 }, offs[4] = { 0 };
+
+		if (fn_eglExportDMABUFImageMESA &&
+		    fn_eglExportDMABUFImageMESA(
+			    d, (EGLImageKHR)gb_h2p(HK_IMAGE, obj), fds, strides,
+			    offs)) {
+			out[0] = 1;
+			for (int i = 0; i < 4; i++) {
+				if (fds[i] < 0)
+					continue;
+				out[1]++;
+				out[2 + i] = gb_sv_fd_give(fds[i]);
+				close(fds[i]);
+				out[6 + i] = (uint32_t)strides[i];
+				out[10 + i] = (uint32_t)offs[i];
+			}
+		}
+		nout = 14;
+	}
+	if (h->flags & GB_CMD_F_WANT_REPLY) {
+		struct gb_out o;
+		struct gb_w w;
+		uint32_t total = GB_ALIGN_UP(16 + 4 * 16, 8u);
+
+		if (!gb_sv_reply_begin(t, h, &o, total)) {
+			gb_w_init(&w, o.p);
+			for (uint32_t i = 0; i < 16; i++)
+				gb_w_u32(&w, i < nout ? out[i] : 0);
+			gb_sv_reply_end(t, &o);
+		}
+	}
 }
 
 /* ---- EGL_KHR_debug ------------------------------------------------------------------ */
@@ -1430,6 +1526,7 @@ void gb_srv_manual_dispatch(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	case GB_OPX_EglDebug: h_egl_debug(t, h, r); break;
 	case GB_OPX_ObjPtrLabel: h_obj_ptr_label(t, h, r); break;
 	case GB_OPX_DriverString: h_driver_string(t, h, r); break;
+	case GB_OPX_FdOp: h_fd_op(t, h, r); break;
 	case GB_OPX_DebugCallback: h_debug_callback(t, h, r); break;
 	case GB_OPX_DebugStr: h_debug_str(t, h, r); break;
 	case GB_OPX_SelectBuffer: h_select_buffer(t, h, r); break;

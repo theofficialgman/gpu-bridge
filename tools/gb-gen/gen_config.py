@@ -100,6 +100,9 @@ _MANUAL = {
         "eglCreateWindowSurface", "eglCreatePlatformWindowSurface",
         "eglCreatePlatformWindowSurfaceEXT",
         "eglCreatePlatformPixmapSurface", "eglCreatePlatformPixmapSurfaceEXT",
+        # fds the server returns (OPX_FdOp)
+        "eglDupNativeFenceFDANDROID", "eglExportDMABUFImageQueryMESA",
+        "eglExportDMABUFImageMESA",
         # EGL_ANDROID_blob_cache: the driver's callbacks run on the server and
         # reach the application's functions as upcalls
         "eglSetBlobCacheFuncsANDROID",
@@ -185,7 +188,9 @@ _ARRAY_STATE = {
     "eglCreatePixmapSurface",
     # EGLImage sources: GL object names / X pixmaps cross as integers; fds
     # (dma-buf) are per-process and must not
-    "eglCreateImage", "eglCreateImageKHR",
+    "eglCreateImage", "eglCreateImageKHR", "eglCreateSync",
+    "eglCreateSyncKHR", "eglCreateSync64KHR",
+    "glImportMemoryFdEXT", "glImportSemaphoreFdEXT",
     # generic buffer bindings (needed to resolve glMapBuffer(target))
     "glBindBufferBase", "glBindBufferRange",
     # BUFFER_MAPPED / ACCESS / MAP_* describe the client-side mapping
@@ -233,6 +238,15 @@ LEN_OVERRIDES = {
     ("eglChooseConfig", "configs"): "config_size",
     ("eglGetConfigs", "configs"): "config_size",
     # array commands whose count is the 'count' parameter (x components)
+    ("eglQueryDmaBufFormatsEXT", "formats"): "max_formats",
+    ("eglQueryDmaBufModifiersEXT", "modifiers"): "max_modifiers",
+    ("eglQueryDmaBufModifiersEXT", "external_only"): "max_modifiers",
+    ("glWaitSemaphoreEXT", "buffers"): "numBufferBarriers",
+    ("glWaitSemaphoreEXT", "textures"): "numTextureBarriers",
+    ("glWaitSemaphoreEXT", "srcLayouts"): "numTextureBarriers",
+    ("glSignalSemaphoreEXT", "buffers"): "numBufferBarriers",
+    ("glSignalSemaphoreEXT", "textures"): "numTextureBarriers",
+    ("glSignalSemaphoreEXT", "dstLayouts"): "numTextureBarriers",
     ("eglSwapBuffersWithDamageKHR", "rects"): "n_rects*4",
     ("eglSwapBuffersWithDamageEXT", "rects"): "n_rects*4",
     ("eglSetDamageRegionKHR", "rects"): "n_rects*4",
@@ -375,6 +389,24 @@ PNAME_CLASSES = [
     (r"^glClear(Named)?(Framebuffer|Buffer)(f|i|ui)v$", "clearbuffer"),
 ]
 
+# File descriptors. FD_PARAMS: (command, parameter) that is an fd the driver
+# takes ownership of; on the wire a token (see gb_cl_fd_put). FD_ATTRIB_CMDS:
+# commands whose attribute list holds fds under the keys below; the value says
+# whether the driver takes ownership on success (native fence) or merely reads
+# them during the call (dma-buf import).
+FD_PARAMS = {
+    ("glImportMemoryFdEXT", "fd"),
+    ("glImportSemaphoreFdEXT", "fd"),
+}
+FD_ATTRIB_CMDS = {
+    "eglCreateImage": False, "eglCreateImageKHR": False,
+    "eglCreateSync": True, "eglCreateSyncKHR": True,
+    "eglCreateSync64KHR": True,
+}
+FD_ATTRIB_KEYS = {0x3272, 0x3275, 0x3278, 0x3440, 0x3145, 0x333C}
+
+# Array lengths the registry does not state (or states as COMPSIZE of other
+# arrays' contents).
 # Handle lifetime: command -> (handle parameter, success condition or None).
 HANDLE_FREE = {
     "eglDestroyContext": ("ctx", "ret == EGL_TRUE"),

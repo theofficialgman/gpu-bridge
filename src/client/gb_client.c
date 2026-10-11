@@ -203,6 +203,91 @@ static int connect_locked(void)
 	return 0;
 }
 
+/* ---- control-socket mailbox -------------------------------------------------
+ * Several kinds of message come back on the control socket (channel replies,
+ * fds the server returns); whoever reads one that is not theirs stashes it. */
+static pthread_mutex_t g_ctl_mu = PTHREAD_MUTEX_INITIALIZER;
+static struct {
+	struct gb_ctl_msg m;
+	int fd;
+	int used;
+} g_stash[16];
+
+static int ctl_wait(uint32_t type, uint64_t token, struct gb_ctl_msg *out,
+		    int *fd_out)
+{
+	int rc = 0;
+
+	pthread_mutex_lock(&g_ctl_mu);
+	for (;;) {
+		for (unsigned i = 0; i < 16; i++)
+			if (g_stash[i].used && g_stash[i].m.type == type &&
+			    (type != GB_CTL_FD_GIVE || g_stash[i].m.a[0] == token)) {
+				*out = g_stash[i].m;
+				if (fd_out)
+					*fd_out = g_stash[i].fd;
+				else if (g_stash[i].fd >= 0)
+					close(g_stash[i].fd);
+				g_stash[i].used = 0;
+				goto out;
+			}
+		struct gb_ctl_msg m;
+		int fd = -1;
+
+		rc = gb_ctl_recv(G.sock, &m, &fd);
+		if (rc)
+			goto out;
+		if (m.type == type &&
+		    (type != GB_CTL_FD_GIVE || m.a[0] == token)) {
+			*out = m;
+			if (fd_out)
+				*fd_out = fd;
+			else if (fd >= 0)
+				close(fd);
+			goto out;
+		}
+		unsigned i;
+		for (i = 0; i < 16 && g_stash[i].used; i++)
+			;
+		if (i == 16) { /* nobody collects these: drop the oldest */
+			if (g_stash[0].fd >= 0)
+				close(g_stash[0].fd);
+			i = 0;
+		}
+		g_stash[i].m = m;
+		g_stash[i].fd = fd;
+		g_stash[i].used = 1;
+	}
+out:
+	pthread_mutex_unlock(&g_ctl_mu);
+	return rc;
+}
+
+/* Send a client fd to the server; the returned token names it in the
+ * requests that follow (0 on failure). */
+uint32_t gb_cl_fd_put(int fd)
+{
+	static uint32_t next;
+	struct gb_ctl_msg m = { .magic = GB_CTL_MAGIC, .type = GB_CTL_FD_PUT };
+	uint32_t tok = __atomic_add_fetch(&next, 1, __ATOMIC_RELAXED);
+
+	if (fd < 0 || !gb_cl_get())
+		return 0;
+	m.a[0] = tok;
+	return gb_ctl_send(G.sock, &m, fd) ? 0 : tok;
+}
+
+/* Receive an fd the server returned under `token`; -1 on failure. */
+int gb_cl_fd_get(uint32_t token)
+{
+	struct gb_ctl_msg m;
+	int fd = -1;
+
+	if (!token || ctl_wait(GB_CTL_FD_GIVE, token, &m, &fd))
+		return -1;
+	return fd;
+}
+
 static struct gb_cl *new_channel_locked(void)
 {
 	struct gb_cl *c = calloc(1, sizeof(*c));
@@ -216,7 +301,7 @@ static struct gb_cl *new_channel_locked(void)
 				.type = GB_CTL_NEW_CHANNEL };
 	m.a[0] = c->chan.region_size;
 	if (gb_ctl_send(G.sock, &m, c->chan.fd) ||
-	    gb_ctl_recv(G.sock, &m, NULL) || m.status) {
+	    ctl_wait(GB_CTL_NEW_CHANNEL_REPLY, 0, &m, NULL) || m.status) {
 		gb_chan_destroy(&c->chan);
 		free(c);
 		return NULL;
@@ -293,7 +378,7 @@ static const char *stat_name(unsigned slot)
 		"Opx_GLXFBConfigs", "Opx_BufferRead", "Opx_EglDevice", "Opx_DeviceString",
 		"Opx_SelectBuffer", "Opx_RenderMode", "Opx_Ping",
 		"Opx_DebugCallback", "Opx_DebugStr", "Opx_BlobFuncs",
-		"Opx_EglDebug", "Opx_ObjPtrLabel", "Opx_DriverString",
+		"Opx_EglDebug", "Opx_ObjPtrLabel", "Opx_DriverString", "Opx_FdOp",
 		"Opx_ElementMax" };
 	if (slot < GB_OP_COUNT)
 		return gb_op_names[slot];

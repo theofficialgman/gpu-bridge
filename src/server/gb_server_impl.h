@@ -54,6 +54,8 @@ struct gb_sth {
 	uint32_t up_seq;            /* sequence of the last blocking upcall */
 	int cur_req_sync;           /* the request being handled wants a reply */
 	struct gb_deferred *defer_head, *defer_tail;
+	int taken_fds[8];           /* client fds adopted for the current request */
+	int ntaken;
 	/* GB_STATS accounting (written by the worker, read at exit) */
 	uint64_t st_msgs, st_busy_ns, st_idle_ns, st_slow_ns, st_slow_msgs;
 };
@@ -84,6 +86,21 @@ void gb_h_free(enum gb_handle_kind k, uint32_t id);
 void *gb_tmp(struct gb_sth *t, size_t bytes);
 void *gb_tmp_zero(struct gb_sth *t, size_t bytes);
 void gb_tmp_reset(struct gb_sth *t);
+
+/* ---- file descriptors across the process boundary ------------------------- */
+/* A client fd named in a request arrives on the control socket under a token.
+ * gb_sv_fd_take() waits for it and returns a server-side fd that is closed
+ * when the request has been handled (unless gb_sv_fd_keep()). -1 on failure. */
+int gb_sv_fd_take(struct gb_sth *t, uint32_t token);
+void gb_sv_fd_keep(struct gb_sth *t, int fd); /* ownership moved to the driver */
+void gb_sv_fd_release(struct gb_sth *t);
+/* Send an fd to the client; returns the token the reply carries (0: failed). */
+uint32_t gb_sv_fd_give(int fd);
+/* Attribute list whose fd-valued entries carry tokens: returns a copy (in the
+ * per-message scratch) with the fds swapped in. wsz is 4 or 8. */
+const void *gb_sv_xlat_fd_attribs(struct gb_sth *t, const void *list,
+				  int64_t n, int wsz);
+void gb_sv_fd_keep_all(struct gb_sth *t); /* the driver owns them now */
 
 /* ---- upcalls (server -> client) ------------------------------------------ */
 /* Queue a non-blocking upcall; safe from any thread (driver callbacks). It is

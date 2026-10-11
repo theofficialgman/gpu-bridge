@@ -269,6 +269,33 @@ if(NOT GB_PURE32 OR GB_SERVER_PATH)
   set(GB_X_RUN "${GB_X_RUN_SAVE}")
 endif()
 
+# file descriptors across the bridge (dma-buf export/import, native fences) ----------
+if(NOT GB_PURE32)
+  add_executable(fd_native tests/loopback/fd_smoke.c)
+  target_link_libraries(fd_native EGL GLESv2)
+  add_executable(fd_b64 tests/loopback/fd_smoke.c)
+  target_link_libraries(fd_b64 gb64_gl)
+  target_compile_definitions(fd_b64 PRIVATE GB_BRIDGE)
+  add_test(NAME fd_native COMMAND fd_native)
+  set_tests_properties(fd_native PROPERTIES ENVIRONMENT "EGL_PLATFORM=surfaceless"
+                       SKIP_RETURN_CODE 77)
+  add_test(NAME fd_b64 COMMAND fd_b64)
+  set_tests_properties(fd_b64 PROPERTIES ENVIRONMENT "${GB_TEST_ENV_EGL}"
+                       SKIP_RETURN_CODE 77)
+endif()
+if(GB_HOST_CAN_M32)
+  add_executable(fd_b32 tests/loopback/fd_smoke.c)
+  gb_m32(fd_b32)
+  target_link_libraries(fd_b32 gb32_gl)
+  target_compile_definitions(fd_b32 PRIVATE GB_BRIDGE)
+endif()
+if(NOT GB_PURE32 OR GB_SERVER_PATH)
+  set(GB_X_RUN_SAVE "${GB_X_RUN}")
+  set(GB_X_RUN "")
+  gb_add_peer32_test(fd_b32 fd_b32 "${GB_TEST_ENV_EGL}")
+  set(GB_X_RUN "${GB_X_RUN_SAVE}")
+endif()
+
 # EGL window (Strategy X) ----------------------------------------------------------
 if(NOT GB_PURE32)
   add_executable(x11_native tests/loopback/x11_window.c)

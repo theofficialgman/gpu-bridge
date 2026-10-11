@@ -177,6 +177,8 @@ void gb_cl_end(struct gb_cl *cx, struct gb_out *o);
 int gb_cl_wait_reply(struct gb_cl *cx, struct gb_in *in, uint32_t op);
 void gb_cl_poll_upcalls(struct gb_cl *cx);
 void gb_state_free(uint32_t ctx_id);
+uint32_t gb_cl_fd_put(int fd);   /* client fd -> token the server can use */
+int gb_cl_fd_get(uint32_t token); /* fd the server returned under token */
 void gb_cl_ext_list_invalidate(void);
 void gb_cl_debug_update_sync(struct gb_cl *cx);
 void gb_cl_set_error(struct gb_cl *cx, uint32_t op);
