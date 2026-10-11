@@ -24,6 +24,9 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <time.h>
+
+#define GB_OPS_NAMES 1 /* want gb_op_names[] for GB_STATS */
 #include "gb_client_impl.h"
 
 extern char **environ;
@@ -260,9 +263,102 @@ struct gb_cl *gb_cl_get(void)
 	return c;
 }
 
+/* ---- GB_STATS: per-opcode call/stall accounting -------------------------------- */
+
+#define STAT_SLOTS (GB_OP_COUNT + 64)
+static int g_stats_on = -1;
+static struct {
+	uint64_t calls, syncs, wait_ns, bytes;
+} g_stat[STAT_SLOTS];
+
+static inline unsigned stat_slot(uint32_t op)
+{
+	if (op >= GB_OPX_BASE)
+		return GB_OP_COUNT + (op - GB_OPX_BASE) % 64;
+	return op < GB_OP_COUNT ? op : 0;
+}
+
+static inline uint64_t mono_ns(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+
+static const char *stat_name(unsigned slot)
+{
+	static const char *const opx[] = { "Opx_GetDisplay", "Opx_QueryString",
+		"Opx_GetString", "Opx_ShaderSource", "Opx_DrawClient",
+		"Opx_CreateWindowSurface", "Opx_OpenXDisplay", "Opx_GLXString",
+		"Opx_GLXFBConfigs", "Opx_BufferRead" };
+	if (slot < GB_OP_COUNT)
+		return gb_op_names[slot];
+	unsigned i = slot - GB_OP_COUNT;
+	return i < sizeof(opx) / sizeof(opx[0]) ? opx[i] : "?";
+}
+
+static void stats_report(void)
+{
+	if (g_stats_on != 1)
+		return;
+	uint64_t tc = 0, ts = 0, tw = 0;
+	for (unsigned i = 0; i < STAT_SLOTS; i++) {
+		tc += g_stat[i].calls;
+		ts += g_stat[i].syncs;
+		tw += g_stat[i].wait_ns;
+	}
+	fprintf(stderr, "\n== gpu-bridge stats: %llu calls, %llu synchronous, "
+		"%.1f ms waiting on replies ==\n", (unsigned long long)tc,
+		(unsigned long long)ts, tw / 1e6);
+	/* top by wait time, then by call count */
+	for (int pass = 0; pass < 2; pass++) {
+		fprintf(stderr, "%s\n", pass ? " most called:" :
+			" most time stalled on replies:");
+		char used[STAT_SLOTS] = { 0 };
+		for (int n = 0; n < 10; n++) {
+			int best = -1;
+			uint64_t bv = 0;
+			for (unsigned i = 0; i < STAT_SLOTS; i++) {
+				uint64_t v = pass ? g_stat[i].calls
+						  : g_stat[i].wait_ns;
+				if (!used[i] && v > bv) {
+					bv = v;
+					best = (int)i;
+				}
+			}
+			if (best < 0)
+				break;
+			used[best] = 1;
+			fprintf(stderr, "   %-34s calls %9llu  sync %9llu  "
+				"wait %9.1f ms  %8.1f KB\n",
+				stat_name((unsigned)best),
+				(unsigned long long)g_stat[best].calls,
+				(unsigned long long)g_stat[best].syncs,
+				g_stat[best].wait_ns / 1e6,
+				g_stat[best].bytes / 1024.0);
+		}
+	}
+}
+
+__attribute__((destructor)) static void stats_dtor(void)
+{
+	stats_report();
+}
+
 int gb_cl_begin(struct gb_cl *cx, struct gb_out *o, uint32_t op,
 		uint32_t total, uint32_t flags)
 {
+	if (__builtin_expect(g_stats_on != 0, 0)) {
+		if (g_stats_on < 0)
+			g_stats_on = getenv("GB_STATS") != NULL;
+		if (g_stats_on) {
+			unsigned s = stat_slot(op);
+			g_stat[s].calls++;
+			g_stat[s].bytes += total;
+			if (flags & GB_CMD_F_WANT_REPLY)
+				g_stat[s].syncs++;
+		}
+	}
 	int rc = gb_out_begin(o, &cx->chan.req, total);
 
 	if (rc) {
@@ -283,7 +379,11 @@ void gb_cl_end(struct gb_cl *cx, struct gb_out *o)
 
 int gb_cl_wait_reply(struct gb_cl *cx, struct gb_in *in, uint32_t op)
 {
+	uint64_t t0 = g_stats_on == 1 ? mono_ns() : 0;
 	int rc = gb_in_recv(in, &cx->chan.rsp, -1);
+
+	if (g_stats_on == 1)
+		g_stat[stat_slot(op)].wait_ns += mono_ns() - t0;
 
 	if (rc) {
 		cx->lost = 1;

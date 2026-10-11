@@ -16,6 +16,7 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <stddef.h>
+#include <time.h>
 #include <stdio.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -203,17 +204,32 @@ int gb_sv_geti(void *ctx, uint32_t pname)
 
 /* ---- worker --------------------------------------------------------------- */
 
+static uint64_t mono_ns(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+
 static void *worker_main(void *arg)
 {
 	struct gb_sth *t = arg;
+	static int stats = -1;
+
+	if (stats < 0)
+		stats = getenv("GB_STATS") != NULL;
 
 	for (;;) {
 		struct gb_in in;
+		uint64_t t0 = stats ? mono_ns() : 0;
 		int rc = gb_in_recv(&in, &t->chan.req, -1);
+		uint64_t t1 = stats ? mono_ns() : 0;
 		if (rc) {
 			gb_log("channel %u ends (%d)", t->id, rc);
 			break;
 		}
+		if (stats)
+			t->st_idle_ns += t1 - t0;
 		struct gb_cmd_hdr h;
 		if (in.size < sizeof(h)) {
 			gb_in_release(&in);
@@ -235,9 +251,39 @@ static void *worker_main(void *arg)
 		}
 		gb_tmp_reset(t);
 		gb_in_release(&in);
+		if (stats) {
+			uint64_t dt = mono_ns() - t1;
+			t->st_busy_ns += dt;
+			t->st_msgs++;
+			if (dt > 200000) { /* handlers taking > 200 us */
+				t->st_slow_ns += dt;
+				t->st_slow_msgs++;
+			}
+		}
 	}
 	gb_srv_scratch_free(t);
 	return NULL;
+}
+
+static struct gb_sth *g_threads[64];
+static int g_nthreads;
+
+static void report_stats(void)
+{
+	if (!getenv("GB_STATS"))
+		return;
+	for (int i = 0; i < g_nthreads; i++) {
+		struct gb_sth *t = g_threads[i];
+		fprintf(stderr, "gbd thread %u: %llu msgs, busy %.1f ms, "
+			"idle (waiting for client) %.1f ms, %.2f us/msg; "
+			"%llu slow msgs (>200us) took %.1f ms\n", t->id,
+			(unsigned long long)t->st_msgs, t->st_busy_ns / 1e6,
+			t->st_idle_ns / 1e6,
+			t->st_msgs ? t->st_busy_ns / 1e3 / (double)t->st_msgs
+				   : 0.0,
+			(unsigned long long)t->st_slow_msgs,
+			t->st_slow_ns / 1e6);
+	}
 }
 
 /* ---- control loop --------------------------------------------------------- */
@@ -253,6 +299,7 @@ static int serve(int sock)
 		int rc = gb_ctl_recv(sock, &m, &fd);
 		if (rc == -ECONNRESET || rc == -EPIPE) {
 			gb_log("client gone, exiting");
+			report_stats();
 			return 0;
 		}
 		if (rc) {
@@ -293,6 +340,8 @@ static int serve(int sock)
 					free(t);
 				} else {
 					t->id = next_id++;
+					if (g_nthreads < 64)
+						g_threads[g_nthreads++] = t;
 					reply.a[0] = t->id;
 					pthread_create(&t->thread, NULL,
 						       worker_main, t);

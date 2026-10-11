@@ -43,6 +43,8 @@ struct gb_sth {
 	uint32_t id;
 	struct gb_tmp_node *tmp; /* per-message scratch allocations */
 	struct gb_scratch *scratch; /* client-array upload buffers per ctx */
+	/* GB_STATS accounting (written by the worker, read at exit) */
+	uint64_t st_msgs, st_busy_ns, st_idle_ns, st_slow_ns, st_slow_msgs;
 };
 
 typedef void (*gb_srv_fn)(struct gb_sth *, const struct gb_cmd_hdr *,
