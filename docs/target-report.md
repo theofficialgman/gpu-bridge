@@ -33,7 +33,7 @@ A 2019 NVIDIA driver on a 2024 distribution: nothing about the userland is
 | Q6 | mmap of a Tegra dma-buf from AArch32 | Not examined (matters only for the future mapped-buffer / zero-copy work) |
 | Q7 | Fences / explicit sync | Not examined (swap is a synchronous call and the X path orders presentation) |
 | Q8 | Can a second X connection render into a window another connection created? | **Yes, for both GLX and EGL, on NVIDIA's own driver.** `glx_xconn` mode 1 renders and reads back correctly; the full `x11_b32`/`glx_b32` tests pass. This was the central bet of Strategy X |
-| Q9 | Extension surface | desktop GL: 369 native, 312 through the bridge; ES 3.2: 192 native, 174 bridged; EGL display extensions: 57 native, 37 bridged (see below) |
+| Q9 | Extension surface | desktop GL: 370 native, 362 through the bridge; ES 3.2: 193 native, 190 bridged; ES 1.1: 35 / 35; EGL display extensions: 56 native, 49 bridged (see below) |
 | Q10 | Per-call cost | see below |
 
 ## What was verified end to end on the device
@@ -84,35 +84,24 @@ APIs it serves.
 
 | List | native | bridge | native-only | bridge-only |
 |---|---|---|---|---|
-| desktop GL (compat 4.6) | 369 | 312 | 57 | 0 |
-| OpenGL ES 3.2 | 192 | 174 | 18 | 0 |
-| EGL display | 57 | 37 | 20 | 0 |
+| desktop GL (compat 4.6) | 370 | 362 | 8 | 0 |
+| OpenGL ES 3.2 | 193 | 190 | 3 | 0 |
+| OpenGL ES 1.1 | 35 | 35 | 0 | 0 |
+| EGL display | 56 | 49 | 7 | 0 |
+
+(Measured on the device with `tools/audit/ext_compare.c`, device platform; each
+context type lists its own extensions. Earlier in the project the desktop list
+was 369 vs 305, ES 192 vs 174 and ES1 had no API at all.)
+
+Still hidden: `GL_NV_path_rendering` (83 entry points), `GL_NV_draw_vulkan_image`,
+`GL_EXT_import_sync_object`, `GL_KTX_buffer_region`, `GL_NV_feature_query`,
+`GL_NV_timer_query` (ES), `EGL_WL_bind_wayland_display`, `EGL_NV_stream_attrib`
+and the extension-string-only items listed in STATUS.md.
 
 (An earlier measurement before the ES generator coverage fix was ES 195 native
 vs 112 bridged: the generator emitted only 3 ES extensions, and
 `EGL_EXT_platform_base` was hidden because two of its entry points were
 missing, which stopped piglit from obtaining a display at all.)
-
-Dropped on desktop GL: 44 `NV_*`, 4 `EXT_*`, 2 `ARB_*`, and vendor extras
-(`OVR`, `NVX`, ...). The ARB/KHR/EXT ones and why: `GL_KHR_debug` and
-`GL_ARB_debug_output` (debug callbacks need a server-to-client upcall),
-`GL_ARB_imaging` (7 colour-table/convolution/histogram getters not sized),
-`GL_EXT_direct_state_access` (10 of 255 entry points: server-sized
-texture-image getters and pointer-array getters), `GL_EXT_semaphore` and
-`GL_EXT_import_sync_object` (file descriptors), `GL_EXT_transform_feedback2`
-(not in the registry; reason not examined). Since the first measurement,
-`ARB_uniform_buffer_object`, `EXT_fog_coord`, `EXT_secondary_color`,
-`EXT_vertex_array`, `EXT_texture_edge_clamp`, `EXT_texture_lod` and
-`EXT_Cg_shader` have been restored (the first three were each missing 1-7 entry
-points, e.g. the `*PointerEXT` spellings).
-
-Dropped on ES: `KHR_debug`, `EXT_semaphore`, `EXT_multi_draw_indirect`,
-`OVR_multiview*`, and a number of NV extensions (`path_rendering`,
-`bindless_texture`, `gpu_shader5`, `sample_locations`, ...).
-
-Dropped on EGL: the stream family (`EGL_KHR_stream*`, `EGL_NV_stream_*`),
-`EGL_EXT_image_dma_buf_import_modifiers`, `EGL_EXT_client_sync`,
-`EGL_NV_nvrm_fence_sync`, `EGL_EXT_output_base`, and the Wayland ones.
 
 Versions are reported as the driver's own (4.6 / ES 3.2), so applications that
 gate on the version string rather than extension strings can still hit
@@ -259,6 +248,7 @@ from it are candidates for bridge bugs.
 | run 3 | 503 | 26 | 83 | 1 | 1 | 28 |
 | run 4 | 511 | 22 | 77 | 1 | 1 | 14 (one new, fixed) |
 | run 5 (default vendor choice) | 515 | 22 | 74 | 0 | 1 | 10 (4 not defects) |
+| run 6, NVIDIA forced on both sides (final library) | 516 | 19 | 75 | 1 | 1 (+1 warn) | 5 (all known non-defects, below) |
 
 What the sweep found (details and the generalised lessons are in
 [STATUS.md](STATUS.md), lessons 10-14):
@@ -314,3 +304,23 @@ Triage tooling kept on the device (`~/gb/pg`, `~/gb/gbd_gdb.sh`, `gbd_mc.sh`,
 selection; gdb works on the armhf client from the arm64 gdb (the client
 processes run natively as AArch32), and a gdb wrapper as `GB_SERVER` gives
 server backtraces.
+
+### Final Tegra result with the complete library (vendor forced to NVIDIA)
+
+Native arm64 515 pass / 21 fail / 75 skip / 1 crash; bridged armhf 516 / 19 /
+75 / 1 (+1 timeout). Five differences, none a bridge defect:
+`depth-clear-precision-check` (the armhf test binary loops forever on its
+`depth32` case, reproducible with plain Mesa llvmpipe and no bridge),
+`depthstencil-default_fb-clear` (flaky natively), `gl-1.4-multidrawarrays-errors`
+and `egl_ext_platform_device` (fail natively, pass bridged) and
+`egl_khr_fence_sync` (the test forks; natively EGL fails in the child). Since
+the previous table the GLES1 test, the three `GL_KHR_debug` context-flag tests
+and the dma-buf-modifiers test now pass.
+
+### Dev-machine loop (x86_64, Radeon + Mesa)
+
+The whole piglit `quick` profile (44,224 tests, ~15 min per side) runs natively
+and bridged on the dev machine's GPU through the DRM render node: 39,202 pass /
+4,531 skip / 96 fail / 385 crash / 10 warn on both sides, **0 differences**
+(STATUS.md, "Dev-machine conformance loop"). It found the Begin/End, list
+compile, shadow-reuse and indexed-getter bugs that the Tegra selection missed.
