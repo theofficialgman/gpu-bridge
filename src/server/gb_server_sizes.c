@@ -9,6 +9,7 @@
  * state that only exists in some API flavors is queried only there.
  */
 #define _GNU_SOURCE
+#include <stdio.h>
 #include <string.h>
 
 #include "gb_server_impl.h"

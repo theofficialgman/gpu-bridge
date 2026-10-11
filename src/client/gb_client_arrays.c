@@ -144,7 +144,9 @@ static int ctx_is_core(struct gb_ctxstate *st)
 			if (maj > 3 || (maj == 3 && min >= 2)) {
 				GLint mask = 0;
 				glGetIntegerv(0x9126 /* PROFILE_MASK */, &mask);
-				core = !(mask & 2); /* not COMPATIBILITY bit */
+				/* Core only when the core bit is set: legacy
+				 * contexts may report 0 (NVIDIA does). */
+				core = (mask & 1) && !(mask & 2);
 			}
 		}
 		st->core = (int8_t)core;
