@@ -26,6 +26,29 @@ static int g_fail;
 		}                                                          \
 	} while (0)
 
+/* Drawing before the X server has mapped (and exposed) a window is undefined
+ * by the pixel-ownership rule; a driver may discard every fragment. Wait for
+ * MapNotify + Expose, as real applications' event loops effectively do. */
+static void wait_exposed(Display *d, Window w)
+{
+	int mapped = 0, exposed = 0;
+
+	for (int i = 0; i < 200 && !(mapped && exposed); i++) {
+		while (XPending(d)) {
+			XEvent ev;
+			XNextEvent(d, &ev);
+			if (ev.xany.window != w)
+				continue;
+			if (ev.type == MapNotify)
+				mapped = 1;
+			else if (ev.type == Expose)
+				exposed = 1;
+		}
+		if (!(mapped && exposed))
+			usleep(10 * 1000);
+	}
+}
+
 static unsigned long pixel_at(Display *d, Window w, int x, int y)
 {
 	XImage *im = XGetImage(d, w, x, y, 1, 1, AllPlanes, ZPixmap);
@@ -33,6 +56,21 @@ static unsigned long pixel_at(Display *d, Window w, int x, int y)
 		return 0xdeadbeef;
 	unsigned long p = XGetPixel(im, 0, 0);
 	XDestroyImage(im);
+	return p;
+}
+
+/* The compositor and the driver's present path decide when a frame becomes
+ * visible to XGetImage; poll instead of sleeping a fixed time. */
+static unsigned long wait_pixel(Display *d, Window w, int x, int y,
+				unsigned long want, int timeout_ms)
+{
+	unsigned long p = 0;
+	for (int waited = 0; waited <= timeout_ms; waited += 20) {
+		p = pixel_at(d, w, x, y) & 0xffffff;
+		if (p == want)
+			break;
+		usleep(20 * 1000);
+	}
 	return p;
 }
 
@@ -90,6 +128,7 @@ int main(void)
 				   &swa);
 	XMapWindow(xd, win);
 	XSync(xd, False);
+	wait_exposed(xd, win);
 	printf("window XID 0x%lx\n", (unsigned long)win);
 
 	EGLSurface surf = eglCreateWindowSurface(dpy, cfg,
@@ -110,8 +149,7 @@ int main(void)
 	render(1.f, 0.f, 0.f, 160, 120);
 	CHECK(eglSwapBuffers(dpy, surf), "swap 1");
 	XSync(xd, False);
-	usleep(100 * 1000);
-	unsigned long px = pixel_at(xd, win, 80, 60);
+	unsigned long px = wait_pixel(xd, win, 80, 60, 0xff0000, 2000);
 	printf("frame 1 pixel: 0x%06lx (want 0xff0000)\n", px & 0xffffff);
 	CHECK((px & 0xffffff) == 0xff0000, "frame 1 pixel 0x%lx", px);
 
@@ -119,8 +157,7 @@ int main(void)
 	render(0.f, 0.f, 1.f, 160, 120);
 	CHECK(eglSwapBuffers(dpy, surf), "swap 2");
 	XSync(xd, False);
-	usleep(100 * 1000);
-	px = pixel_at(xd, win, 10, 10);
+	px = wait_pixel(xd, win, 10, 10, 0x0000ff, 2000);
 	printf("frame 2 pixel: 0x%06lx (want 0x0000ff)\n", px & 0xffffff);
 	CHECK((px & 0xffffff) == 0x0000ff, "frame 2 pixel 0x%lx", px);
 
@@ -135,8 +172,7 @@ int main(void)
 	printf("after resize: surface %dx%d\n", w, h);
 	CHECK(w == 200 && h == 150, "resized surface %dx%d", w, h);
 	XSync(xd, False);
-	usleep(100 * 1000);
-	px = pixel_at(xd, win, 190, 140);
+	px = wait_pixel(xd, win, 190, 140, 0x00ff00, 2000);
 	CHECK((px & 0xffffff) == 0x00ff00, "frame 3 pixel 0x%lx", px);
 
 	eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);

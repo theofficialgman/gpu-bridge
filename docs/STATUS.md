@@ -139,6 +139,13 @@ None of this is a Tegra number. Re-run `bench_b32` on the device in Phase 0.
    server, recursively. The client strips its own directory from the server's
    environment and the server refuses any library exporting
    `gb_bridge_client_marker`.
+9. **Draw only into an exposed window.** Rendering before the X server has
+   mapped/exposed a window is undefined by the pixel-ownership rule and
+   NVIDIA discards the fragments (everything reads back black). My tests
+   mapped and drew immediately: ~15% flaky on the Tegra, *natively too*. They
+   now wait for MapNotify + Expose and poll window readback instead of
+   sleeping. 0 failures in 130 runs afterwards. Real applications process
+   events first, so this never showed in glmark2/glxgears.
 8. **A "passing" run on the wrong renderer proves little.** The first GLX
    results were all llvmpipe (Xvfb); only the real-display runs say anything
    about acceleration.

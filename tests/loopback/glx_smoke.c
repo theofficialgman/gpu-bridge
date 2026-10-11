@@ -34,6 +34,29 @@ static int g_fail;
 #define W 64
 #define H 64
 
+/* Drawing before the X server has mapped (and exposed) a window is undefined
+ * by the pixel-ownership rule; a driver may discard every fragment. Wait for
+ * MapNotify + Expose, as real applications' event loops effectively do. */
+static void wait_exposed(Display *d, Window w)
+{
+	int mapped = 0, exposed = 0;
+
+	for (int i = 0; i < 200 && !(mapped && exposed); i++) {
+		while (XPending(d)) {
+			XEvent ev;
+			XNextEvent(d, &ev);
+			if (ev.xany.window != w)
+				continue;
+			if (ev.type == MapNotify)
+				mapped = 1;
+			else if (ev.type == Expose)
+				exposed = 1;
+		}
+		if (!(mapped && exposed))
+			usleep(10 * 1000);
+	}
+}
+
 static int near_px(const unsigned char *p, int r, int g, int b)
 {
 	return abs(p[0] - r) <= 3 && abs(p[1] - g) <= 3 && abs(p[2] - b) <= 3;
@@ -581,12 +604,13 @@ int main(void)
 	XSetWindowAttributes swa = { 0 };
 	swa.colormap = XCreateColormap(dpy, DefaultRootWindow(dpy), vi->visual,
 				       AllocNone);
-	swa.event_mask = StructureNotifyMask;
+	swa.event_mask = StructureNotifyMask | ExposureMask;
 	Window win = XCreateWindow(dpy, DefaultRootWindow(dpy), 0, 0, W, H, 0,
 				   vi->depth, InputOutput, vi->visual,
 				   CWColormap | CWEventMask, &swa);
 	XMapWindow(dpy, win);
 	XSync(dpy, False);
+	wait_exposed(dpy, win);
 
 	GLXContext ctx = glXCreateContext(dpy, vi, NULL, True);
 	CHECK(ctx != NULL, "glXCreateContext");
