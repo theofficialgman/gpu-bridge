@@ -1543,6 +1543,82 @@ GB_API void glGetPointerv(GLenum pname, void **params)
 	*params = st ? (void *)st->vao->a[slot].ptr : NULL;
 }
 
+/* ---- EXT_direct_state_access client-array entry points ---------------------------------- */
+
+/* pointer enum (+ index) -> array slot, -1 if not a pointer query */
+static int pointer_slot(GLenum pname, GLuint index)
+{
+	switch (pname) {
+	case 0x808E: return CA_VERTEX;
+	case 0x808F: return CA_NORMAL;
+	case 0x8090: return CA_COLOR;
+	case 0x8091: return CA_INDEX;
+	case 0x8092: return index < GB_MAX_TEXUNITS ? CA_TEX0 + (int)index : -1;
+	case 0x8093: return CA_EDGEFLAG;
+	case 0x8456: return CA_FOGCOORD;
+	case 0x845D: return CA_SECONDARY;
+	case 0x8645: /* VERTEX_ATTRIB_ARRAY_POINTER */
+		return index < GB_MAX_GENERIC ? CA_GENERIC0 + (int)index : -1;
+	default: return -1;
+	}
+}
+
+GB_API void glGetPointeri_vEXT(GLenum pname, GLuint index, void **params)
+{
+	struct gb_ctxstate *st = gb_cur_state_raw();
+	int slot = pointer_slot(pname, index);
+
+	if (!params)
+		return;
+	if (slot < 0 || !st) {
+		gb_cl_gl_error(0x0500);
+		*params = NULL;
+		return;
+	}
+	*params = (void *)st->vao->a[slot].ptr;
+}
+
+GB_API void glGetPointerIndexedvEXT(GLenum pname, GLuint index, void **params)
+{
+	glGetPointeri_vEXT(pname, index, params);
+}
+
+GB_API void glGetVertexArrayPointeri_vEXT(GLuint vaobj, GLuint index,
+					  GLenum pname, void **param)
+{
+	struct gb_ctxstate *st = gb_cur_state_raw();
+	struct gb_vao *v = st ? vao_get(st, vaobj, 0) : NULL;
+	int slot = pointer_slot(pname, index);
+
+	if (!param)
+		return;
+	if (slot < 0 || !v) {
+		gb_cl_gl_error(slot < 0 ? 0x0500 : 0x0502);
+		*param = NULL;
+		return;
+	}
+	*param = (void *)v->a[slot].ptr;
+}
+
+GB_API void glGetVertexArrayPointervEXT(GLuint vaobj, GLenum pname,
+					void **param)
+{
+	glGetVertexArrayPointeri_vEXT(vaobj, 0, pname, param);
+}
+
+GB_API void glMultiTexCoordPointerEXT(GLenum texunit, GLint size, GLenum type,
+				      GLsizei stride, const void *pointer)
+{
+	struct gb_ctxstate *st = gb_cur_state_raw();
+	GLuint unit = texunit - 0x84C0;
+
+	if (st && unit < GB_MAX_TEXUNITS &&
+	    gb_arr_pointer(st, CA_TEX0 + (int)unit, size, type, 0, 0, 0, stride,
+			   pointer))
+		return;
+	gbx_glMultiTexCoordPointerEXT(texunit, size, type, stride, pointer);
+}
+
 /* ---- legacy multi-draw extensions the registry does not list ---------------------------- */
 
 GB_API void glBlendEquationSeparateATI(GLenum modeRGB, GLenum modeA)

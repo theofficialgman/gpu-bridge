@@ -178,6 +178,75 @@ int64_t gb_sv_sz_pixels_tex(struct gb_sth *t, uint32_t target, int32_t level,
 				 vol ? d : GB_DEPTH_2D);
 }
 
+int64_t gb_sv_sz_pixels_dsa(struct gb_sth *t, int multi, uint32_t tex_or_unit,
+			    uint32_t target, int32_t level, uint32_t format,
+			    uint32_t type)
+{
+	GB_NATIVE(glGetTextureLevelParameterivEXT, void,
+		  (GLuint, GLenum, GLint, GLenum, GLint *));
+	GB_NATIVE(glGetMultiTexLevelParameterivEXT, void,
+		  (GLenum, GLenum, GLint, GLenum, GLint *));
+	GLint w = 0, h = 1, d = 1;
+
+	if (flavor() != FL_DESKTOP)
+		return -1;
+	if (multi && fn_glGetMultiTexLevelParameterivEXT) {
+		fn_glGetMultiTexLevelParameterivEXT(tex_or_unit, target, level,
+						    0x1000, &w);
+		fn_glGetMultiTexLevelParameterivEXT(tex_or_unit, target, level,
+						    0x1001, &h);
+		fn_glGetMultiTexLevelParameterivEXT(tex_or_unit, target, level,
+						    0x8071, &d);
+	} else if (!multi && fn_glGetTextureLevelParameterivEXT) {
+		fn_glGetTextureLevelParameterivEXT(tex_or_unit, target, level,
+						   0x1000, &w);
+		fn_glGetTextureLevelParameterivEXT(tex_or_unit, target, level,
+						   0x1001, &h);
+		fn_glGetTextureLevelParameterivEXT(tex_or_unit, target, level,
+						   0x8071, &d);
+	} else {
+		return -1;
+	}
+	int vol = target == 0x806F || target == 0x8C1A || target == 0x9009;
+
+	return gb_sv_pixel_bytes(GB_PM_PACK, format, type, w, h,
+				 vol ? d : GB_DEPTH_2D);
+}
+
+int64_t gb_sv_sz_ctex_dsa(struct gb_sth *t, int multi, uint32_t tex_or_unit,
+			  uint32_t target, int32_t level)
+{
+	GB_NATIVE(glGetTextureLevelParameterivEXT, void,
+		  (GLuint, GLenum, GLint, GLenum, GLint *));
+	GB_NATIVE(glGetMultiTexLevelParameterivEXT, void,
+		  (GLenum, GLenum, GLint, GLenum, GLint *));
+	GLint sz = 0;
+
+	if (multi && fn_glGetMultiTexLevelParameterivEXT)
+		fn_glGetMultiTexLevelParameterivEXT(tex_or_unit, target, level,
+						    0x86A0, &sz);
+	else if (!multi && fn_glGetTextureLevelParameterivEXT)
+		fn_glGetTextureLevelParameterivEXT(tex_or_unit, target, level,
+						   0x86A0, &sz);
+	else
+		return -1;
+	return sz;
+}
+
+int64_t gb_sv_sz_progstring_named(struct gb_sth *t, uint32_t program,
+				  uint32_t target)
+{
+	GB_NATIVE(glGetNamedProgramivEXT, void,
+		  (GLuint, GLenum, GLenum, GLint *));
+	GLint n = 0;
+
+	if (!fn_glGetNamedProgramivEXT)
+		return -1;
+	fn_glGetNamedProgramivEXT(program, target, 0x8627 /* PROGRAM_LENGTH */,
+				  &n);
+	return n < 0 ? -1 : n;
+}
+
 int64_t gb_sv_sz_ctex(struct gb_sth *t, uint32_t target, int32_t level)
 {
 	GB_NATIVE(glGetTexLevelParameteriv, void, (GLenum, GLint, GLenum, GLint *));

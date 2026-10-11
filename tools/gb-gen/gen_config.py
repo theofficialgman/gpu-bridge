@@ -131,6 +131,9 @@ _MANUAL = {
         "eglGetDisplayDriverName", "eglGetDisplayDriverConfig",
         # KHR_debug / ARB_debug_output: callbacks are upcalls; the string
         # calls take explicit lengths (gb_client_debug.c)
+        # EXT_direct_state_access: pointer getters answered from the shadow
+        "glGetPointeri_vEXT", "glGetPointerIndexedvEXT",
+        "glGetVertexArrayPointervEXT", "glGetVertexArrayPointeri_vEXT",
         "glDebugMessageCallback", "glDebugMessageCallbackKHR",
         "glDebugMessageCallbackARB", "glDebugMessageInsert",
         "glDebugMessageInsertKHR", "glDebugMessageInsertARB", "glObjectLabel",
@@ -195,6 +198,7 @@ _POINTER_FUNCS = {
     "glSecondaryColorPointer", "glFogCoordPointer", "glIndexPointer",
     "glEdgeFlagPointer", "glTexCoordPointer",
     "glVertexAttribIPointerEXT", "glVertexAttribLPointerEXT",
+    "glMultiTexCoordPointerEXT",
 }
 _DRAW_FUNCS = {
     "glDrawArrays", "glDrawArraysInstanced", "glDrawArraysInstancedARB",
@@ -333,6 +337,16 @@ COMPSIZE = {
 SERVER_SIZED = [
     (r"^glGetUniform(f|i|ui|d|i64|ui64)v(ARB|EXT|NV)?$", "uniform",
      [["program", "location"], ["programObj", "location"]]),
+    (r"^glGetTextureImageEXT$", "pixels_dsa",
+     [["texture", "target", "level", "format", "type"]]),
+    (r"^glGetMultiTexImageEXT$", "pixels_multi",
+     [["texunit", "target", "level", "format", "type"]]),
+    (r"^glGetCompressedTextureImageEXT$", "ctex_dsa",
+     [["texture", "target", "lod"]]),
+    (r"^glGetCompressedMultiTexImageEXT$", "ctex_multi",
+     [["texunit", "target", "lod"]]),
+    (r"^glGetNamedProgramStringEXT$", "progstring_named",
+     [["program", "target"]]),
     (r"^glGetTexImage$", "pixels_tex", [["target", "level", "format", "type"]]),
     (r"^glGetCompressedTexImage(ARB)?$", "ctex", [["target", "level"]]),
     (r"^glGetPixelMap(f|ui|us)v$", "pixelmap", [["map"]]),

@@ -126,6 +126,15 @@ int64_t gb_sv_sz_uniform(struct gb_sth *t, int wsz, uint32_t program,
 int64_t gb_sv_sz_pixels_tex(struct gb_sth *t, uint32_t target, int32_t level,
 			    uint32_t format, uint32_t type);
 int64_t gb_sv_sz_ctex(struct gb_sth *t, uint32_t target, int32_t level);
+/* EXT_direct_state_access variants: the texture is named, or addressed by
+ * texture unit */
+int64_t gb_sv_sz_pixels_dsa(struct gb_sth *t, int multi, uint32_t tex_or_unit,
+			    uint32_t target, int32_t level, uint32_t format,
+			    uint32_t type);
+int64_t gb_sv_sz_ctex_dsa(struct gb_sth *t, int multi, uint32_t tex_or_unit,
+			  uint32_t target, int32_t level);
+int64_t gb_sv_sz_progstring_named(struct gb_sth *t, uint32_t program,
+				  uint32_t target);
 int64_t gb_sv_sz_pixelmap(struct gb_sth *t, int wsz, uint32_t map);
 int64_t gb_sv_sz_uniformblock(struct gb_sth *t, int wsz, uint32_t program,
 			      uint32_t block, uint32_t pname);
@@ -153,6 +162,16 @@ int64_t gb_sv_sz_progstring(struct gb_sth *t, uint32_t target,
 #define GB_SZS_pixels_tex(t, op, wsz, tg, lv, f, ty) \
 	gb_sv_sz_pixels_tex((t), (tg), (lv), (f), (ty))
 #define GB_SZS_ctex(t, op, wsz, tg, lv) gb_sv_sz_ctex((t), (tg), (lv))
+#define GB_SZS_pixels_dsa(t, op, wsz, tx, tg, lv, f, ty) \
+	gb_sv_sz_pixels_dsa((t), 0, (tx), (tg), (lv), (f), (ty))
+#define GB_SZS_pixels_multi(t, op, wsz, tx, tg, lv, f, ty) \
+	gb_sv_sz_pixels_dsa((t), 1, (tx), (tg), (lv), (f), (ty))
+#define GB_SZS_ctex_dsa(t, op, wsz, tx, tg, lv) \
+	gb_sv_sz_ctex_dsa((t), 0, (tx), (tg), (lv))
+#define GB_SZS_ctex_multi(t, op, wsz, tx, tg, lv) \
+	gb_sv_sz_ctex_dsa((t), 1, (tx), (tg), (lv))
+#define GB_SZS_progstring_named(t, op, wsz, pg, tg) \
+	gb_sv_sz_progstring_named((t), (pg), (tg))
 #define GB_SZS_pixelmap(t, op, wsz, m) gb_sv_sz_pixelmap((t), (wsz), (m))
 #define GB_SZS_uniformblock(t, op, wsz, p, b, pn) \
 	gb_sv_sz_uniformblock((t), (wsz), (p), (b), (pn))
