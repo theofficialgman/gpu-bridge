@@ -143,6 +143,11 @@ int64_t gb_sv_sz_uniform(struct gb_sth *t, int wsz, uint32_t program,
 int64_t gb_sv_sz_pixels_tex(struct gb_sth *t, uint32_t target, int32_t level,
 			    uint32_t format, uint32_t type);
 int64_t gb_sv_sz_ctex(struct gb_sth *t, uint32_t target, int32_t level);
+/* ARB_imaging getters: which = 0 color table, 1 convolution, 2/3 separable
+ * row/column, 4 histogram, 5 minmax */
+int64_t gb_sv_sz_imaging(struct gb_sth *t, int which, uint32_t target,
+			 uint32_t format, uint32_t type);
+int64_t gb_sv_sz_progstring_nv(struct gb_sth *t, uint32_t id, uint32_t pname);
 /* EXT_direct_state_access variants: the texture is named, or addressed by
  * texture unit */
 int64_t gb_sv_sz_pixels_dsa(struct gb_sth *t, int multi, uint32_t tex_or_unit,
@@ -162,6 +167,9 @@ int64_t gb_sv_sz_progstring(struct gb_sth *t, uint32_t target,
 	gb_pname_count_class((cls), (uint32_t)(pname), gb_sv_geti, NULL)
 #define GB_BYTES_pixels1(m, f, t, w) \
 	gb_sv_pixel_bytes((m), (uint32_t)(f), (uint32_t)(t), (int64_t)(w), 1, GB_DEPTH_2D)
+#define GB_BYTES_pixels1t(m, tg, f, t, w) \
+	gb_sv_pixel_bytes((m), (uint32_t)(f), (uint32_t)(t), (int64_t)(w), 1, \
+			  GB_DEPTH_2D)
 #define GB_BYTES_pixels2(m, f, t, w, h) \
 	gb_sv_pixel_bytes((m), (uint32_t)(f), (uint32_t)(t), (int64_t)(w), \
 			  (int64_t)(h), GB_DEPTH_2D)
@@ -179,6 +187,14 @@ int64_t gb_sv_sz_progstring(struct gb_sth *t, uint32_t target,
 #define GB_SZS_pixels_tex(t, op, wsz, tg, lv, f, ty) \
 	gb_sv_sz_pixels_tex((t), (tg), (lv), (f), (ty))
 #define GB_SZS_ctex(t, op, wsz, tg, lv) gb_sv_sz_ctex((t), (tg), (lv))
+#define GB_SZS_img_ct(t, op, wsz, tg, f, ty) gb_sv_sz_imaging((t), 0, (tg), (f), (ty))
+#define GB_SZS_img_conv(t, op, wsz, tg, f, ty) gb_sv_sz_imaging((t), 1, (tg), (f), (ty))
+#define GB_SZS_img_sep_row(t, op, wsz, tg, f, ty) gb_sv_sz_imaging((t), 2, (tg), (f), (ty))
+#define GB_SZS_img_sep_col(t, op, wsz, tg, f, ty) gb_sv_sz_imaging((t), 3, (tg), (f), (ty))
+#define GB_SZS_img_hist(t, op, wsz, tg, f, ty) gb_sv_sz_imaging((t), 4, (tg), (f), (ty))
+#define GB_SZS_img_minmax(t, op, wsz, tg, f, ty) gb_sv_sz_imaging((t), 5, (tg), (f), (ty))
+#define GB_SZS_progstring_nv(t, op, wsz, id, pn) \
+	gb_sv_sz_progstring_nv((t), (id), (pn))
 #define GB_SZS_pixels_dsa(t, op, wsz, tx, tg, lv, f, ty) \
 	gb_sv_sz_pixels_dsa((t), 0, (tx), (tg), (lv), (f), (ty))
 #define GB_SZS_pixels_multi(t, op, wsz, tx, tg, lv, f, ty) \

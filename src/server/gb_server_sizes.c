@@ -247,6 +247,60 @@ int64_t gb_sv_sz_progstring_named(struct gb_sth *t, uint32_t program,
 	return n < 0 ? -1 : n;
 }
 
+int64_t gb_sv_sz_imaging(struct gb_sth *t, int which, uint32_t target,
+			 uint32_t format, uint32_t type)
+{
+	GB_NATIVE(glGetColorTableParameteriv, void, (GLenum, GLenum, GLint *));
+	GB_NATIVE(glGetConvolutionParameteriv, void, (GLenum, GLenum, GLint *));
+	GB_NATIVE(glGetHistogramParameteriv, void, (GLenum, GLenum, GLint *));
+	GLint w = 0, h = 1;
+
+	if (flavor() != FL_DESKTOP)
+		return -1;
+	switch (which) {
+	case 0: /* color table */
+		if (!fn_glGetColorTableParameteriv)
+			return -1;
+		fn_glGetColorTableParameteriv(target, 0x80D9, &w);
+		break;
+	case 1: /* convolution filter (2D has a height) */
+	case 2: /* separable row */
+	case 3: /* separable column: `height` pixels */
+		if (!fn_glGetConvolutionParameteriv)
+			return -1;
+		fn_glGetConvolutionParameteriv(target, 0x8018, &w);
+		if (which == 1 && target != 0x8010 /* CONVOLUTION_1D */)
+			fn_glGetConvolutionParameteriv(target, 0x8019, &h);
+		if (which == 3) {
+			fn_glGetConvolutionParameteriv(target, 0x8019, &w);
+			h = 1;
+		}
+		break;
+	case 4: /* histogram */
+		if (!fn_glGetHistogramParameteriv)
+			return -1;
+		fn_glGetHistogramParameteriv(target, 0x8026, &w);
+		break;
+	default: /* minmax: two pixels (minimum, maximum) */
+		w = 2;
+		break;
+	}
+	if (w < 0 || h < 0)
+		return -1;
+	return gb_sv_pixel_bytes(GB_PM_PACK, format, type, w, h, GB_DEPTH_2D);
+}
+
+int64_t gb_sv_sz_progstring_nv(struct gb_sth *t, uint32_t id, uint32_t pname)
+{
+	GB_NATIVE(glGetProgramivNV, void, (GLuint, GLenum, GLint *));
+	GLint n = 0;
+
+	if (!fn_glGetProgramivNV)
+		return -1;
+	fn_glGetProgramivNV(id, 0x8E2E /* PROGRAM_LENGTH_NV */, &n);
+	return n < 0 ? -1 : n;
+}
+
 int64_t gb_sv_sz_ctex(struct gb_sth *t, uint32_t target, int32_t level)
 {
 	GB_NATIVE(glGetTexLevelParameteriv, void, (GLenum, GLint, GLenum, GLint *));

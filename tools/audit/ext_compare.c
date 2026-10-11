@@ -72,8 +72,30 @@ int main(void)
 {
 	PFNEGLGETPLATFORMDISPLAYEXTPROC gpd =
 		(void *)eglGetProcAddress("eglGetPlatformDisplayEXT");
-	EGLDisplay d = gpd(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, NULL);
+	const char *plat = getenv("EXTCMP_PLATFORM"); /* surfaceless (default) | device */
+	EGLDisplay d = EGL_NO_DISPLAY;
 	EGLint a, b;
+
+	if (plat && !strcmp(plat, "device")) {
+		/* first hardware device (not the software rasterizer) */
+		PFNEGLQUERYDEVICESEXTPROC qd =
+			(void *)eglGetProcAddress("eglQueryDevicesEXT");
+		PFNEGLQUERYDEVICESTRINGEXTPROC qs =
+			(void *)eglGetProcAddress("eglQueryDeviceStringEXT");
+		EGLDeviceEXT devs[8];
+		EGLint nd = 0;
+
+		if (qd && qs && qd(8, devs, &nd))
+			for (int i = 0; i < nd && d == EGL_NO_DISPLAY; i++) {
+				const char *de = qs(devs[i], EGL_EXTENSIONS);
+
+				if (de && strstr(de, "EGL_MESA_device_software"))
+					continue;
+				d = gpd(EGL_PLATFORM_DEVICE_EXT, devs[i], NULL);
+			}
+	} else {
+		d = gpd(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, NULL);
+	}
 
 	words("EGL-client", eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS));
 	if (!eglInitialize(d, &a, &b))

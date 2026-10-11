@@ -208,7 +208,10 @@ def parse_len(cmd, pname, expr, params):
     if expr is None:
         return None
     pnames = {p["name"] for p in params}
-    for rx, key, cands in cfg.SERVER_SIZED:
+    for entry in cfg.SERVER_SIZED:
+        rx, key, cands = entry[:3]
+        if len(entry) > 3 and entry[3] != pname:
+            continue
         if re.match(rx, cmd):
             for cand in cands:
                 if all(a in pnames for a in cand) and (

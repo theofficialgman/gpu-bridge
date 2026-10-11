@@ -257,6 +257,9 @@ int64_t gb_cl_bitmap_bytes(int mode, int64_t w, int64_t h);
 	gb_pname_count_class((cls), (uint32_t)(pname), gb_cl_geti, NULL)
 #define GB_BYTES_pixels1(m, f, t, w) \
 	gb_cl_pixel_bytes((m), (uint32_t)(f), (uint32_t)(t), (int64_t)(w), 1, GB_DEPTH_2D)
+#define GB_BYTES_pixels1t(m, tg, f, t, w) \
+	gb_cl_pixel_bytes((m), (uint32_t)(f), (uint32_t)(t), (int64_t)(w), 1, \
+			  GB_DEPTH_2D)
 #define GB_BYTES_pixels2(m, f, t, w, h) \
 	gb_cl_pixel_bytes((m), (uint32_t)(f), (uint32_t)(t), (int64_t)(w), \
 			  (int64_t)(h), GB_DEPTH_2D)

@@ -238,6 +238,9 @@ LEN_OVERRIDES = {
     ("eglChooseConfig", "configs"): "config_size",
     ("eglGetConfigs", "configs"): "config_size",
     # array commands whose count is the 'count' parameter (x components)
+    ("glGetSeparableFilter", "span"): "0",     # reserved, must be NULL
+    ("glGetSeparableFilterEXT", "span"): "0",
+    ("glTransformFeedbackAttribsNV", "attribs"): "count*3",
     ("eglQueryDmaBufFormatsEXT", "formats"): "max_formats",
     ("eglQueryDmaBufModifiersEXT", "modifiers"): "max_modifiers",
     ("eglQueryDmaBufModifiersEXT", "external_only"): "max_modifiers",
@@ -341,6 +344,10 @@ COMPSIZE = {
     ("target",): "pname",              # glGet*i_v: class geti_v
     ("buffer",): "pname",              # glClearBuffer*v: class clearbuffer
     ("format", "type"): "pixel1",      # one texel (glClearTexImage, ...)
+    ("format", "type", "count"): "pixels1",       # glColorSubTable
+    ("target", "format", "type", "width"): "pixels1t",   # separable filter row
+    ("target", "format", "type", "height"): "pixels1t",  # ... column
+    ("value",): "pname",                # glGetIntegerui64vNV: class getv
     ("target", "stride", "order"): "map1",
     ("target", "ustride", "uorder", "vstride", "vorder"): "map2",
 }
@@ -361,6 +368,17 @@ SERVER_SIZED = [
      [["texunit", "target", "lod"]]),
     (r"^glGetNamedProgramStringEXT$", "progstring_named",
      [["program", "target"]]),
+    # ARB_imaging getters: sizes live in the image's own parameters
+    (r"^glGetColorTable(EXT)?$", "img_ct", [["target", "format", "type"]]),
+    (r"^glGetConvolutionFilter(EXT)?$", "img_conv",
+     [["target", "format", "type"]]),
+    (r"^glGetSeparableFilter(EXT)?$", "img_sep_row",
+     [["target", "format", "type"]], "row"),
+    (r"^glGetSeparableFilter(EXT)?$", "img_sep_col",
+     [["target", "format", "type"]], "column"),
+    (r"^glGetHistogram(EXT)?$", "img_hist", [["target", "format", "type"]]),
+    (r"^glGetMinmax(EXT)?$", "img_minmax", [["target", "format", "type"]]),
+    (r"^glGetProgramStringNV$", "progstring_nv", [["id", "pname"]]),
     (r"^glGetTexImage$", "pixels_tex", [["target", "level", "format", "type"]]),
     (r"^glGetCompressedTexImage(ARB)?$", "ctex", [["target", "level"]]),
     (r"^glGetPixelMap(f|ui|us)v$", "pixelmap", [["map"]]),
@@ -386,6 +404,8 @@ PNAME_CLASSES = [
      "texparam"),
     (r"^gl(Get)?TextureParameter.*$", "texparam"),
     (r"^glGet(Boolean|Double|Float|Integer)IndexedvEXT$", "geti_v"),
+    (r"^glGetIntegerui64vNV$", "getv"),
+    (r"^glGetIntegerui64i_vNV$", "geti_v"),
     (r"^glClear(Named)?(Framebuffer|Buffer)(f|i|ui)v$", "clearbuffer"),
 ]
 
@@ -447,6 +467,12 @@ EXT_NO_COMMANDS = {
     "GL_EXT_demote_to_helper_invocation", "GL_EXT_shader_clock",
     "GL_EXT_texture_rectangle", "GL_MESA_texture_signed_rgba",
     "GL_NV_ES1_1_compatibility",
+    "EGL_EXT_stream_acquire_mode", "EGL_NV_output_drm_flip_event",
+    "EGL_WL_wayland_eglstream", "EGL_NV_nvrm_fence_sync",
+    # NVIDIA GL/ES extensions with no entry points
+    "GL_EXTX_framebuffer_mixed_formats", "GL_EXT_transform_feedback2",
+    "GL_NV_EGL_stream_consumer_external", "GL_NV_ES3_1_compatibility",
+    "GL_NV_gpu_program4_1", "GL_NV_gpu_program_fp64",
     # desktop (enum-only)
     "GL_EXT_texture_edge_clamp", "GL_EXT_texture_lod", "GL_EXT_Cg_shader",
 }
