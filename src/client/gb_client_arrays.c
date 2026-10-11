@@ -2181,3 +2181,50 @@ GB_API void glImportSemaphoreFdEXT(GLuint semaphore, GLenum handleType, GLint fd
 	gbx_glImportSemaphoreFdEXT(semaphore, handleType,
 				   (GLint)gb_cl_fd_put(fd));
 }
+
+/* ---- NV_command_list: client-memory command streams ------------------------------------ */
+
+GB_API void glListDrawCommandsStatesClientNV(GLuint list, GLuint segment,
+					     const void **indirects,
+					     const GLsizei *sizes,
+					     const GLuint *states,
+					     const GLuint *fbos, GLuint count)
+{
+	struct gb_cl *cx = gb_cl_get();
+	struct gb_out o;
+	struct gb_w w;
+	uint64_t total = 0;
+
+	if (!cx || count > 4096 || (count && (!indirects || !sizes || !states ||
+					      !fbos)))
+		return;
+	for (GLuint i = 0; i < count; i++) {
+		if (sizes[i] < 0 || sizes[i] > (1 << 24) ||
+		    (sizes[i] && !indirects[i])) {
+			gb_cl_gl_error(0x0501);
+			return;
+		}
+		total += GB_ALIGN_UP((uint32_t)sizes[i], 8u);
+	}
+	if (total > GB_MAX_ARRAY_BYTES) {
+		gb_cl_gl_error(0x0505);
+		return;
+	}
+	uint32_t sz = GB_ALIGN_UP(16 + 12 + 12 * count, 8u) + (uint32_t)total;
+	if (gb_cl_msg_begin(cx, &o, &w, GB_OPX_ListDrawClient, sz, 0))
+		return;
+	gb_w_u32(&w, list);
+	gb_w_u32(&w, segment);
+	gb_w_u32(&w, count);
+	for (GLuint i = 0; i < count; i++)
+		gb_w_u32(&w, (uint32_t)sizes[i]);
+	for (GLuint i = 0; i < count; i++)
+		gb_w_u32(&w, states[i]);
+	for (GLuint i = 0; i < count; i++)
+		gb_w_u32(&w, fbos[i]);
+	for (GLuint i = 0; i < count; i++)
+		if (sizes[i])
+			memcpy(gb_w_blob(&w, (uint32_t)sizes[i]), indirects[i],
+			       (size_t)sizes[i]);
+	gb_cl_end(cx, &o);
+}

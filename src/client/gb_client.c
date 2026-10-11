@@ -379,6 +379,7 @@ static const char *stat_name(unsigned slot)
 		"Opx_SelectBuffer", "Opx_RenderMode", "Opx_Ping",
 		"Opx_DebugCallback", "Opx_DebugStr", "Opx_BlobFuncs",
 		"Opx_EglDebug", "Opx_ObjPtrLabel", "Opx_DriverString", "Opx_FdOp",
+		"Opx_ObjString", "Opx_ListDrawClient",
 		"Opx_ElementMax" };
 	if (slot < GB_OP_COUNT)
 		return gb_op_names[slot];

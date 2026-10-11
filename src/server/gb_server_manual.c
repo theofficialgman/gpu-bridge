@@ -619,6 +619,80 @@ static void h_driver_string(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	reply_string(t, h, s);
 }
 
+static void h_obj_string(struct gb_sth *t, const struct gb_cmd_hdr *h,
+			 struct gb_r *r)
+{
+	uint32_t kind = gb_r_u32(r), dpy = gb_r_u32(r), obj = gb_r_u32(r),
+		 name = gb_r_u32(r);
+
+	if (r->err || kind > 1) {
+		gb_sv_proto_error(t, h);
+		return;
+	}
+	GB_NATIVE(eglQueryOutputLayerStringEXT, const char *,
+		  (EGLDisplay, EGLOutputLayerEXT, EGLint));
+	GB_NATIVE(eglQueryOutputPortStringEXT, const char *,
+		  (EGLDisplay, EGLOutputPortEXT, EGLint));
+	EGLDisplay d = (EGLDisplay)gb_h2p(HK_DISPLAY, dpy);
+	const char *str = NULL;
+
+	if (kind == 0 && fn_eglQueryOutputLayerStringEXT)
+		str = fn_eglQueryOutputLayerStringEXT(
+			d, (EGLOutputLayerEXT)gb_h2p(HK_OUTLAYER, obj),
+			(EGLint)name);
+	else if (kind == 1 && fn_eglQueryOutputPortStringEXT)
+		str = fn_eglQueryOutputPortStringEXT(
+			d, (EGLOutputPortEXT)gb_h2p(HK_OUTPORT, obj),
+			(EGLint)name);
+	reply_string(t, h, str);
+}
+
+/*
+ * ListDrawClient: glListDrawCommandsStatesClientNV. The command streams are
+ * client memory (indirects[i], sizes[i] bytes); they are shipped inline.
+ *   u32 list, segment, count; u32 sizes[count], states[count], fbos[count];
+ *   then each stream as an 8-aligned blob.
+ */
+static void h_list_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
+			       struct gb_r *r)
+{
+	uint32_t list = gb_r_u32(r), seg = gb_r_u32(r), count = gb_r_u32(r);
+
+	if (r->err || count > 4096)
+		goto bad;
+	GLsizei *sizes = gb_tmp(t, 4 * (size_t)count + 8);
+	GLuint *states = gb_tmp(t, 4 * (size_t)count + 8);
+	GLuint *fbos = gb_tmp(t, 4 * (size_t)count + 8);
+	const void **ind = gb_tmp(t, sizeof(void *) * (size_t)count + 8);
+
+	if (!sizes || !states || !fbos || !ind)
+		goto bad;
+	for (uint32_t i = 0; i < count; i++)
+		sizes[i] = (GLsizei)gb_r_u32(r);
+	for (uint32_t i = 0; i < count; i++)
+		states[i] = gb_r_u32(r);
+	for (uint32_t i = 0; i < count; i++)
+		fbos[i] = gb_r_u32(r);
+	for (uint32_t i = 0; i < count; i++) {
+		if (sizes[i] < 0 || (uint32_t)sizes[i] > (1u << 24))
+			goto bad;
+		ind[i] = sizes[i] ? gb_r_blob(r, (uint32_t)sizes[i]) : NULL;
+		if (sizes[i] && !ind[i])
+			goto bad;
+	}
+	if (r->err)
+		goto bad;
+	GB_NATIVE(glListDrawCommandsStatesClientNV, void,
+		  (GLuint, GLuint, const void **, const GLsizei *,
+		   const GLuint *, const GLuint *, GLuint));
+	if (fn_glListDrawCommandsStatesClientNV)
+		fn_glListDrawCommandsStatesClientNV(list, seg, ind, sizes,
+						    states, fbos, count);
+	return;
+bad:
+	gb_sv_proto_error(t, h);
+}
+
 /*
  * FdOp: EGL calls that return file descriptors. The fds are sent over the
  * control socket under tokens that the reply carries.
@@ -631,10 +705,12 @@ static void h_fd_op(struct gb_sth *t, const struct gb_cmd_hdr *h,
 {
 	uint32_t sub = gb_r_u32(r), dpy = gb_r_u32(r), obj = gb_r_u32(r);
 
-	if (r->err || sub > 2) {
+	if (r->err || sub > 3) {
 		gb_sv_proto_error(t, h);
 		return;
 	}
+	GB_NATIVE(eglGetStreamFileDescriptorKHR, EGLint,
+		  (EGLDisplay, EGLStreamKHR));
 	GB_NATIVE(eglDupNativeFenceFDANDROID, EGLint, (EGLDisplay, EGLSyncKHR));
 	GB_NATIVE(eglExportDMABUFImageQueryMESA, EGLBoolean,
 		  (EGLDisplay, EGLImageKHR, int *, int *, uint64_t *));
@@ -645,12 +721,15 @@ static void h_fd_op(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	uint32_t nout = 0;
 
 	memset(out, 0, sizeof(out));
-	if (sub == 0) {
+	if (sub == 0 || sub == 3) {
 		int fd = -1;
 
-		if (fn_eglDupNativeFenceFDANDROID)
+		if (sub == 0 && fn_eglDupNativeFenceFDANDROID)
 			fd = fn_eglDupNativeFenceFDANDROID(
 				d, (EGLSyncKHR)gb_h2p(HK_SYNC, obj));
+		else if (sub == 3 && fn_eglGetStreamFileDescriptorKHR)
+			fd = fn_eglGetStreamFileDescriptorKHR(
+				d, (EGLStreamKHR)gb_h2p(HK_STREAM, obj));
 		out[0] = (uint32_t)fd;
 		if (fd >= 0) {
 			out[1] = gb_sv_fd_give(fd);
@@ -1552,6 +1631,8 @@ void gb_srv_manual_dispatch(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	case GB_OPX_ObjPtrLabel: h_obj_ptr_label(t, h, r); break;
 	case GB_OPX_DriverString: h_driver_string(t, h, r); break;
 	case GB_OPX_FdOp: h_fd_op(t, h, r); break;
+	case GB_OPX_ObjString: h_obj_string(t, h, r); break;
+	case GB_OPX_ListDrawClient: h_list_draw_client(t, h, r); break;
 	case GB_OPX_DebugCallback: h_debug_callback(t, h, r); break;
 	case GB_OPX_DebugStr: h_debug_str(t, h, r); break;
 	case GB_OPX_SelectBuffer: h_select_buffer(t, h, r); break;

@@ -130,7 +130,8 @@ for t in ("GLenum", "GLbitfield", "GLuint", "GLubyte", "GLushort", "GLboolean",
           "GLXPbufferSGIX", "GLXVideoSourceSGIX", "GLXVideoDeviceNV"):
     VAL[t] = ("u32", 4)
 for t in ("GLint", "GLsizei", "GLbyte", "GLshort", "GLfixed", "GLclampx",
-          "EGLint", "int", "Bool", "Status", "int32_t"):
+          "EGLint", "int", "Bool", "Status", "int32_t",
+          "EGLNativeFileDescriptorKHR"):
     VAL[t] = ("i32", 4)
 for t in ("GLfloat", "GLclampf"):
     VAL[t] = ("f32", 4)
@@ -149,6 +150,7 @@ HANDLES = {
     "EGLContext": "CONTEXT", "EGLImage": "IMAGE", "EGLImageKHR": "IMAGE",
     "EGLSync": "SYNC", "EGLSyncKHR": "SYNC", "EGLStreamKHR": "STREAM",
     "EGLDeviceEXT": "DEVICE", "GLsync": "GLSYNC",
+    "EGLOutputLayerEXT": "OUTLAYER", "EGLOutputPortEXT": "OUTPORT",
     "GLeglImageOES": "IMAGE",
     "GLXContext": "GLXCTX", "GLXFBConfig": "GLXFBC",
     "GLXFBConfigSGIX": "GLXFBC",
@@ -165,7 +167,8 @@ for t in ("GLint", "GLuint", "GLenum", "GLfloat", "GLsizei", "GLfixed",
           "unsigned int", "int32_t", "uint32_t", "GLhandleARB", "GLclampf"):
     ELEM[t] = ("raw", 4)
 for t in ("GLint64", "GLuint64", "GLdouble", "GLint64EXT", "GLuint64EXT",
-          "int64_t", "uint64_t", "GLclampd", "EGLuint64KHR", "EGLuint64NV"):
+          "int64_t", "uint64_t", "GLclampd", "EGLuint64KHR", "EGLuint64NV",
+          "EGLTimeKHR", "EGLTime"):
     ELEM[t] = ("raw", 8)
 for t in ("GLintptr", "GLsizeiptr", "EGLAttrib", "EGLAttribKHR", "GLintptrARB",
           "GLsizeiptrARB", "unsigned long"):

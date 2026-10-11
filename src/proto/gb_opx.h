@@ -45,6 +45,8 @@ enum gb_opx {
 	GB_OPX_ObjPtrLabel,       /* sync handle, bufsize -> len, label */
 	GB_OPX_DriverString,      /* dpy, which (0 name, 1 config) -> str */
 	GB_OPX_FdOp,              /* fd-returning EGL calls: sub, dpy, obj -> ... */
+	GB_OPX_ObjString,         /* kind (0 output layer, 1 port), dpy, obj, name -> str */
+	GB_OPX_ListDrawClient,    /* NV_command_list client command streams */
 	GB_OPX_ElementMax,        /* itype, count, byte off -> max index (i64, -1 = out of range) */
 	GB_OPX_END
 };

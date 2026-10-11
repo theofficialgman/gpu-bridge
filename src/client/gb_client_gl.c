@@ -439,6 +439,73 @@ static int fd_op(uint32_t sub, uint32_t dpy, uint32_t obj, uint32_t *out)
 	return bad ? -1 : 0;
 }
 
+GB_API EGLNativeFileDescriptorKHR eglGetStreamFileDescriptorKHR(
+	EGLDisplay dpy, EGLStreamKHR stream)
+{
+	uint32_t o[16];
+
+	if (fd_op(3, (uint32_t)(uintptr_t)dpy, (uint32_t)(uintptr_t)stream, o) ||
+	    (int32_t)o[0] < 0)
+		return EGL_NO_FILE_DESCRIPTOR_KHR;
+	return gb_cl_fd_get(o[1]);
+}
+
+GB_API EGLStreamKHR eglCreateStreamFromFileDescriptorKHR(
+	EGLDisplay dpy, EGLNativeFileDescriptorKHR file_descriptor)
+{
+	/* the server gets its own copy of the descriptor (as a token) */
+	return gbx_eglCreateStreamFromFileDescriptorKHR(
+		dpy, (EGLNativeFileDescriptorKHR)gb_cl_fd_put(file_descriptor));
+}
+
+static const char *obj_string(uint32_t kind, EGLDisplay dpy, void *obj,
+			      EGLint name)
+{
+	struct gb_cl *cx = gb_cl_get();
+	struct gb_out o;
+	struct gb_w w;
+
+	if (!cx || gb_cl_msg_begin(cx, &o, &w, GB_OPX_ObjString, 32,
+				   GB_CMD_F_WANT_REPLY))
+		return NULL;
+	gb_w_u32(&w, kind);
+	gb_w_u32(&w, (uint32_t)(uintptr_t)dpy);
+	gb_w_u32(&w, (uint32_t)(uintptr_t)obj);
+	gb_w_u32(&w, (uint32_t)name);
+	gb_cl_end(cx, &o);
+
+	struct gb_in in;
+	if (gb_cl_wait_reply(cx, &in, GB_OPX_ObjString))
+		return NULL;
+	struct gb_r r;
+	gb_r_init(&r, in.p, in.size);
+	uint32_t len = gb_r_u32(&r);
+	const char *res = NULL;
+
+	if (len != GB_NULL_LEN && len > 0 && len <= (1u << 20)) {
+		const char *s = gb_r_blob(&r, len);
+
+		if (s && !r.err && s[len - 1] == 0)
+			res = gb_cl_intern(s, len - 1);
+	}
+	gb_in_release(&in);
+	return res;
+}
+
+GB_API const char *eglQueryOutputLayerStringEXT(EGLDisplay dpy,
+						EGLOutputLayerEXT layer,
+						EGLint name)
+{
+	return obj_string(0, dpy, layer, name);
+}
+
+GB_API const char *eglQueryOutputPortStringEXT(EGLDisplay dpy,
+					       EGLOutputPortEXT port,
+					       EGLint name)
+{
+	return obj_string(1, dpy, port, name);
+}
+
 GB_API EGLint eglDupNativeFenceFDANDROID(EGLDisplay dpy, EGLSyncKHR sync)
 {
 	uint32_t o[16];

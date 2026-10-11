@@ -101,6 +101,8 @@ _MANUAL = {
         "eglCreatePlatformWindowSurfaceEXT",
         "eglCreatePlatformPixmapSurface", "eglCreatePlatformPixmapSurfaceEXT",
         # fds the server returns (OPX_FdOp)
+        "eglGetStreamFileDescriptorKHR", "eglQueryOutputLayerStringEXT",
+        "eglQueryOutputPortStringEXT", "glListDrawCommandsStatesClientNV",
         "eglDupNativeFenceFDANDROID", "eglExportDMABUFImageQueryMESA",
         "eglExportDMABUFImageMESA",
         # EGL_ANDROID_blob_cache: the driver's callbacks run on the server and
@@ -192,6 +194,7 @@ _ARRAY_STATE = {
     "eglCreateImage", "eglCreateImageKHR", "eglCreateSync",
     "eglCreateSyncKHR", "eglCreateSync64KHR",
     "glImportMemoryFdEXT", "glImportSemaphoreFdEXT",
+    "eglCreateStreamFromFileDescriptorKHR",
     # generic buffer bindings (needed to resolve glMapBuffer(target))
     "glBindBufferBase", "glBindBufferRange",
     # BUFFER_MAPPED / ACCESS / MAP_* describe the client-side mapping
@@ -245,6 +248,10 @@ LEN_OVERRIDES = {
     ("glGetSeparableFilter", "span"): "0",     # reserved, must be NULL
     ("glGetSeparableFilterEXT", "span"): "0",
     ("glTransformFeedbackAttribsNV", "attribs"): "count*3",
+    ("eglSetStreamMetadataNV", "data"): "size",
+    ("eglQueryStreamMetadataNV", "data"): "size",
+    ("eglGetOutputLayersEXT", "layers"): "max_layers",
+    ("eglGetOutputPortsEXT", "ports"): "max_ports",
     ("eglQueryDmaBufFormatsEXT", "formats"): "max_formats",
     ("eglQueryDmaBufModifiersEXT", "modifiers"): "max_modifiers",
     ("eglQueryDmaBufModifiersEXT", "external_only"): "max_modifiers",
@@ -291,6 +298,11 @@ for _f in ("glDrawElements", "glDrawRangeElements", "glDrawElementsInstanced",
            "glDrawElementsInstancedBaseVertexBaseInstance",
            "glDrawElementsInstancedEXT", "glDrawRangeElementsEXT"):
     OFFSET_ONLY.add((_f, "indices"))
+for _f in ("glMultiDrawArraysIndirectBindlessNV",
+           "glMultiDrawElementsIndirectBindlessNV",
+           "glMultiDrawArraysIndirectBindlessCountNV",
+           "glMultiDrawElementsIndirectBindlessCountNV"):
+    OFFSET_ONLY.add((_f, "indirect"))
 for _f in ("glDrawArraysIndirect", "glDrawElementsIndirect",
            "glMultiDrawArraysIndirect", "glMultiDrawElementsIndirect",
            "glMultiDrawArraysIndirectCount", "glMultiDrawElementsIndirectCount",
@@ -419,6 +431,7 @@ PNAME_CLASSES = [
 # whether the driver takes ownership on success (native fence) or merely reads
 # them during the call (dma-buf import).
 FD_PARAMS = {
+    ("eglCreateStreamFromFileDescriptorKHR", "file_descriptor"),
     ("glImportMemoryFdEXT", "fd"),
     ("glImportSemaphoreFdEXT", "fd"),
 }
