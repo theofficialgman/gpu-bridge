@@ -83,6 +83,24 @@ static void ortho_identity(void)
 
 /* ------------------------------------------------------------------------ */
 
+
+static struct {
+	int *calls;
+	char *last;
+	GLenum *sev;
+} dbg_state;
+
+static void GLAPIENTRY dbg_cb(GLenum source, GLenum type, GLuint id,
+			      GLenum severity, GLsizei length,
+			      const GLchar *message, const void *user)
+{
+	(void)source; (void)type; (void)id; (void)user;
+	if (dbg_state.calls && source == GL_DEBUG_SOURCE_APPLICATION) {
+		(*dbg_state.calls)++;
+		snprintf(dbg_state.last, 64, "%.*s", (int)length, message);
+		*dbg_state.sev = severity;
+	}
+}
 static void test_legacy(void)
 {
 	unsigned char px[4];
@@ -267,6 +285,41 @@ static void test_legacy(void)
 		CHECK(fb[0] == (float)GL_POLYGON_TOKEN && fb[1] == 3.f,
 		      "feedback header: %g %g", fb[0], fb[1]);
 		CHECK(glGetError() == GL_NO_ERROR, "select/feedback errors");
+	}
+
+	/* KHR_debug: the driver's callback runs on the server; with
+	 * DEBUG_OUTPUT_SYNCHRONOUS the application must see it before the
+	 * offending call returns */
+	{
+		static int calls;
+		static char last[64];
+		static GLenum last_sev;
+		void *cbp = NULL;
+
+		calls = 0;
+		last[0] = 0;
+		last_sev = 0;
+		glDebugMessageCallback(dbg_cb, &calls);
+		glGetPointerv(GL_DEBUG_CALLBACK_FUNCTION, &cbp);
+		CHECK(cbp == (void *)dbg_cb, "debug callback pointer %p", cbp);
+		glGetPointerv(GL_DEBUG_CALLBACK_USER_PARAM, &cbp);
+		CHECK(cbp == (void *)&calls, "debug user param %p", cbp);
+		glEnable(GL_DEBUG_OUTPUT);
+		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+		dbg_state.calls = &calls;
+		dbg_state.last = last;
+		dbg_state.sev = &last_sev;
+		glDebugMessageInsert(GL_DEBUG_SOURCE_APPLICATION,
+				     GL_DEBUG_TYPE_OTHER, 1234,
+				     GL_DEBUG_SEVERITY_HIGH, -1,
+				     "hello from the bridge");
+		CHECK(calls == 1, "debug callback calls: %d", calls);
+		CHECK(!strcmp(last, "hello from the bridge"),
+		      "debug message: '%s'", last);
+		CHECK(last_sev == GL_DEBUG_SEVERITY_HIGH, "severity %#x",
+		      last_sev);
+		glDebugMessageCallback(NULL, NULL);
+		glDisable(GL_DEBUG_OUTPUT);
 	}
 
 	/* error reporting */

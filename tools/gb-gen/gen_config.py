@@ -100,6 +100,9 @@ _MANUAL = {
         "eglCreateWindowSurface", "eglCreatePlatformWindowSurface",
         "eglCreatePlatformWindowSurfaceEXT",
         "eglCreatePlatformPixmapSurface", "eglCreatePlatformPixmapSurfaceEXT",
+        # EGL_ANDROID_blob_cache: the driver's callbacks run on the server and
+        # reach the application's functions as upcalls
+        "eglSetBlobCacheFuncsANDROID",
         # EGL_EXT_device_*: device handles are bridge ids; see OPX_EglDevice
         "eglQueryDevicesEXT", "eglQueryDeviceStringEXT",
         "eglQueryDeviceAttribEXT", "eglQueryDisplayAttribEXT",
@@ -119,6 +122,13 @@ _MANUAL = {
         # the driver retains the buffer pointer and writes at glRenderMode:
         # the server keeps a persistent buffer and returns its contents then
         "glSelectBuffer", "glFeedbackBuffer", "glRenderMode",
+        # KHR_debug / ARB_debug_output: callbacks are upcalls; the string
+        # calls take explicit lengths (gb_client_debug.c)
+        "glDebugMessageCallback", "glDebugMessageCallbackKHR",
+        "glDebugMessageCallbackARB", "glDebugMessageInsert",
+        "glDebugMessageInsertKHR", "glDebugMessageInsertARB", "glObjectLabel",
+        "glObjectLabelKHR", "glPushDebugGroup", "glPushDebugGroupKHR",
+        "glObjectPtrLabel", "glObjectPtrLabelKHR",
         # EXT_vertex_array: the extra `count` argument is not needed here
         "glVertexPointerEXT", "glNormalPointerEXT", "glColorPointerEXT",
         "glIndexPointerEXT", "glTexCoordPointerEXT", "glEdgeFlagPointerEXT",
@@ -364,9 +374,6 @@ UNSUPPORTED = {
     "glXCreateGLXPixmapMESA": "obsolete (use glXCreatePixmap)",
     # explicit-length strings (length < 0 means NUL-terminated): needs a
     # dedicated kind
-    "glDebugMessageInsert": "string with explicit length parameter",
-    "glObjectLabel": "string with explicit length parameter",
-    "glPushDebugGroup": "string with explicit length parameter",
 }
 
 # Extensions that add no entry points (behavior / enums only) and that the

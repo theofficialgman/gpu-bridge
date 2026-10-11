@@ -297,6 +297,52 @@ GB_API EGLImageKHR eglCreateImageKHR(EGLDisplay dpy, EGLContext ctx,
 	return gbx_eglCreateImageKHR(dpy, ctx, target, buffer, attrib_list);
 }
 
+/* ---- EGL_ANDROID_blob_cache ------------------------------------------------------ */
+
+static EGLSetBlobFuncANDROID g_blob_set;
+static EGLGetBlobFuncANDROID g_blob_get;
+
+GB_API void eglSetBlobCacheFuncsANDROID(EGLDisplay dpy,
+					EGLSetBlobFuncANDROID set,
+					EGLGetBlobFuncANDROID get)
+{
+	struct gb_cl *cx = gb_cl_get();
+	struct gb_out o;
+	struct gb_w w;
+
+	if (!cx)
+		return;
+	if (!set || !get) {
+		gb_cl_egl_error(EGL_BAD_PARAMETER);
+		return;
+	}
+	if (g_blob_set || g_blob_get) {
+		gb_cl_egl_error(EGL_BAD_PARAMETER); /* already set (BAD_ACCESS
+						     * in the spec; either
+						     * way: unchanged) */
+		return;
+	}
+	g_blob_set = set;
+	g_blob_get = get;
+	if (gb_cl_msg_begin(cx, &o, &w, GB_OPX_BlobFuncs, 24, 0))
+		return;
+	gb_w_u32(&w, (uint32_t)(uintptr_t)dpy);
+	gb_w_u32(&w, 1);
+	gb_cl_end(cx, &o);
+}
+
+void gb_cl_blob_set(const void *key, long ksz, const void *val, long vsz)
+{
+	if (g_blob_set)
+		g_blob_set(key, (EGLsizeiANDROID)ksz, val, (EGLsizeiANDROID)vsz);
+}
+
+long gb_cl_blob_get(const void *key, long ksz, void *val, long vmax)
+{
+	return g_blob_get ? (long)g_blob_get(key, (EGLsizeiANDROID)ksz, val,
+					     (EGLsizeiANDROID)vmax) : 0;
+}
+
 /* ---- EGL_EXT_device_* ----------------------------------------------------------------- */
 
 /* One request/reply; fills ok/n/value and up to `nmax` handles. */
@@ -438,6 +484,7 @@ GB_API EGLBoolean eglMakeCurrent(EGLDisplay dpy, EGLSurface draw,
 
 	if (r && cx)
 		cx->cur = ctx ? gb_state_for((uint32_t)(uintptr_t)ctx) : NULL;
+		gb_cl_debug_update_sync(cx);
 	return r;
 }
 

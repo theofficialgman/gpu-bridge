@@ -36,6 +36,8 @@ typedef int GLclampx; /* GLES1 fixed point */
 #include "gb_opx.h"
 
 struct gb_tmp_node;
+struct gb_upmsg;
+struct gb_deferred;
 
 /* Per client thread: one channel and one worker. */
 struct gb_sth {
@@ -46,6 +48,12 @@ struct gb_sth {
 	struct gb_scratch *scratch; /* client-array upload buffers per ctx */
 	void *ctx_key;              /* cached current EGL/GLX context */
 	int ctx_valid;              /* ctx_key is current (see CTX_CHANGERS) */
+	/* upcalls (see gb_opx.h): queued from any thread, flushed by the worker */
+	pthread_mutex_t up_lock;
+	struct gb_upmsg *up_head, *up_tail;
+	uint32_t up_seq;            /* sequence of the last blocking upcall */
+	int cur_req_sync;           /* the request being handled wants a reply */
+	struct gb_deferred *defer_head, *defer_tail;
 	/* GB_STATS accounting (written by the worker, read at exit) */
 	uint64_t st_msgs, st_busy_ns, st_idle_ns, st_slow_ns, st_slow_msgs;
 };
@@ -76,6 +84,22 @@ void gb_h_free(enum gb_handle_kind k, uint32_t id);
 void *gb_tmp(struct gb_sth *t, size_t bytes);
 void *gb_tmp_zero(struct gb_sth *t, size_t bytes);
 void gb_tmp_reset(struct gb_sth *t);
+
+/* ---- upcalls (server -> client) ------------------------------------------ */
+/* Queue a non-blocking upcall; safe from any thread (driver callbacks). It is
+ * written to the client before the next reply / after the current request. */
+void gb_sv_upcall_post(struct gb_sth *t, uint32_t id, const void *payload,
+		       uint32_t len);
+/* Worker thread only: write queued upcalls into the response ring. */
+void gb_sv_upcall_flush(struct gb_sth *t);
+/* Worker thread only: blocking upcall; returns the reply length or -1 (also
+ * -1 immediately if the current request is asynchronous: the client is not
+ * listening and a wait could deadlock against a full request ring). */
+int gb_sv_upcall_call(struct gb_sth *t, uint32_t id, const void *payload,
+		      uint32_t len, void *out, uint32_t outmax);
+/* The thread whose worker is running this code (for callbacks that carry no
+ * user pointer, e.g. EGL_ANDROID_blob_cache). */
+struct gb_sth *gb_sv_this_thread(void);
 
 /* ---- replies -------------------------------------------------------------- */
 int gb_sv_reply_begin(struct gb_sth *t, const struct gb_cmd_hdr *req,

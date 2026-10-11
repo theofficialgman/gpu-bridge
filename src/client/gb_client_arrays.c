@@ -1068,6 +1068,11 @@ GB_API void glEnable(GLenum cap)
 {
 	struct gb_ctxstate *st = gb_cur_state();
 
+	if (st && cap == 0x8242 /* DEBUG_OUTPUT_SYNCHRONOUS */) {
+		st->debug_sync = 1;
+		gb_cl_debug_update_sync(gb_cl_get());
+	}
+
 	if (st && cap >= GL_VERTEX_ARRAY_ && cap <= GL_EDGE_FLAG_ARRAY_) {
 		int s = cap_slot(st, cap);
 		if (s >= 0)
@@ -1082,6 +1087,11 @@ GB_API void glEnable(GLenum cap)
 GB_API void glDisable(GLenum cap)
 {
 	struct gb_ctxstate *st = gb_cur_state();
+
+	if (st && cap == 0x8242 /* DEBUG_OUTPUT_SYNCHRONOUS */) {
+		st->debug_sync = 0;
+		gb_cl_debug_update_sync(gb_cl_get());
+	}
 
 	if (st && cap >= GL_VERTEX_ARRAY_ && cap <= GL_EDGE_FLAG_ARRAY_) {
 		int s = cap_slot(st, cap);
@@ -1485,6 +1495,12 @@ GB_API void glGetPointerv(GLenum pname, void **params)
 	case 0x8093: slot = CA_EDGEFLAG; break;
 	case 0x8456: slot = CA_FOGCOORD; break;
 	case 0x845D: slot = CA_SECONDARY; break;
+	case 0x8244: /* DEBUG_CALLBACK_FUNCTION (KHR/ARB) */
+		*params = st ? (void *)st->debug_cb : NULL;
+		return;
+	case 0x8245: /* DEBUG_CALLBACK_USER_PARAM */
+		*params = st ? (void *)st->debug_user : NULL;
+		return;
 	default:
 		gb_cl_gl_error(0x0500);
 		*params = NULL;

@@ -129,6 +129,7 @@ endif()
 # libOpenGL.so.0) via symlinks, like a vendor driver does.
 set(GB_CLIENT_SRC src/client/gb_client.c src/client/gb_client_arrays.c
                   src/client/gb_client_strings.c src/client/gb_client_map.c
+                  src/client/gb_client_debug.c
                   src/client/gb_client_gl.c src/client/gb_client_glx.c
                   ${GB_GEN_DIR}/gb_client_all_gen.c)
 set(GB_SONAME_ALIASES libEGL.so.1 libGLESv2.so.2 libGLESv1_CM.so.1

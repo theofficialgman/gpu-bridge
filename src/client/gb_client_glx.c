@@ -154,6 +154,7 @@ GB_API Bool glXMakeCurrent(Display *dpy, GLXDrawable drawable, GLXContext ctx)
 
 	if (r && cx) {
 		cx->cur = ctx ? gb_state_for((uint32_t)(uintptr_t)ctx) : NULL;
+		gb_cl_debug_update_sync(cx);
 		cx->cur_xdpy = ctx ? dpy : NULL;
 	}
 	return r;
@@ -167,6 +168,7 @@ GB_API Bool glXMakeContextCurrent(Display *dpy, GLXDrawable draw,
 
 	if (r && cx) {
 		cx->cur = ctx ? gb_state_for((uint32_t)(uintptr_t)ctx) : NULL;
+		gb_cl_debug_update_sync(cx);
 		cx->cur_xdpy = ctx ? dpy : NULL;
 	}
 	return r;

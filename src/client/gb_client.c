@@ -291,7 +291,9 @@ static const char *stat_name(unsigned slot)
 		"Opx_GetString", "Opx_ShaderSource", "Opx_DrawClient",
 		"Opx_CreateWindowSurface", "Opx_OpenXDisplay", "Opx_GLXString",
 		"Opx_GLXFBConfigs", "Opx_BufferRead", "Opx_EglDevice", "Opx_DeviceString",
-		"Opx_SelectBuffer", "Opx_RenderMode", "Opx_ElementMax" };
+		"Opx_SelectBuffer", "Opx_RenderMode", "Opx_Ping",
+		"Opx_DebugCallback", "Opx_DebugStr", "Opx_BlobFuncs",
+		"Opx_ElementMax" };
 	if (slot < GB_OP_COUNT)
 		return gb_op_names[slot];
 	unsigned i = slot - GB_OP_COUNT;
@@ -360,7 +362,12 @@ int gb_cl_begin(struct gb_cl *cx, struct gb_out *o, uint32_t op,
 				g_stat[s].syncs++;
 		}
 	}
-	int rc = gb_out_begin(o, &cx->chan.req, total);
+	int rc;
+
+	if (__builtin_expect(gb_ring_peek(&cx->chan.rsp, &(uint32_t){0}) != NULL, 0) &&
+	    !cx->in_upcall)
+		gb_cl_poll_upcalls(cx);
+	rc = gb_out_begin(o, &cx->chan.req, total);
 
 	if (rc) {
 		cx->lost = 1;
@@ -372,16 +379,150 @@ int gb_cl_begin(struct gb_cl *cx, struct gb_out *o, uint32_t op,
 	return 0;
 }
 
+/* ---- server -> client upcalls ------------------------------------------------- */
+
+static void upcall_reply(struct gb_cl *cx, uint32_t id, uint32_t seq,
+			 const void *data, uint32_t len)
+{
+	struct gb_out o;
+	uint32_t size = GB_ALIGN_UP((uint32_t)sizeof(struct gb_cmd_hdr) + len, 8u);
+
+	if (gb_out_begin(&o, &cx->chan.req, size)) {
+		cx->lost = 1;
+		return;
+	}
+	struct gb_cmd_hdr h = { id, size, seq, GB_CMD_F_UPCALL | GB_CMD_F_REPLY };
+	memset(o.p, 0, size);
+	memcpy(o.p, &h, sizeof(h));
+	if (len)
+		memcpy(o.p + sizeof(h), data, len);
+	if (gb_out_end(&o))
+		cx->lost = 1;
+}
+
+/* blob cache callbacks, set with eglSetBlobCacheFuncsANDROID (gb_client_gl.c) */
+void gb_cl_blob_set(const void *key, long ksz, const void *val, long vsz);
+long gb_cl_blob_get(const void *key, long ksz, void *val, long vmax);
+
+static void dispatch_upcall(struct gb_cl *cx, const struct gb_in *in)
+{
+	struct gb_cmd_hdr h;
+	struct gb_r r;
+
+	memcpy(&h, in->p, sizeof(h));
+	gb_r_init(&r, in->p, in->size); /* the reader skips the header itself */
+	if (getenv("GB_TRACE_OPS"))
+		fprintf(stderr, "c: upcall %#x size %u\n", h.opcode, in->size);
+	cx->in_upcall++;
+	switch (h.opcode) {
+	case GB_UP_DebugMessage: {
+		uint32_t src = gb_r_u32(&r), type = gb_r_u32(&r),
+			 id = gb_r_u32(&r), sev = gb_r_u32(&r),
+			 n = gb_r_u32(&r);
+		(void)gb_r_u32(&r); /* pad: the blob below is 8-aligned */
+		const char *msg = n ? gb_r_blob(&r, n) : "";
+		struct gb_ctxstate *st = cx->cur;
+
+		if (!r.err && msg && st && st->debug_cb)
+			st->debug_cb(src, type, id, sev, (GLsizei)n, msg,
+				     st->debug_user);
+		break;
+	}
+	case GB_UP_BlobSet: {
+		uint32_t ksz = gb_r_u32(&r), vsz = gb_r_u32(&r);
+		const void *k = gb_r_blob(&r, ksz);
+		const void *v = gb_r_blob(&r, vsz);
+
+		if (!r.err && k && v)
+			gb_cl_blob_set(k, ksz, v, vsz);
+		break;
+	}
+	case GB_UP_BlobGet: { /* blocking */
+		uint32_t ksz = gb_r_u32(&r), vmax = gb_r_u32(&r);
+		const void *k = gb_r_blob(&r, ksz);
+		uint8_t *buf = NULL;
+		long n = 0;
+
+		if (!r.err && k && vmax <= (1u << 20) &&
+		    (buf = malloc(vmax + 8)))
+			n = gb_cl_blob_get(k, ksz, buf, vmax);
+		if (n < 0 || (uint32_t)n > vmax)
+			n = 0;
+		if (h.flags & GB_CMD_F_WANT_REPLY)
+			upcall_reply(cx, h.opcode, h.seq, buf, (uint32_t)n);
+		free(buf);
+		break;
+	}
+	default:
+		if (h.flags & GB_CMD_F_WANT_REPLY)
+			upcall_reply(cx, h.opcode, h.seq, NULL, 0);
+		break;
+	}
+	cx->in_upcall--;
+}
+
+/* Deliver whatever the server has queued; never waits. Called at the start
+ * of every call (cheap: one ring peek) and while waiting for a reply. */
+void gb_cl_poll_upcalls(struct gb_cl *cx)
+{
+	for (;;) {
+		struct gb_in in;
+		uint32_t sz;
+		const void *rec = gb_ring_peek(&cx->chan.rsp, &sz);
+
+		if (!rec)
+			return;
+		if (gb_in_recv(&in, &cx->chan.rsp, 0))
+			return;
+		struct gb_cmd_hdr h;
+		memcpy(&h, in.p, sizeof(h));
+		if (h.flags & GB_CMD_F_UPCALL)
+			dispatch_upcall(cx, &in);
+		/* anything else cannot be pending: no request is outstanding */
+		gb_in_release(&in);
+	}
+}
+
 void gb_cl_end(struct gb_cl *cx, struct gb_out *o)
 {
+	uint32_t flags = ((const struct gb_cmd_hdr *)o->p)->flags;
+
 	if (gb_out_end(o))
 		cx->lost = 1;
+	/* GL_DEBUG_OUTPUT_SYNCHRONOUS: the application expects its callback
+	 * before the offending call returns; async calls are made to
+	 * synchronise (the reply is preceded by the call's debug messages). */
+	if (__builtin_expect(cx->sync_dbg, 0) && !cx->in_upcall &&
+	    !(flags & GB_CMD_F_WANT_REPLY) && !cx->lost) {
+		struct gb_out po;
+		struct gb_w pw;
+		struct gb_in pin;
+
+		if (!gb_cl_msg_begin(cx, &po, &pw, GB_OPX_Ping, 16,
+				     GB_CMD_F_WANT_REPLY)) {
+			gb_cl_end(cx, &po);
+			if (!gb_cl_wait_reply(cx, &pin, GB_OPX_Ping))
+				gb_in_release(&pin);
+		}
+	}
 }
 
 int gb_cl_wait_reply(struct gb_cl *cx, struct gb_in *in, uint32_t op)
 {
 	uint64_t t0 = g_stats_on == 1 ? mono_ns() : 0;
-	int rc = gb_in_recv(in, &cx->chan.rsp, -1);
+	int rc;
+	struct gb_cmd_hdr h;
+
+	for (;;) {
+		rc = gb_in_recv(in, &cx->chan.rsp, -1);
+		if (rc)
+			break;
+		memcpy(&h, in->p, sizeof(h));
+		if (!(h.flags & GB_CMD_F_UPCALL))
+			break;
+		dispatch_upcall(cx, in); /* callbacks run in the calling thread */
+		gb_in_release(in);
+	}
 
 	if (g_stats_on == 1)
 		g_stat[stat_slot(op)].wait_ns += mono_ns() - t0;
@@ -391,8 +532,6 @@ int gb_cl_wait_reply(struct gb_cl *cx, struct gb_in *in, uint32_t op)
 		dbg("reply wait failed (%d): server lost", rc);
 		return rc;
 	}
-	struct gb_cmd_hdr h;
-	memcpy(&h, in->p, sizeof(h));
 	if (!(h.flags & GB_CMD_F_REPLY) || h.seq != cx->chan.seq ||
 	    h.opcode != op) {
 		dbg("reply desync: op %u/%u seq %u/%u", h.opcode, op, h.seq,

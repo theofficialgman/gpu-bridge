@@ -119,6 +119,11 @@ struct gb_ctxstate {
 	 * wrappers forward the call and the driver raises INVALID_OPERATION.
 	 * list_mode: GL_COMPILE / GL_COMPILE_AND_EXECUTE while a list is open
 	 * (a glBegin that is only compiled does not start immediate mode). */
+	/* KHR_debug / ARB_debug_output: the application's callback */
+	void (*debug_cb)(GLenum, GLenum, GLuint, GLenum, GLsizei, const GLchar *,
+			 const void *);
+	const void *debug_user;
+	uint8_t debug_sync; /* GL_DEBUG_OUTPUT_SYNCHRONOUS enabled */
 	uint8_t in_begin;
 	uint8_t save_begin;  /* a glBegin was seen while compiling a list */
 	uint16_t list_mode;
@@ -147,6 +152,8 @@ struct gb_cl {
 	int32_t egl_error;          /* locally generated EGL error (or 0) */
 	uint32_t gl_error;          /* locally generated GL error (or 0) */
 	Display *cur_xdpy;          /* Display the current GLX context uses */
+	uint8_t in_upcall;          /* dispatching an upcall (no re-entrant poll) */
+	uint8_t sync_dbg;           /* make async calls synchronous (debug sync) */
 };
 
 struct gb_proc {
@@ -168,6 +175,8 @@ int gb_cl_begin(struct gb_cl *cx, struct gb_out *o, uint32_t op,
 		uint32_t total, uint32_t flags);
 void gb_cl_end(struct gb_cl *cx, struct gb_out *o);
 int gb_cl_wait_reply(struct gb_cl *cx, struct gb_in *in, uint32_t op);
+void gb_cl_poll_upcalls(struct gb_cl *cx);
+void gb_cl_debug_update_sync(struct gb_cl *cx);
 void gb_cl_set_error(struct gb_cl *cx, uint32_t op);
 void gb_cl_unsupported(const char *what);
 void gb_cl_unsupported_egl(const char *what);

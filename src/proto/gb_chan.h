@@ -18,6 +18,9 @@
 #define GB_CMD_F_BIG (1u << 3)      /* hdr is a BIG announcement */
 #define GB_CMD_F_REPLY (1u << 4)    /* server -> client response */
 #define GB_CMD_F_ERROR (1u << 5)    /* reply: request was rejected */
+#define GB_CMD_F_UPCALL (1u << 6)   /* server -> client request (or its
+					 * reply, client -> server, with
+					 * GB_CMD_F_REPLY); opcode is GB_UP_* */
 #define GB_MAX_MSG_BYTES (512u << 20)
 
 struct gb_chan {

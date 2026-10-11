@@ -165,7 +165,10 @@ void gb_tmp_reset(struct gb_sth *t)
 int gb_sv_reply_begin(struct gb_sth *t, const struct gb_cmd_hdr *req,
 		      struct gb_out *o, uint32_t size)
 {
-	int rc = gb_out_begin(o, &t->chan.rsp, size);
+	int rc;
+
+	gb_sv_upcall_flush(t); /* debug messages precede the reply */
+	rc = gb_out_begin(o, &t->chan.rsp, size);
 	if (rc)
 		return rc;
 	struct gb_cmd_hdr h = { req->opcode, size, req->seq, GB_CMD_F_REPLY };
@@ -291,6 +294,141 @@ void gb_stat_native_add(uint32_t op, uint64_t ns)
 	}
 }
 
+/* ---- upcalls ---------------------------------------------------------------- */
+
+struct gb_upmsg {
+	struct gb_upmsg *next;
+	uint32_t id, len;
+	uint8_t data[];
+};
+
+struct gb_deferred {
+	struct gb_deferred *next;
+	uint32_t size;
+	uint8_t data[];
+};
+
+static __thread struct gb_sth *t_this; /* set in worker_main */
+
+struct gb_sth *gb_sv_this_thread(void)
+{
+	return t_this;
+}
+
+#define GB_UP_MAX_PAYLOAD (GB_CHAN_RING_BYTES / 8)
+
+void gb_sv_upcall_post(struct gb_sth *t, uint32_t id, const void *payload,
+		       uint32_t len)
+{
+	struct gb_upmsg *m;
+
+	if (!t || len > GB_UP_MAX_PAYLOAD)
+		return;
+	m = malloc(sizeof(*m) + len);
+	if (!m)
+		return;
+	m->next = NULL;
+	m->id = id;
+	m->len = len;
+	if (len)
+		memcpy(m->data, payload, len);
+	pthread_mutex_lock(&t->up_lock);
+	if (t->up_tail)
+		t->up_tail->next = m;
+	else
+		t->up_head = m;
+	t->up_tail = m;
+	pthread_mutex_unlock(&t->up_lock);
+}
+
+/* Write one upcall record; non-blocking: dropped if the ring is too full
+ * (the client may not be draining and the worker must never block here). */
+static int upcall_write(struct gb_sth *t, uint32_t id, const void *payload,
+			uint32_t len, uint32_t flags, uint32_t seq)
+{
+	uint32_t size = GB_ALIGN_UP((uint32_t)sizeof(struct gb_cmd_hdr) + len, 8u);
+	struct gb_out o;
+
+	if (gb_ring_free(&t->chan.rsp) < size + 64)
+		return -1;
+	if (gb_out_begin(&o, &t->chan.rsp, size))
+		return -1;
+	struct gb_cmd_hdr h = { id, size, seq, flags | GB_CMD_F_UPCALL };
+	memset(o.p, 0, size);
+	memcpy(o.p, &h, sizeof(h));
+	if (len)
+		memcpy(o.p + sizeof(h), payload, len);
+	gb_out_end(&o);
+	return 0;
+}
+
+void gb_sv_upcall_flush(struct gb_sth *t)
+{
+	struct gb_upmsg *m;
+
+	pthread_mutex_lock(&t->up_lock);
+	m = t->up_head;
+	t->up_head = t->up_tail = NULL;
+	pthread_mutex_unlock(&t->up_lock);
+	while (m) {
+		struct gb_upmsg *n = m->next;
+
+		upcall_write(t, m->id, m->data, m->len, 0, 0);
+		free(m);
+		m = n;
+	}
+}
+
+int gb_sv_upcall_call(struct gb_sth *t, uint32_t id, const void *payload,
+		      uint32_t len, void *out, uint32_t outmax)
+{
+	uint32_t seq = ++t->up_seq;
+	int result = -1;
+
+	if (!t->cur_req_sync || len > GB_UP_MAX_PAYLOAD)
+		return -1;
+	gb_sv_upcall_flush(t); /* keep ordering with earlier messages */
+	if (upcall_write(t, id, payload, len, GB_CMD_F_WANT_REPLY, seq))
+		return -1;
+	for (;;) {
+		struct gb_in in;
+
+		if (gb_in_recv(&in, &t->chan.req, -1))
+			return -1;
+		struct gb_cmd_hdr h;
+		if (in.size >= sizeof(h))
+			memcpy(&h, in.p, sizeof(h));
+		else
+			h.flags = 0;
+		if ((h.flags & GB_CMD_F_UPCALL) && (h.flags & GB_CMD_F_REPLY) &&
+		    h.seq == seq) {
+			uint32_t n = in.size - (uint32_t)sizeof(h);
+
+			if (n > outmax)
+				n = outmax;
+			if (out && n)
+				memcpy(out, in.p + sizeof(h), n);
+			result = (int)n;
+			gb_in_release(&in);
+			return result;
+		}
+		/* An ordinary request that was already queued: it must run
+		 * after this callback returns, not inside the driver. */
+		struct gb_deferred *d = malloc(sizeof(*d) + in.size);
+		if (d) {
+			d->next = NULL;
+			d->size = in.size;
+			memcpy(d->data, in.p, in.size);
+			if (t->defer_tail)
+				t->defer_tail->next = d;
+			else
+				t->defer_head = d;
+			t->defer_tail = d;
+		}
+		gb_in_release(&in);
+	}
+}
+
 static void *worker_main(void *arg)
 {
 	struct gb_sth *t = arg;
@@ -301,10 +439,28 @@ static void *worker_main(void *arg)
 	/* GB_TRACE_OPS: one line per request on stderr (debugging aid) */
 	int trace_ops = getenv("GB_TRACE_OPS") != NULL;
 
+	t_this = t;
 	for (;;) {
 		struct gb_in in;
+		struct gb_deferred *dcur = NULL;
 		uint64_t t0 = stats ? mono_ns() : 0;
-		int rc = gb_in_recv(&in, &t->chan.req, -1);
+		int rc;
+
+		if (t->defer_head) { /* requests read while awaiting an upcall */
+			struct gb_deferred *d = t->defer_head;
+
+			t->defer_head = d->next;
+			if (!t->defer_head)
+				t->defer_tail = NULL;
+			memset(&in, 0, sizeof(in));
+			in.p = d->data;
+			in.size = d->size;
+			in.heap = 0;
+			rc = 0;
+			dcur = d; /* freed after the message is handled */
+		} else {
+			rc = gb_in_recv(&in, &t->chan.req, -1);
+		}
 		uint64_t t1 = stats ? mono_ns() : 0;
 		if (rc) {
 			gb_log("channel %u ends (%d)", t->id, rc);
@@ -314,7 +470,10 @@ static void *worker_main(void *arg)
 			t->st_idle_ns += t1 - t0;
 		struct gb_cmd_hdr h;
 		if (in.size < sizeof(h)) {
-			gb_in_release(&in);
+			if (dcur)
+				free(dcur);
+			else
+				gb_in_release(&in);
 			break;
 		}
 		memcpy(&h, in.p, sizeof(h)); /* copy: ring memory is untrusted */
@@ -323,6 +482,7 @@ static void *worker_main(void *arg)
 
 		t_recent_cur = h.opcode;
 		t_recent[t_recent_n++ % RECENT_OPS] = h.opcode;
+		t->cur_req_sync = !!(h.flags & GB_CMD_F_WANT_REPLY);
 		if (trace_ops) {
 			char tb[96];
 			int tn = snprintf(tb, sizeof(tb), "op %s\n",
@@ -342,7 +502,11 @@ static void *worker_main(void *arg)
 			gb_sv_proto_error(t, &h);
 		}
 		gb_tmp_reset(t);
-		gb_in_release(&in);
+		gb_sv_upcall_flush(t); /* messages from asynchronous requests */
+		if (dcur)
+			free(dcur);
+		else
+			gb_in_release(&in);
 		if (stats) {
 			uint64_t dt = mono_ns() - t1;
 			t->st_busy_ns += dt;
@@ -471,6 +635,7 @@ static int serve(int sock)
 					free(t);
 				} else {
 					t->id = next_id++;
+					pthread_mutex_init(&t->up_lock, NULL);
 					if (g_nthreads < 64)
 						g_threads[g_nthreads++] = t;
 					reply.a[0] = t->id;

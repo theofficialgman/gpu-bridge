@@ -489,6 +489,166 @@ bad:
 	gb_sv_proto_error(t, h);
 }
 
+/* ---- debug output upcalls (GL_KHR_debug / ARB_debug_output) ------------------------- */
+
+/* Native callback: may run on a driver thread. Queue; the worker delivers. */
+static void gb_dbg_cb(GLenum source, GLenum type, GLuint id, GLenum severity,
+		      GLsizei length, const GLchar *message, const void *user)
+{
+	struct gb_sth *t = (struct gb_sth *)(uintptr_t)user;
+	if (getenv("GB_TRACE_OPS"))
+		fprintf(stderr, "s: debug callback src=%#x id=%u len=%d\n",
+			source, id, length);
+	uint32_t n = length >= 0 ? (uint32_t)length
+				 : (message ? (uint32_t)strlen(message) : 0);
+	uint8_t buf[32 + 1024];
+
+	if (n > 1024)
+		n = 1024;
+	/* six words so that the message blob starts 8-aligned on the wire */
+	uint32_t hdr[6] = { source, type, id, severity, n, 0 };
+	memcpy(buf, hdr, sizeof(hdr));
+	if (n)
+		memcpy(buf + sizeof(hdr), message, n);
+	gb_sv_upcall_post(t, GB_UP_DebugMessage, buf, (uint32_t)sizeof(hdr) + n);
+}
+
+static void h_ping(struct gb_sth *t, const struct gb_cmd_hdr *h, struct gb_r *r)
+{
+	(void)r;
+	reply_u64(t, h, 0);
+}
+
+static void h_debug_callback(struct gb_sth *t, const struct gb_cmd_hdr *h,
+			     struct gb_r *r)
+{
+	uint32_t on = gb_r_u32(r);
+
+	if (r->err) {
+		gb_sv_proto_error(t, h);
+		return;
+	}
+	typedef void (*cbfn)(GLenum, GLenum, GLuint, GLenum, GLsizei,
+			     const GLchar *, const void *);
+	GB_NATIVE(glDebugMessageCallback, void, (cbfn, const void *));
+	GB_NATIVE(glDebugMessageCallbackKHR, void, (cbfn, const void *));
+	GB_NATIVE(glDebugMessageCallbackARB, void, (cbfn, const void *));
+	void (*fn)(cbfn, const void *) = fn_glDebugMessageCallback
+		? fn_glDebugMessageCallback
+		: fn_glDebugMessageCallbackKHR ? fn_glDebugMessageCallbackKHR
+					       : fn_glDebugMessageCallbackARB;
+
+	if (fn)
+		fn(on ? gb_dbg_cb : NULL, on ? (const void *)t : NULL);
+}
+
+/* DebugStr: the explicit-length string calls of KHR_debug. */
+static void h_debug_str(struct gb_sth *t, const struct gb_cmd_hdr *h,
+			struct gb_r *r)
+{
+	uint32_t sub = gb_r_u32(r), a = gb_r_u32(r), b = gb_r_u32(r),
+		 c = gb_r_u32(r), d = gb_r_u32(r), slen = gb_r_u32(r);
+	const char *str = NULL;
+
+	if (r->err || sub > 3 || slen > (1u << 20))
+		goto bad;
+	if (slen != GB_NULL_LEN) {
+		str = gb_r_blob(r, slen);
+		if (!str)
+			goto bad;
+	}
+	GB_NATIVE(glDebugMessageInsert, void,
+		  (GLenum, GLenum, GLuint, GLenum, GLsizei, const GLchar *));
+	GB_NATIVE(glObjectLabel, void, (GLenum, GLuint, GLsizei, const GLchar *));
+	GB_NATIVE(glPushDebugGroup, void,
+		  (GLenum, GLuint, GLsizei, const GLchar *));
+	GB_NATIVE(glObjectPtrLabel, void, (const void *, GLsizei, const GLchar *));
+	GLsizei n = slen == GB_NULL_LEN ? 0 : (GLsizei)slen;
+
+	switch (sub) {
+	case 0: /* glDebugMessageInsert(source=a, type=b, id=c, severity=d) */
+		if (fn_glDebugMessageInsert)
+			fn_glDebugMessageInsert(a, b, c, d, n, str);
+		break;
+	case 1: /* glObjectLabel(identifier=a, name=b); NULL label clears */
+		if (fn_glObjectLabel)
+			fn_glObjectLabel(a, b, slen == GB_NULL_LEN ? 0 : n, str);
+		break;
+	case 2: /* glPushDebugGroup(source=a, id=b) */
+		if (fn_glPushDebugGroup)
+			fn_glPushDebugGroup(a, b, n, str);
+		break;
+	case 3: /* glObjectPtrLabel(ptr = sync handle a) */
+		if (fn_glObjectPtrLabel)
+			fn_glObjectPtrLabel(gb_h2p(HK_GLSYNC, a), n, str);
+		break;
+	}
+	return;
+bad:
+	gb_sv_proto_error(t, h);
+}
+
+/* ---- EGL_ANDROID_blob_cache upcalls -------------------------------------------------- */
+
+static void blob_set_cb(const void *key, EGLsizeiANDROID ksz, const void *val,
+			EGLsizeiANDROID vsz)
+{
+	struct gb_sth *t = gb_sv_this_thread();
+
+	if (!t || ksz < 0 || vsz < 0 || ksz > (1 << 16) || vsz > (1 << 17))
+		return; /* not the worker thread, or too large: no caching */
+	size_t n = 8 + (size_t)ksz + (size_t)vsz;
+	uint8_t *buf = malloc(n + 16);
+
+	if (!buf)
+		return;
+	uint32_t hdr[2] = { (uint32_t)ksz, (uint32_t)vsz };
+	/* blobs are 8-aligned on the wire: key, then value */
+	size_t off = 8;
+	memcpy(buf, hdr, 8);
+	memcpy(buf + off, key, (size_t)ksz);
+	off = GB_ALIGN_UP(off + (size_t)ksz, 8u);
+	memcpy(buf + off, val, (size_t)vsz);
+	gb_sv_upcall_post(t, GB_UP_BlobSet, buf, (uint32_t)(off + (size_t)vsz));
+	free(buf);
+}
+
+static EGLsizeiANDROID blob_get_cb(const void *key, EGLsizeiANDROID ksz,
+				   void *val, EGLsizeiANDROID vmax)
+{
+	struct gb_sth *t = gb_sv_this_thread();
+
+	if (!t || ksz < 0 || vmax < 0 || ksz > (1 << 16))
+		return 0;
+	if (vmax > (1 << 20))
+		vmax = 1 << 20;
+	uint8_t buf[8 + (1 << 16) + 8];
+	uint32_t hdr[2] = { (uint32_t)ksz, (uint32_t)vmax };
+
+	memcpy(buf, hdr, 8);
+	memcpy(buf + 8, key, (size_t)ksz);
+	int n = gb_sv_upcall_call(t, GB_UP_BlobGet, buf, 8 + (uint32_t)ksz, val,
+				  (uint32_t)vmax);
+	return n < 0 ? 0 : (EGLsizeiANDROID)n;
+}
+
+static void h_blob_funcs(struct gb_sth *t, const struct gb_cmd_hdr *h,
+			 struct gb_r *r)
+{
+	uint32_t dpy = gb_r_u32(r), on = gb_r_u32(r);
+
+	if (r->err) {
+		gb_sv_proto_error(t, h);
+		return;
+	}
+	GB_NATIVE(eglSetBlobCacheFuncsANDROID, void,
+		  (EGLDisplay, EGLSetBlobFuncANDROID, EGLGetBlobFuncANDROID));
+
+	if (fn_eglSetBlobCacheFuncsANDROID && on)
+		fn_eglSetBlobCacheFuncsANDROID((EGLDisplay)gb_h2p(HK_DISPLAY, dpy),
+					       blob_set_cb, blob_get_cb);
+}
+
 /* ---- selection / feedback buffers ------------------------------------------------- */
 
 #define GB_MAX_SELECT_WORDS (1u << 22)
@@ -1100,6 +1260,10 @@ void gb_srv_manual_dispatch(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	case GB_OPX_BufferRead: h_buffer_read(t, h, r); break;
 	case GB_OPX_ElementMax: h_element_max(t, h, r); break;
 	case GB_OPX_EglDevice: h_egl_device(t, h, r); break;
+	case GB_OPX_Ping: h_ping(t, h, r); break;
+	case GB_OPX_BlobFuncs: h_blob_funcs(t, h, r); break;
+	case GB_OPX_DebugCallback: h_debug_callback(t, h, r); break;
+	case GB_OPX_DebugStr: h_debug_str(t, h, r); break;
 	case GB_OPX_SelectBuffer: h_select_buffer(t, h, r); break;
 	case GB_OPX_RenderMode: h_render_mode(t, h, r); break;
 	case GB_OPX_DeviceString: h_device_string(t, h, r); break;
