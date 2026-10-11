@@ -40,7 +40,10 @@ struct gb_ring_ctrl {
 
 	_Alignas(64) _Atomic uint32_t head; /* consumer-written */
 	_Atomic uint32_t producer_sleeping;
-	uint32_t reserved2[14];
+	/* bytes a sleeping producer needs: the consumer wakes it only once at
+	 * least max(need, size/4) are free, not for every record it frees */
+	_Atomic uint32_t producer_need;
+	uint32_t reserved2[13];
 };
 
 _Static_assert(offsetof(struct gb_ring_ctrl, tail) == 64, "ctrl.tail offset");

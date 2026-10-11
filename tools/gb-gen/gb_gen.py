@@ -895,9 +895,11 @@ def emit_server(cmd, opname):
     ptypes = ", ".join(p["ctype"] for p in P) or "void"
     args = ", ".join(f"a_{p['name']}" for p in P)
     L.append(f"\tGB_NATIVE({cmd.name}, {cmd.ret}, ({ptypes}));")
+    L.append("\tuint64_t __t0 = gb_stat_now();")
     L.append(f"\tif (fn_{cmd.name}) " +
              ("ret = " if cmd.rk[0] != "void" else "") +
              f"fn_{cmd.name}({args});")
+    L.append("\tgb_stat_native(__op, __t0);")
 
     if cmd.api == "egl" and cmd.rk[0] in ("val", "handle"):
         L.append(f'\tGB_EGL_TRACE("{cmd.name}", (intptr_t)ret);')

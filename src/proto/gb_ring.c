@@ -245,6 +245,8 @@ void *gb_ring_reserve(struct gb_ring *r, uint32_t bytes, int64_t timeout_ns)
 			}
 		}
 
+		atomic_store_explicit(&c->producer_need, need,
+				      memory_order_relaxed);
 		atomic_store_explicit(&c->producer_sleeping, 1,
 				      memory_order_relaxed);
 		atomic_thread_fence(memory_order_seq_cst);
@@ -317,8 +319,23 @@ static void publish_head(struct gb_ring *r)
 
 	atomic_store_explicit(&c->head, r->rhead, memory_order_release);
 	atomic_thread_fence(memory_order_seq_cst);
-	if (atomic_load_explicit(&c->producer_sleeping, memory_order_relaxed))
-		futex_wake(&c->head);
+	if (atomic_load_explicit(&c->producer_sleeping, memory_order_relaxed)) {
+		/*
+		 * Hysteresis: a producer that outruns the consumer keeps the
+		 * ring full. Waking it for every freed record costs a futex
+		 * syscall per message (it writes one record and sleeps
+		 * again). Wake only once a useful amount of space exists.
+		 */
+		uint32_t tail = atomic_load_explicit(&c->tail,
+						     memory_order_relaxed);
+		uint32_t free_bytes = r->size - (tail - r->rhead);
+		uint32_t need = atomic_load_explicit(&c->producer_need,
+						     memory_order_relaxed);
+		uint32_t thresh = need > r->size / 4 ? need : r->size / 4;
+
+		if (free_bytes >= thresh)
+			futex_wake(&c->head);
+	}
 }
 
 const void *gb_ring_peek(struct gb_ring *r, uint32_t *size_out)

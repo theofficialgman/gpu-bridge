@@ -140,6 +140,20 @@ void gb_srv_manual_dispatch(struct gb_sth *t, const struct gb_cmd_hdr *h,
 			    struct gb_r *r);
 void gb_srv_scratch_free(struct gb_sth *t);
 
+/* GB_STATS: time spent inside the native driver call, per opcode. */
+extern int gb_stats_on;
+uint64_t gb_stat_mono_ns(void);
+void gb_stat_native_add(uint32_t op, uint64_t ns);
+static inline uint64_t gb_stat_now(void)
+{
+	return gb_stats_on ? gb_stat_mono_ns() : 0;
+}
+static inline void gb_stat_native(uint32_t op, uint64_t t0)
+{
+	if (gb_stats_on)
+		gb_stat_native_add(op, gb_stat_mono_ns() - t0);
+}
+
 /* Log if GB_DEBUG is set. */
 void gb_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 int gb_debug_enabled(void);

@@ -13,6 +13,7 @@
  *   GB_DEBUG=1                       log to stderr
  */
 #define _GNU_SOURCE
+#define GB_OPS_NAMES 1 /* gb_op_names[] for GB_STATS */
 #include <errno.h>
 #include <stdarg.h>
 #include <stddef.h>
@@ -204,11 +205,30 @@ int gb_sv_geti(void *ctx, uint32_t pname)
 
 /* ---- worker --------------------------------------------------------------- */
 
+int gb_stats_on;
+
 static uint64_t mono_ns(void)
 {
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+
+uint64_t gb_stat_mono_ns(void)
+{
+	return mono_ns();
+}
+
+static struct {
+	uint64_t calls, ns;
+} g_native[GB_OP_COUNT];
+
+void gb_stat_native_add(uint32_t op, uint64_t ns)
+{
+	if (op < GB_OP_COUNT) {
+		g_native[op].calls++;
+		g_native[op].ns += ns;
+	}
 }
 
 static void *worker_main(void *arg)
@@ -268,12 +288,51 @@ static void *worker_main(void *arg)
 static struct gb_sth *g_threads[64];
 static int g_nthreads;
 
+static void report_native(void)
+{
+	uint64_t total = 0, calls = 0;
+	char used[GB_OP_COUNT] = { 0 };
+
+	for (unsigned i = 0; i < GB_OP_COUNT; i++) {
+		total += g_native[i].ns;
+		calls += g_native[i].calls;
+	}
+	fprintf(stderr, "gbd native driver time: %.1f ms over %llu calls "
+		"(%.2f us/call)\n  top by time:\n", total / 1e6,
+		(unsigned long long)calls,
+		calls ? total / 1e3 / (double)calls : 0.0);
+	for (int n = 0; n < 12; n++) {
+		int best = -1;
+		uint64_t bv = 0;
+		for (unsigned i = 0; i < GB_OP_COUNT; i++)
+			if (!used[i] && g_native[i].ns > bv) {
+				bv = g_native[i].ns;
+				best = (int)i;
+			}
+		if (best < 0)
+			break;
+		used[best] = 1;
+		fprintf(stderr, "   %-32s %9llu calls %9.1f ms %7.2f us/call\n",
+			gb_op_names[best],
+			(unsigned long long)g_native[best].calls, bv / 1e6,
+			bv / 1e3 / (double)g_native[best].calls);
+	}
+}
+
 static void report_stats(void)
 {
 	if (!getenv("GB_STATS"))
 		return;
+	report_native();
 	for (int i = 0; i < g_nthreads; i++) {
 		struct gb_sth *t = g_threads[i];
+		clockid_t cid;
+		struct timespec cpu = { 0, 0 };
+		if (!pthread_getcpuclockid(t->thread, &cid))
+			clock_gettime(cid, &cpu);
+		fprintf(stderr, "gbd thread %u: CPU time actually used %.1f ms "
+			"(vs busy wall time below)\n", t->id,
+			cpu.tv_sec * 1e3 + cpu.tv_nsec / 1e6);
 		fprintf(stderr, "gbd thread %u: %llu msgs, busy %.1f ms, "
 			"idle (waiting for client) %.1f ms, %.2f us/msg; "
 			"%llu slow msgs (>200us) took %.1f ms\n", t->id,
@@ -374,6 +433,7 @@ int main(int argc, char **argv)
 		return 2;
 	}
 	g_debug = getenv("GB_DEBUG") != NULL;
+	gb_stats_on = getenv("GB_STATS") != NULL;
 
 	if (gb_native_init())
 		return 3;
