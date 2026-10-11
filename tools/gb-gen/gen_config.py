@@ -116,6 +116,8 @@ _ARRAY_STATE = {
     "glDeleteVertexArraysOES", "glVertexAttribDivisor",
     "glVertexAttribDivisorARB",
     "glPixelStorei", "glGetError", "glGetIntegerv",
+    # client-array state (size/type/stride/binding) lives in the shadow
+    "glGetFloatv", "glGetDoublev", "glGetBooleanv", "glGetInteger64v",
     # generic buffer bindings (needed to resolve glMapBuffer(target))
     "glBindBufferBase", "glBindBufferRange",
     # BUFFER_MAPPED / ACCESS / MAP_* describe the client-side mapping

@@ -290,7 +290,7 @@ static const char *stat_name(unsigned slot)
 	static const char *const opx[] = { "Opx_GetDisplay", "Opx_QueryString",
 		"Opx_GetString", "Opx_ShaderSource", "Opx_DrawClient",
 		"Opx_CreateWindowSurface", "Opx_OpenXDisplay", "Opx_GLXString",
-		"Opx_GLXFBConfigs", "Opx_BufferRead" };
+		"Opx_GLXFBConfigs", "Opx_BufferRead", "Opx_ElementMax" };
 	if (slot < GB_OP_COUNT)
 		return gb_op_names[slot];
 	unsigned i = slot - GB_OP_COUNT;

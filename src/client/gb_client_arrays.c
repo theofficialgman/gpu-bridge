@@ -193,6 +193,35 @@ void gb_arr_enable(struct gb_ctxstate *st, int slot, int on)
 
 /* ---- client-memory draws ------------------------------------------------------------- */
 
+/* Largest index in [off, off + count * size(itype)) of the bound element
+ * buffer, or -1 if the range is not inside the buffer. */
+static int64_t gb_cl_element_max(uint32_t itype, uint32_t count, uintptr_t off)
+{
+	struct gb_cl *cx = gb_cl_get();
+	struct gb_out o;
+	struct gb_w w;
+	int64_t max = -1;
+
+	if (!cx || gb_cl_msg_begin(cx, &o, &w, GB_OPX_ElementMax, 32,
+				   GB_CMD_F_WANT_REPLY))
+		return -1;
+	gb_w_u32(&w, itype);
+	gb_w_u32(&w, count);
+	gb_w_u64(&w, (uint64_t)off);
+	gb_cl_end(cx, &o);
+
+	struct gb_in in;
+	if (gb_cl_wait_reply(cx, &in, GB_OPX_ElementMax))
+		return -1;
+	struct gb_r r;
+	gb_r_init(&r, in.p, in.size);
+	uint64_t v = gb_r_u64(&r);
+	if (!r.err)
+		max = (int64_t)v;
+	gb_in_release(&in);
+	return max;
+}
+
 int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 		   int32_t first, int32_t count, uint32_t itype,
 		   const void *indices, int32_t instances, int is_instanced,
@@ -219,15 +248,42 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 		return 1;
 	}
 
+	uint32_t bound_off = 0;
+	int from_ebo = 0; /* indices live in the application's element buffer */
+
 	if (indexed) {
 		if (v->element_buffer) {
-			if (nclient) {
-				gb_cl_unsupported("client vertex arrays with "
-						  "buffer-object indices");
-				gb_cl_gl_error(0x0502);
+			if (!nclient)
+				return 0;
+			if (count < 0 || (is_instanced && instances <= 0))
+				return 0; /* let the driver report it */
+			if (count == 0)
+				return 1;
+			int ib = itype == 0x1401 ? 1 : itype == 0x1403 ? 2
+					   : itype == 0x1405 ? 4 : 0;
+			uintptr_t eoff = (uintptr_t)indices;
+			if (!ib) {
+				gb_cl_gl_error(0x0500 /* INVALID_ENUM */);
 				return 1;
 			}
-			return 0;
+			if (eoff > 0x7fffffffu)
+				return 0;
+			/* One round trip: the server reads the range. */
+			int64_t maxv = gb_cl_element_max(itype, (uint32_t)count,
+							 eoff);
+			if (maxv < 0) {
+				gb_cl_gl_error(0x0502 /* INVALID_OPERATION */);
+				return 1;
+			}
+			maxv += basevertex;
+			if (maxv < 0 || maxv >= (1 << 26)) {
+				gb_cl_gl_error(maxv < 0 ? 0x0502 : 0x0505);
+				return 1;
+			}
+			nverts = (uint32_t)maxv + 1;
+			bound_off = (uint32_t)eoff;
+			from_ebo = 1;
+			goto attrs;
 		}
 		if (count < 0 || (is_instanced && instances <= 0))
 			return 0; /* let the driver report it */
@@ -266,6 +322,7 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 		nverts = (uint32_t)count;
 	}
 
+attrs:;
 	uint32_t na = 0;
 	for (uint32_t s = 0; s < CA_COUNT; s++) {
 		const struct gb_carray *a = &v->a[s];
@@ -310,7 +367,7 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 		na++;
 	}
 
-	uint32_t sz = 16 + 48 + 28 * na;
+	uint32_t sz = 16 + 52 + 28 * na;
 	if (ibytes)
 		sz = GB_ALIGN_UP(sz, 8u) + ibytes;
 	for (uint32_t i = 0; i < na; i++)
@@ -318,7 +375,7 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 	if (gb_cl_msg_begin(cx, &o, &w, GB_OPX_DrawClient, sz, 0))
 		return 1;
 	gb_w_u32(&w, mode);
-	gb_w_u32(&w, indexed ? 1 : 0);
+	gb_w_u32(&w, from_ebo ? 2u : indexed ? 1u : 0u);
 	gb_w_u32(&w, (uint32_t)count);
 	gb_w_u32(&w, itype);
 	gb_w_u32(&w, nverts);
@@ -330,6 +387,7 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 	/* bindings the server restores afterwards (so it need not query them) */
 	gb_w_u32(&w, st->array_buffer);
 	gb_w_u32(&w, v->element_buffer);
+	gb_w_u32(&w, bound_off);
 	for (uint32_t i = 0; i < na; i++) {
 		gb_w_u32(&w, at[i].slot);
 		gb_w_u32(&w, at[i].size);
@@ -368,8 +426,78 @@ GB_API GLenum glGetError(void)
 	return gbx_glGetError();
 }
 
+/*
+ * Fixed-function client array state (size / type / stride / buffer binding).
+ * Client-memory arrays never reach the driver until a draw, so the driver's
+ * own state does not reflect the application's glXxxPointer calls; answer
+ * these queries from the shadow. Returns 1 and the value when pname is one.
+ */
+static int array_state_query(GLenum pname, int64_t *out)
+{
+	enum { SIZE, TYPE, STRIDE, BUF };
+	int slot, what;
+	struct gb_ctxstate *st = gb_cur_state();
+
+	switch (pname) {
+	case 0x807A: slot = CA_VERTEX;    what = SIZE;   break;
+	case 0x807B: slot = CA_VERTEX;    what = TYPE;   break;
+	case 0x807C: slot = CA_VERTEX;    what = STRIDE; break;
+	case 0x807E: slot = CA_NORMAL;    what = TYPE;   break;
+	case 0x807F: slot = CA_NORMAL;    what = STRIDE; break;
+	case 0x8081: slot = CA_COLOR;     what = SIZE;   break;
+	case 0x8082: slot = CA_COLOR;     what = TYPE;   break;
+	case 0x8083: slot = CA_COLOR;     what = STRIDE; break;
+	case 0x8085: slot = CA_INDEX;     what = TYPE;   break;
+	case 0x8086: slot = CA_INDEX;     what = STRIDE; break;
+	case 0x8088: slot = -1;           what = SIZE;   break; /* TEXCOORD */
+	case 0x8089: slot = -1;           what = TYPE;   break;
+	case 0x808A: slot = -1;           what = STRIDE; break;
+	case 0x808C: slot = CA_EDGEFLAG;  what = STRIDE; break;
+	case 0x8454: slot = CA_FOGCOORD;  what = TYPE;   break;
+	case 0x8455: slot = CA_FOGCOORD;  what = STRIDE; break;
+	case 0x845A: slot = CA_SECONDARY; what = SIZE;   break;
+	case 0x845B: slot = CA_SECONDARY; what = TYPE;   break;
+	case 0x845C: slot = CA_SECONDARY; what = STRIDE; break;
+	case 0x8896: slot = CA_VERTEX;    what = BUF;    break;
+	case 0x8897: slot = CA_NORMAL;    what = BUF;    break;
+	case 0x8898: slot = CA_COLOR;     what = BUF;    break;
+	case 0x8899: slot = CA_INDEX;     what = BUF;    break;
+	case 0x889A: slot = -1;           what = BUF;    break;
+	case 0x889B: slot = CA_EDGEFLAG;  what = BUF;    break;
+	case 0x889C: slot = CA_SECONDARY; what = BUF;    break;
+	case 0x889D: slot = CA_FOGCOORD;  what = BUF;    break;
+	default:
+		return 0;
+	}
+	if (!st || ctx_is_core(st))
+		return 0;
+	if (slot < 0) /* texture coordinate array of the client-active unit */
+		slot = CA_TEX0 + (int)(st->client_active_tex % GB_MAX_TEXUNITS);
+
+	const struct gb_carray *a = &st->vao->a[slot];
+	int is_set = a->type != 0;
+
+	switch (what) {
+	case SIZE:
+		*out = is_set ? a->size : 4;
+		break;
+	case TYPE:
+		*out = is_set ? (int64_t)a->type : 0x1406 /* FLOAT */;
+		break;
+	case STRIDE:
+		*out = is_set ? a->stride : 0;
+		break;
+	default:
+		*out = a->buffer;
+		break;
+	}
+	return 1;
+}
+
 GB_API void glGetIntegerv(GLenum pname, GLint *data)
 {
+	int64_t v;
+
 	if (pname == GL_NUM_EXTENSIONS_ && data) {
 		const struct gb_extlist *l = gb_cl_ext_list();
 		if (l) {
@@ -377,7 +505,55 @@ GB_API void glGetIntegerv(GLenum pname, GLint *data)
 			return;
 		}
 	}
+	if (data && array_state_query(pname, &v)) {
+		*data = (GLint)v;
+		return;
+	}
 	gbx_glGetIntegerv(pname, data);
+}
+
+GB_API void glGetInteger64v(GLenum pname, GLint64 *data)
+{
+	int64_t v;
+
+	if (data && array_state_query(pname, &v)) {
+		*data = v;
+		return;
+	}
+	gbx_glGetInteger64v(pname, data);
+}
+
+GB_API void glGetFloatv(GLenum pname, GLfloat *data)
+{
+	int64_t v;
+
+	if (data && array_state_query(pname, &v)) {
+		*data = (GLfloat)v;
+		return;
+	}
+	gbx_glGetFloatv(pname, data);
+}
+
+GB_API void glGetDoublev(GLenum pname, GLdouble *data)
+{
+	int64_t v;
+
+	if (data && array_state_query(pname, &v)) {
+		*data = (GLdouble)v;
+		return;
+	}
+	gbx_glGetDoublev(pname, data);
+}
+
+GB_API void glGetBooleanv(GLenum pname, GLboolean *data)
+{
+	int64_t v;
+
+	if (data && array_state_query(pname, &v)) {
+		*data = v != 0;
+		return;
+	}
+	gbx_glGetBooleanv(pname, data);
 }
 
 /* Generic buffer targets other than the four with dedicated fields. */

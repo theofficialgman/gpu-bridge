@@ -196,7 +196,29 @@ int main(void)
 	read_center(W, H, px);
 	CHECK(near_px(px, 255, 0, 255, 255), "VBO/IBO quad: %d %d %d %d",
 	      px[0], px[1], px[2], px[3]);
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+	/* --- 6b. client-memory vertex array drawn with a bound IBO ---------- */
+	glBindBuffer(GL_ARRAY_BUFFER, 0); /* IBO stays bound */
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, quad); /* client */
+	glUniform4f(loc, 0.f, 1.f, 1.f, 1.f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, (const void *)0);
+	read_center(W, H, px);
+	CHECK(near_px(px, 0, 255, 255, 255), "client array + IBO: %d %d %d %d",
+	      px[0], px[1], px[2], px[3]);
+	/* index range starting at a byte offset: only triangle (0,2,3) */
+	glClear(GL_COLOR_BUFFER_BIT);
+	glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT,
+		       (const void *)(3 * sizeof(GLushort)));
+	{
+		GLubyte a[4], b[4];
+		glReadPixels(W / 4, 3 * H / 4, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, a);
+		glReadPixels(3 * W / 4, H / 4, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, b);
+		/* (0,2,3) covers the upper-left half of the quad */
+		CHECK(near_px(a, 0, 255, 255, 255) && near_px(b, 0, 0, 0, 255),
+		      "IBO byte offset: a=%d %d %d b=%d %d %d", a[0], a[1],
+		      a[2], b[0], b[1], b[2]);
+	}
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
 	/* --- 7. texture upload from client memory -------------------------- */

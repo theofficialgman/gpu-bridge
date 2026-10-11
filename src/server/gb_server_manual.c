@@ -475,6 +475,86 @@ bad:
 	gb_sv_proto_error(t, h);
 }
 
+/*
+ * ElementMax: largest index in a range of the bound ELEMENT_ARRAY_BUFFER.
+ * Lets the client size the vertex data it must upload when client-memory
+ * attribute arrays are drawn with buffer-object indices. Replies -1 when the
+ * range is not inside the buffer (the draw would be invalid) so that no GL
+ * error is raised behind the application's back.
+ */
+static void h_element_max(struct gb_sth *t, const struct gb_cmd_hdr *h,
+			  struct gb_r *r)
+{
+	uint32_t itype = gb_r_u32(r), count = gb_r_u32(r);
+	uint64_t off = gb_r_u64(r);
+	int ib = itype == 0x1401 ? 1 : itype == 0x1403 ? 2
+		 : itype == 0x1405 ? 4 : 0;
+	int64_t max = -1;
+
+	if (r->err || !ib || count == 0 || count > (1u << 26) ||
+	    off > (1ull << 40))
+		goto bad;
+
+	GB_NATIVE(glGetBufferParameteriv, void, (GLenum, GLenum, GLint *));
+	GB_NATIVE(glGetBufferSubData, void, (GLenum, GLintptr, GLsizeiptr, void *));
+	GB_NATIVE(glMapBufferRange, void *,
+		  (GLenum, GLintptr, GLsizeiptr, GLbitfield));
+	GB_NATIVE(glUnmapBuffer, GLboolean, (GLenum));
+	GB_NATIVE(eglGetCurrentContext, EGLContext, (void));
+	uint64_t len = (uint64_t)count * (uint64_t)ib;
+	GLint size = 0;
+
+	if (fn_glGetBufferParameteriv)
+		fn_glGetBufferParameteriv(GL_ELEMENT_ARRAY_BUFFER,
+					  0x8764 /* BUFFER_SIZE */, &size);
+	if (size > 0 && off + len <= (uint64_t)size) {
+		int es = fn_eglGetCurrentContext &&
+			 fn_eglGetCurrentContext() != EGL_NO_CONTEXT;
+		uint8_t *buf = gb_tmp(t, (size_t)len + 8);
+		const uint8_t *src = NULL;
+
+		if (buf && !es && fn_glGetBufferSubData) {
+			fn_glGetBufferSubData(GL_ELEMENT_ARRAY_BUFFER,
+					      (GLintptr)off, (GLsizeiptr)len,
+					      buf);
+			src = buf;
+		} else if (fn_glMapBufferRange && fn_glUnmapBuffer) {
+			const uint8_t *p = fn_glMapBufferRange(
+				GL_ELEMENT_ARRAY_BUFFER, (GLintptr)off,
+				(GLsizeiptr)len, 0x0001 /* MAP_READ_BIT */);
+			if (p && buf) {
+				memcpy(buf, p, (size_t)len);
+				src = buf;
+			}
+			if (p)
+				fn_glUnmapBuffer(GL_ELEMENT_ARRAY_BUFFER);
+		}
+		if (src) {
+			for (uint32_t i = 0; i < count; i++) {
+				int64_t x = ib == 1 ? src[i]
+					  : ib == 2 ? ((const uint16_t *)src)[i]
+						    : ((const uint32_t *)src)[i];
+				if (x > max)
+					max = x;
+			}
+		}
+	}
+
+	if (h->flags & GB_CMD_F_WANT_REPLY) {
+		struct gb_out o;
+		struct gb_w w;
+
+		if (!gb_sv_reply_begin(t, h, &o, 24)) {
+			gb_w_init(&w, o.p);
+			gb_w_u64(&w, (uint64_t)max);
+			gb_sv_reply_end(t, &o);
+		}
+	}
+	return;
+bad:
+	gb_sv_proto_error(t, h);
+}
+
 /* ---- client-memory vertex arrays ------------------------------------------------ */
 
 static int index_type_bytes(uint32_t type)
@@ -585,8 +665,9 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	int32_t basevertex = (int32_t)gb_r_u32(r);
 	uint32_t baseinstance = gb_r_u32(r);
 	uint32_t old_abo = gb_r_u32(r), old_ebo = gb_r_u32(r);
+	uint32_t bound_off = gb_r_u32(r); /* kind 2: byte offset in bound EBO */
 
-	if (r->err || kind > 1 || count < 0 || nattr > CA_COUNT ||
+	if (r->err || kind > 2 || count < 0 || nattr > CA_COUNT ||
 	    (nattr == 0 && kind != 1) || nverts > (1u << 26) ||
 	    ibytes > GB_MAX_ARRAY_BYTES || instances > (1u << 24))
 		goto bad;
@@ -610,7 +691,11 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 			have_plain = 1;
 
 	const uint8_t *idx = NULL;
-	if (kind == 1) {
+	if (kind == 2) {
+		/* indices stay in the application's own element buffer */
+		if (!index_type_bytes(itype) || ibytes || !nattr)
+			goto bad;
+	} else if (kind == 1) {
 		int ib = index_type_bytes(itype);
 		if (!ib || (uint64_t)count * ib != ibytes)
 			goto bad;
@@ -710,7 +795,7 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	}
 
 	/* ---- indices ---- */
-	size_t ioff = 0;
+	size_t ioff = kind == 2 ? bound_off : 0;
 	if (kind == 1) {
 		size_t itotal = GB_ALIGN_UP(ibytes, 16u);
 		if (!s->ebo)
@@ -765,7 +850,8 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		} else if (fn_glDrawElements) {
 			fn_glDrawElements(mode, count, itype, ip);
 		}
-		fn_glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, old_ebo);
+		if (kind == 1)
+			fn_glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, old_ebo);
 	}
 	if (nattr)
 		fn_glBindBuffer(GL_ARRAY_BUFFER, old_abo);
@@ -788,6 +874,7 @@ void gb_srv_manual_dispatch(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	case GB_OPX_GLXString: h_glx_string(t, h, r); break;
 	case GB_OPX_GLXFBConfigs: h_glx_fbconfigs(t, h, r); break;
 	case GB_OPX_BufferRead: h_buffer_read(t, h, r); break;
+	case GB_OPX_ElementMax: h_element_max(t, h, r); break;
 	default: gb_sv_proto_error(t, h); break;
 	}
 }
