@@ -207,6 +207,44 @@ before the X server has exposed it is undefined by the pixel-ownership rule
 and NVIDIA discards the fragments. Tests now wait for MapNotify + Expose
 (0 failures in 130 runs afterwards).
 
+### CPU cost of the bridge, per process (glmark2, whole run)
+
+Same 33 scenes, native arm64 vs bridged armhf, on the live display. A sampler
+read `/proc/<pid>/stat` (utime+stime) twice a second for kwin, Xorg,
+plasmashell, glmark2 and gbd; a 20 s idle window beforehand gave the
+compositor/X baseline, which is subtracted ("excess"). Script:
+`~/gb/glmark2/cpu_procs.py` + `cpu_cmp.sh` on the device.
+
+| Process | native arm64 | bridged armhf |
+|---|---|---|
+| glmark2 (client) | 316.6 CPU-s (96% of a core) | 83.3 CPU-s (25%) |
+| gbd (server) | - | 293.2 CPU-s (88%) |
+| app + driver combined | 316.6 | 376.5 (**+19%**) |
+| kwin_x11, excess over idle | 92.7 s (29% of wall) | 123.6 s (38%, **+33%**) |
+| Xorg, excess over idle | 35.3 s | 32.1 s |
+| plasmashell | ~0 | ~0 |
+| total excess CPU | 444.6 s | 532.4 s (**+20%**) |
+| glmark2 score | 2425 | 2303 (95%) |
+| total CPU per frame | 0.555 ms | 0.700 ms (+26%) |
+
+Reading it:
+
+* The bridge adds ~60 CPU-seconds over the run, ~0.08 ms per frame. The
+  client is cheap (it carries the app's logic plus marshalling); `gbd` carries
+  the driver work. The two together cost 19% more than the single native
+  process.
+* Xorg is unchanged, consistent with Strategy X presenting through the same
+  driver path.
+* **kwin used 33% more CPU with the bridge: unexplained, single run.** Either
+  noise, or extra damage/expose traffic from the server presenting over its own
+  X connection. To settle it: repeat the pair and compare X event counts.
+* Frame counts are approximate (FPS x 10 s per scene); the same method is used
+  for both runs, so the ratios are comparable.
+* Consequence for triage: general transport CPU overhead is about 20%, so a
+  test that is 300x slower (`depth-clear-precision-check`, below under
+  "Conformance") is not explained by transport cost; something specific to its
+  call pattern is wrong.
+
 ## Conformance: piglit (arm64 native baseline vs armhf through the bridge)
 
 Same Ubuntu piglit package for both architectures, `-p x11_egl`, one process

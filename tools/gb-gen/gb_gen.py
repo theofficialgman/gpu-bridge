@@ -883,9 +883,13 @@ def emit_server(cmd, opname):
             L.append(f"\t\tuns_{n} = n_{n} < 0; if (uns_{n}) n_{n} = 0;")
             L.append(f"\t\tif (n_{n} * {wsz} != (int64_t)l_{n}) "
                      f"goto proto_error;")
-            # +512: a wrong (too small) size rule must not corrupt the heap
+            # +512: a wrong (too small) size rule must not corrupt the heap.
+            # Only widened arrays (32-bit wire elements, 64-bit native) need
+            # more than the wire size per element; sizing raw arrays at 8x
+            # made every large glReadPixels allocate and zero 8x the image.
+            esz = 8 if mode == "widen" else wsz
             L.append(f"\t\to_{n} = gb_tmp_zero(__t, (size_t)n_{n} * "
-                     f"{max(wsz, 8)} + 512);")
+                     f"{esz} + 512);")
             L.append("\t}")
             if pbo:
                 L.append(f"\t{p['ctype']} a_{n} = (l_{n} == GB_PBO_LEN) ? "
