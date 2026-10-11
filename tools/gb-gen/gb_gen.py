@@ -140,7 +140,7 @@ for t in ("GLint64", "GLint64EXT", "GLintptr", "GLsizeiptr", "GLintptrARB",
           "GLsizeiptrARB", "EGLAttrib", "EGLnsecsANDROID", "int64_t"):
     VAL[t] = ("i64", 8)
 for t in ("GLuint64", "GLuint64EXT", "EGLuint64KHR", "EGLTime", "EGLTimeKHR",
-          "uint64_t", "unsigned long"):
+          "uint64_t", "unsigned long", "EGLuint64NV"):
     VAL[t] = ("u64", 8)
 
 HANDLES = {

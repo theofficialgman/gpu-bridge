@@ -24,6 +24,9 @@ EGL_EXTENSIONS = {
     "EGL_KHR_image_base",
     "EGL_EXT_device_base", "EGL_EXT_device_enumeration",
     "EGL_EXT_device_query", "EGL_KHR_display_reference",
+    "EGL_KHR_wait_sync", "EGL_EXT_sync_reuse",
+    "EGL_KHR_swap_buffers_with_damage", "EGL_EXT_swap_buffers_with_damage",
+    "EGL_KHR_partial_update", "EGL_NV_post_sub_buffer", "EGL_NV_system_time",
 }
 GLES_EXTENSIONS = {
     "GL_OES_EGL_image",
@@ -202,6 +205,9 @@ LEN_OVERRIDES = {
     ("eglChooseConfig", "configs"): "config_size",
     ("eglGetConfigs", "configs"): "config_size",
     # array commands whose count is the 'count' parameter (x components)
+    ("eglSwapBuffersWithDamageKHR", "rects"): "n_rects*4",
+    ("eglSwapBuffersWithDamageEXT", "rects"): "n_rects*4",
+    ("eglSetDamageRegionKHR", "rects"): "n_rects*4",
     ("glGetUniformIndices", "uniformNames"): "uniformCount",
     ("glGetUniformIndices", "uniformIndices"): "uniformCount",
     ("glViewportArrayv", "v"): "count*4",
@@ -367,6 +373,8 @@ EXT_NO_COMMANDS = {
     "GL_OES_depth_texture_cube_map", "GL_EXT_multisample_compatibility",
     "GL_EXT_compressed_ETC1_RGB8_sub_texture",
     "GL_EXT_EGL_image_external_wrap_modes", "GL_NV_occlusion_query_samples",
+    # EGL (behavior-only)
+    "EGL_MESA_configless_context",
     # desktop (enum-only)
     "GL_EXT_texture_edge_clamp", "GL_EXT_texture_lod", "GL_EXT_Cg_shader",
 }
