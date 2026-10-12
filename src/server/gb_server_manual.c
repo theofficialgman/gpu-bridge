@@ -1211,9 +1211,11 @@ static void h_element_max(struct gb_sth *t, const struct gb_cmd_hdr *h,
 {
 	uint32_t itype = gb_r_u32(r), count = gb_r_u32(r);
 	uint64_t off = gb_r_u64(r);
+	int64_t restart = (int64_t)gb_r_u64(r); /* -1: none */
 	int ib = itype == 0x1401 ? 1 : itype == 0x1403 ? 2
 		 : itype == 0x1405 ? 4 : 0;
 	int64_t max = -1;
+	int skipped = 0;
 
 	if (r->err || !ib || count == 0 || count > (1u << 26) ||
 	    off > (1ull << 40))
@@ -1258,9 +1260,15 @@ static void h_element_max(struct gb_sth *t, const struct gb_cmd_hdr *h,
 				int64_t x = ib == 1 ? src[i]
 					  : ib == 2 ? ((const uint16_t *)src)[i]
 						    : ((const uint32_t *)src)[i];
+				if (x == restart) {
+					skipped = 1;
+					continue;
+				}
 				if (x > max)
 					max = x;
 			}
+			if (max < 0 && skipped)
+				max = 0;
 		}
 	}
 
@@ -1415,6 +1423,8 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	uint32_t baseinstance = gb_r_u32(r);
 	uint32_t old_abo = gb_r_u32(r), old_ebo = gb_r_u32(r);
 	uint32_t bound_off = gb_r_u32(r); /* kind 2: byte offset in bound EBO */
+	uint32_t rs_lo = gb_r_u32(r), rs_hi = gb_r_u32(r);
+	int64_t restart = (int64_t)(((uint64_t)rs_hi << 32) | rs_lo); /* -1: off */
 
 	if (r->err || kind > 2 || count < 0 || nattr > CA_COUNT ||
 	    (nattr == 0 && kind != 1) || nverts > (1u << 26) ||
@@ -1456,6 +1466,8 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 			int64_t v = ib == 1 ? idx[i]
 				  : ib == 2 ? ((const uint16_t *)idx)[i]
 					    : ((const uint32_t *)idx)[i];
+			if (v == restart)
+				continue;
 			v += basevertex;
 			if (v < 0 || v >= (int64_t)nverts)
 				goto bad;

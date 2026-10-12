@@ -114,6 +114,12 @@ struct gb_ctxstate {
 	struct gb_pixstore pack, unpack;
 	uint32_t client_active_tex; /* texture unit index */
 	int8_t core;                /* -1 unknown, 0 compat/ES, 1 core profile */
+	int8_t es;                  /* -1 unknown, 0 desktop GL, 1 OpenGL ES */
+	/* Primitive restart (GL 3.1 / NV_primitive_restart / fixed index): the
+	 * client needs the index to leave it out of the vertex-range scan that
+	 * sizes client-array uploads. */
+	uint8_t restart_on, restart_fixed;
+	uint32_t restart_index;
 	/* Between glBegin and glEnd nearly every other command is an error and
 	 * must not touch the shadow: gb_cur_state() hides the state then, so
 	 * wrappers forward the call and the driver raises INVALID_OPERATION.

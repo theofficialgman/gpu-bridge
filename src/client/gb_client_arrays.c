@@ -35,6 +35,7 @@ struct gb_ctxstate *gb_state_for(uint32_t ctx_id)
 		s->ctx_id = ctx_id;
 		s->vao = &s->vao0;
 		s->core = -1;
+		s->es = -1;
 		s->pack = (struct gb_pixstore){ 4, 0, 0, 0, 0, 0 };
 		s->unpack = (struct gb_pixstore){ 4, 0, 0, 0, 0, 0 };
 		s->next = g_states;
@@ -286,6 +287,26 @@ static int ctx_is_core(struct gb_ctxstate *st)
 #endif
 }
 
+/* The index that restarts the primitive for an index type, or -1 when
+ * primitive restart is off. ES 3.0+ always restarts on the fixed index. */
+static int64_t restart_value(struct gb_ctxstate *st, uint32_t itype)
+{
+	if (st->es < 0) {
+		const char *v = (const char *)glGetString(GL_VERSION);
+
+		st->es = 0;
+		if (v && !strncmp(v, "OpenGL ES", 9)) {
+			v += 9;
+			while (*v && (*v < '0' || *v > '9'))
+				v++;
+			st->es = atoi(v) >= 3;
+		}
+	}
+	if (!st->es && !st->restart_fixed)
+		return st->restart_on ? (int64_t)st->restart_index : -1;
+	return itype == 0x1401 ? 0xFF : itype == 0x1403 ? 0xFFFF : 0xFFFFFFFFll;
+}
+
 /* ---- array shadow ----------------------------------------------------------------- */
 
 int gb_arr_pointer(struct gb_ctxstate *st, int slot, int size, uint32_t type,
@@ -327,19 +348,21 @@ void gb_arr_enable(struct gb_ctxstate *st, int slot, int on)
 
 /* Largest index in [off, off + count * size(itype)) of the bound element
  * buffer, or -1 if the range is not inside the buffer. */
-static int64_t gb_cl_element_max(uint32_t itype, uint32_t count, uintptr_t off)
+static int64_t gb_cl_element_max(uint32_t itype, uint32_t count, uintptr_t off,
+				 int64_t restart)
 {
 	struct gb_cl *cx = gb_cl_get();
 	struct gb_out o;
 	struct gb_w w;
 	int64_t max = -1;
 
-	if (!cx || gb_cl_msg_begin(cx, &o, &w, GB_OPX_ElementMax, 32,
+	if (!cx || gb_cl_msg_begin(cx, &o, &w, GB_OPX_ElementMax, 40,
 				   GB_CMD_F_WANT_REPLY))
 		return -1;
 	gb_w_u32(&w, itype);
 	gb_w_u32(&w, count);
 	gb_w_u64(&w, (uint64_t)off);
+	gb_w_u64(&w, (uint64_t)restart); /* -1: none */
 	gb_cl_end(cx, &o);
 
 	struct gb_in in;
@@ -370,17 +393,35 @@ static int emulate_list_draw(struct gb_ctxstate *st, uint32_t mode, int indexed,
 	if ((is_instanced && instances != 1) ||
 	    (indexed && (st->vao->element_buffer || !ib || !indices)))
 		return 0;
+	int64_t rs = indexed ? restart_value(st, itype) : -1;
+
 	glBegin(mode);
 	for (int32_t i = 0; i < count; i++) {
 		int64_t e;
 
-		if (!indexed)
+		if (!indexed) {
 			e = (int64_t)first + i;
-		else
-			e = (ib == 1 ? ((const uint8_t *)indices)[i]
-			   : ib == 2 ? ((const uint16_t *)indices)[i]
-				     : ((const uint32_t *)indices)[i]) +
-			    (int64_t)basevertex;
+		} else {
+			if (ib == 1) {
+				e = ((const uint8_t *)indices)[i];
+			} else if (ib == 2) {
+				uint16_t t;
+
+				memcpy(&t, (const uint8_t *)indices + 2 * i, 2);
+				e = t;
+			} else {
+				uint32_t t;
+
+				memcpy(&t, (const uint8_t *)indices + 4 * i, 4);
+				e = t;
+			}
+			if (e == rs) { /* restart: a new primitive begins */
+				glEnd();
+				glBegin(mode);
+				continue;
+			}
+			e += basevertex;
+		}
 		glArrayElement((GLint)e);
 	}
 	glEnd();
@@ -464,8 +505,9 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 			if (eoff > 0x7fffffffu)
 				return 0;
 			/* One round trip: the server reads the range. */
-			int64_t maxv = gb_cl_element_max(itype, (uint32_t)count,
-							 eoff);
+			int64_t maxv = gb_cl_element_max(
+				itype, (uint32_t)count, eoff,
+				restart_value(st, itype));
 			if (maxv < 0) {
 				gb_cl_gl_error(0x0502 /* INVALID_OPERATION */);
 				return 1;
@@ -494,15 +536,35 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 			gb_cl_gl_error(0x0502);
 			return 1;
 		}
-		int64_t maxv = -1;
+		int64_t maxv = -1, rs = restart_value(st, itype);
+		int skipped = 0;
+		/* the indices are application memory: not necessarily aligned */
 		for (int32_t i = 0; i < count; i++) {
-			int64_t x = ib == 1 ? ((const uint8_t *)indices)[i]
-				  : ib == 2 ? ((const uint16_t *)indices)[i]
-					    : ((const uint32_t *)indices)[i];
+			int64_t x;
+
+			if (ib == 1) {
+				x = ((const uint8_t *)indices)[i];
+			} else if (ib == 2) {
+				uint16_t t;
+
+				memcpy(&t, (const uint8_t *)indices + 2 * i, 2);
+				x = t;
+			} else {
+				uint32_t t;
+
+				memcpy(&t, (const uint8_t *)indices + 4 * i, 4);
+				x = t;
+			}
+			if (x == rs) { /* restart marker, not a vertex */
+				skipped = 1;
+				continue;
+			}
 			x += basevertex;
 			if (x > maxv)
 				maxv = x;
 		}
+		if (maxv < 0 && skipped)
+			maxv = 0;
 		if (maxv < 0 || maxv >= (1 << 26)) {
 			gb_cl_gl_error(maxv < 0 ? 0x0502 : 0x0505);
 			return 1;
@@ -562,7 +624,7 @@ attrs:;
 		na++;
 	}
 
-	uint32_t sz = 16 + 52 + 28 * na;
+	uint32_t sz = 16 + 60 + 28 * na;
 	if (ibytes)
 		sz = GB_ALIGN_UP(sz, 8u) + ibytes;
 	for (uint32_t i = 0; i < na; i++)
@@ -583,6 +645,12 @@ attrs:;
 	gb_w_u32(&w, st->array_buffer);
 	gb_w_u32(&w, v->element_buffer);
 	gb_w_u32(&w, bound_off);
+	{ /* primitive-restart index (-1: none), exempt from the range check */
+		int64_t rs = indexed ? restart_value(st, itype) : -1;
+
+		gb_w_u32(&w, (uint32_t)((uint64_t)rs & 0xffffffffu));
+		gb_w_u32(&w, (uint32_t)((uint64_t)rs >> 32));
+	}
 	for (uint32_t i = 0; i < na; i++) {
 		gb_w_u32(&w, at[i].slot);
 		gb_w_u32(&w, at[i].size);
@@ -1106,6 +1174,8 @@ GB_API void glEnableClientState(GLenum array)
 		int s = cap_slot(st, array);
 		if (s >= 0)
 			gb_arr_enable(st, s, 1);
+		else if (array == 0x8558) /* PRIMITIVE_RESTART_NV */
+			st->restart_on = 1;
 	}
 	gbx_glEnableClientState(array);
 }
@@ -1117,6 +1187,8 @@ GB_API void glDisableClientState(GLenum array)
 		int s = cap_slot(st, array);
 		if (s >= 0)
 			gb_arr_enable(st, s, 0);
+		else if (array == 0x8558) /* PRIMITIVE_RESTART_NV */
+			st->restart_on = 0;
 	}
 	gbx_glDisableClientState(array);
 }
@@ -1136,6 +1208,10 @@ GB_API void glEnable(GLenum cap)
 
 		if (s >= 0)
 			gb_arr_enable(st, s, 1);
+		else if (cap == 0x8558 || cap == 0x8F9D) /* PRIMITIVE_RESTART */
+			st->restart_on = 1;
+		else if (cap == 0x8D69) /* PRIMITIVE_RESTART_FIXED_INDEX */
+			st->restart_fixed = 1;
 	}
 	gbx_glEnable(cap);
 }
@@ -1154,8 +1230,30 @@ GB_API void glDisable(GLenum cap)
 
 		if (s >= 0)
 			gb_arr_enable(st, s, 0);
+		else if (cap == 0x8558 || cap == 0x8F9D) /* PRIMITIVE_RESTART */
+			st->restart_on = 0;
+		else if (cap == 0x8D69) /* PRIMITIVE_RESTART_FIXED_INDEX */
+			st->restart_fixed = 0;
 	}
 	gbx_glDisable(cap);
+}
+
+GB_API void glPrimitiveRestartIndex(GLuint index)
+{
+	struct gb_ctxstate *st = gb_cur_state();
+
+	if (st)
+		st->restart_index = index;
+	gbx_glPrimitiveRestartIndex(index);
+}
+
+GB_API void glPrimitiveRestartIndexNV(GLuint index)
+{
+	struct gb_ctxstate *st = gb_cur_state();
+
+	if (st)
+		st->restart_index = index;
+	gbx_glPrimitiveRestartIndexNV(index);
 }
 
 GB_API void glClientActiveTexture(GLenum texture)
@@ -1495,6 +1593,250 @@ GB_API void glDrawElementsInstancedBaseVertexBaseInstance(
 	gbx_glDrawElementsInstancedBaseVertexBaseInstance(
 		mode, count, type, indices, instancecount, basevertex,
 		baseinstance);
+}
+
+/* ---- indirect draws -------------------------------------------------------
+ * With a buffer bound to GL_DRAW_INDIRECT_BUFFER the argument is an offset
+ * and goes to the server as is.  The compatibility profile also accepts a
+ * pointer to client memory there; the server cannot read that, so the command
+ * structures are fetched here and the draws issued one by one as instanced
+ * base-instance draws (which run through the client-array machinery too).
+ * The structures are copied out with memcpy: client memory is not
+ * necessarily 4-byte aligned. */
+#define GB_DRAW_INDIRECT_BUFFER 0x8F3F
+
+static int indirect_stride_ok(struct gb_ctxstate *st, GLsizei drawcount,
+			      GLsizei stride, GLsizei natural, GLsizei *out)
+{
+	if (st && st->in_begin) {
+		gb_cl_gl_error(0x0502);
+		return 0;
+	}
+	if (drawcount < 0 || stride < 0 || (stride & 3)) {
+		gb_cl_gl_error(0x0501);
+		return 0;
+	}
+	*out = stride ? stride : natural;
+	return 1;
+}
+
+static void indirect_arrays_client(GLenum mode, const char *p,
+				   GLsizei drawcount, GLsizei stride)
+{
+	for (GLsizei i = 0; i < drawcount; i++) {
+		uint32_t c[4];
+
+		memcpy(c, p + (size_t)i * stride, sizeof c);
+		glDrawArraysInstancedBaseInstance(mode, (GLint)c[2],
+						  (GLsizei)c[0],
+						  (GLsizei)c[1], c[3]);
+	}
+}
+
+static void indirect_elements_client(struct gb_ctxstate *st, GLenum mode,
+				     GLenum type, const char *p,
+				     GLsizei drawcount, GLsizei stride)
+{
+	size_t isz;
+
+	switch (type) {
+	case 0x1401: isz = 1; break;
+	case 0x1403: isz = 2; break;
+	case 0x1405: isz = 4; break;
+	default:
+		gb_cl_gl_error(0x0500);
+		return;
+	}
+	/* The index array must live in a buffer: indices are offsets into it. */
+	if (!st->vao->element_buffer) {
+		gb_cl_gl_error(0x0502);
+		return;
+	}
+	for (GLsizei i = 0; i < drawcount; i++) {
+		uint32_t c[5];
+
+		memcpy(c, p + (size_t)i * stride, sizeof c);
+		glDrawElementsInstancedBaseVertexBaseInstance(
+			mode, (GLsizei)c[0], type,
+			(const void *)(uintptr_t)(c[2] * isz), (GLsizei)c[1],
+			(GLint)c[3], c[4]);
+	}
+}
+
+/* Vertex arrays in client memory with the commands in a buffer: the number of
+ * vertices to upload depends on buffer contents the client cannot see, so
+ * the command structures are read back and the draws issued one by one.
+ * Returns 1 when the draw was handled. */
+static int indirect_expand_buffer(struct gb_ctxstate *st, GLenum mode,
+				  GLenum type, int indexed,
+				  const void *indirect, GLsizei drawcount,
+				  GLsizei stride)
+{
+	struct gb_vao *v = st->vao;
+	int client = 0;
+
+	for (int i = 0; i < CA_COUNT; i++)
+		if (v->a[i].enabled && v->a[i].buffer == 0)
+			client = 1;
+	if (!client)
+		return 0;
+	if (st->in_begin) {
+		gb_cl_gl_error(0x0502);
+		return 1;
+	}
+	GLsizei natural = indexed ? 20 : 16, str;
+
+	if (!indirect_stride_ok(st, drawcount, stride, natural, &str))
+		return 1;
+	if (drawcount == 0)
+		return 1;
+	uint64_t len = (uint64_t)(drawcount - 1) * (uint64_t)str + natural;
+
+	if (len > (64u << 20)) {
+		gb_cl_gl_error(0x0505);
+		return 1;
+	}
+	uint8_t *tmp = calloc(1, (size_t)len);
+
+	if (!tmp) {
+		gb_cl_gl_error(0x0505);
+		return 1;
+	}
+	glGetBufferSubData(GB_DRAW_INDIRECT_BUFFER, (GLintptr)(uintptr_t)indirect,
+			   (GLsizeiptr)len, tmp);
+	if (indexed)
+		indirect_elements_client(st, mode, type, (const char *)tmp,
+					 drawcount, str);
+	else
+		indirect_arrays_client(mode, (const char *)tmp, drawcount, str);
+	free(tmp);
+	return 1;
+}
+
+GB_API void glDrawArraysIndirect(GLenum mode, const void *indirect)
+{
+	struct gb_ctxstate *st = gb_cur_state_raw();
+	GLsizei stride;
+
+	if (!st || gb_state_bound(st, GB_DRAW_INDIRECT_BUFFER)) {
+		if (!st || !indirect_expand_buffer(st, mode, 0, 0, indirect, 1,
+						   0))
+			gbx_glDrawArraysIndirect(mode, indirect);
+		return;
+	}
+	if (!indirect_stride_ok(st, 1, 0, 16, &stride) || !indirect)
+		return;
+	indirect_arrays_client(mode, indirect, 1, stride);
+}
+
+GB_API void glDrawElementsIndirect(GLenum mode, GLenum type,
+				   const void *indirect)
+{
+	struct gb_ctxstate *st = gb_cur_state_raw();
+	GLsizei stride;
+
+	if (!st || gb_state_bound(st, GB_DRAW_INDIRECT_BUFFER)) {
+		if (!st || !indirect_expand_buffer(st, mode, type, 1, indirect,
+						   1, 0))
+			gbx_glDrawElementsIndirect(mode, type, indirect);
+		return;
+	}
+	if (!indirect_stride_ok(st, 1, 0, 20, &stride) || !indirect)
+		return;
+	indirect_elements_client(st, mode, type, indirect, 1, stride);
+}
+
+GB_API void glMultiDrawArraysIndirect(GLenum mode, const void *indirect,
+				      GLsizei drawcount, GLsizei stride)
+{
+	struct gb_ctxstate *st = gb_cur_state_raw();
+
+	if (!st || gb_state_bound(st, GB_DRAW_INDIRECT_BUFFER)) {
+		if (!st || !indirect_expand_buffer(st, mode, 0, 0, indirect,
+						   drawcount, stride))
+			gbx_glMultiDrawArraysIndirect(mode, indirect, drawcount,
+						      stride);
+		return;
+	}
+	if (!indirect_stride_ok(st, drawcount, stride, 16, &stride) ||
+	    !indirect || !drawcount)
+		return;
+	indirect_arrays_client(mode, indirect, drawcount, stride);
+}
+
+GB_API void glMultiDrawElementsIndirect(GLenum mode, GLenum type,
+					const void *indirect,
+					GLsizei drawcount, GLsizei stride)
+{
+	struct gb_ctxstate *st = gb_cur_state_raw();
+
+	if (!st || gb_state_bound(st, GB_DRAW_INDIRECT_BUFFER)) {
+		if (!st || !indirect_expand_buffer(st, mode, type, 1, indirect,
+						   drawcount, stride))
+			gbx_glMultiDrawElementsIndirect(mode, type, indirect,
+							drawcount, stride);
+		return;
+	}
+	if (!indirect_stride_ok(st, drawcount, stride, 20, &stride) ||
+	    !indirect || !drawcount)
+		return;
+	indirect_elements_client(st, mode, type, indirect, drawcount, stride);
+}
+
+/* The *Count variants read the draw count from the parameter buffer, and
+ * require the command buffer too: client memory is an error. */
+static int indirect_count_ok(struct gb_ctxstate *st)
+{
+	if (st && st->in_begin) {
+		gb_cl_gl_error(0x0502);
+		return 0;
+	}
+	if (st && !gb_state_bound(st, GB_DRAW_INDIRECT_BUFFER)) {
+		gb_cl_gl_error(0x0502);
+		return 0;
+	}
+	return 1;
+}
+
+GB_API void glMultiDrawArraysIndirectCount(GLenum mode, const void *indirect,
+					   GLintptr drawcount,
+					   GLsizei maxdrawcount, GLsizei stride)
+{
+	if (indirect_count_ok(gb_cur_state_raw()))
+		gbx_glMultiDrawArraysIndirectCount(mode, indirect, drawcount,
+						   maxdrawcount, stride);
+}
+
+GB_API void glMultiDrawElementsIndirectCount(GLenum mode, GLenum type,
+					     const void *indirect,
+					     GLintptr drawcount,
+					     GLsizei maxdrawcount,
+					     GLsizei stride)
+{
+	if (indirect_count_ok(gb_cur_state_raw()))
+		gbx_glMultiDrawElementsIndirectCount(mode, type, indirect,
+						     drawcount, maxdrawcount,
+						     stride);
+}
+
+GB_API void glMultiDrawArraysIndirectCountARB(GLenum mode,
+					      const void *indirect,
+					      GLintptr drawcount,
+					      GLsizei maxdrawcount,
+					      GLsizei stride)
+{
+	glMultiDrawArraysIndirectCount(mode, indirect, drawcount, maxdrawcount,
+				       stride);
+}
+
+GB_API void glMultiDrawElementsIndirectCountARB(GLenum mode, GLenum type,
+						const void *indirect,
+						GLintptr drawcount,
+						GLsizei maxdrawcount,
+						GLsizei stride)
+{
+	glMultiDrawElementsIndirectCount(mode, type, indirect, drawcount,
+					 maxdrawcount, stride);
 }
 
 /* A multi-draw with a negative primcount or any negative count is an
@@ -1988,6 +2330,12 @@ GB_API void glArrayElement(GLint i)
 	const struct gb_carray *a;
 	int eb;
 
+	/* NV_primitive_restart: the restart index restarts the primitive
+	 * instead of fetching a vertex */
+	if (st && st->restart_on && (uint32_t)i == st->restart_index) {
+		glPrimitiveRestartNV();
+		return;
+	}
 	if (!st || i < 0) {
 		gbx_glArrayElement(i);
 		return;

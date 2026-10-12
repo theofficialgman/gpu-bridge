@@ -222,6 +222,15 @@ _DRAW_FUNCS = {
     "glDrawElementsInstancedBaseVertexBaseInstance", "glMultiDrawArrays",
     "glDrawElementsInstancedEXT", "glDrawRangeElementsEXT",
     "glDrawArraysInstancedEXT",
+    # the restart index is client state (it limits the vertex-range scan)
+    "glPrimitiveRestartIndex", "glPrimitiveRestartIndexNV",
+    # client-memory command structures (compatibility profile) are expanded
+    # into ordinary draws by hand wrappers
+    "glDrawArraysIndirect", "glDrawElementsIndirect",
+    "glMultiDrawArraysIndirect", "glMultiDrawElementsIndirect",
+    "glMultiDrawArraysIndirectCount", "glMultiDrawElementsIndirectCount",
+    "glMultiDrawArraysIndirectCountARB",
+    "glMultiDrawElementsIndirectCountARB",
 }
 _WRAPPED = {
     "gles": _ARRAY_STATE | _POINTER_FUNCS | _DRAW_FUNCS | {
