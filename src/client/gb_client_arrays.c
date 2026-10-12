@@ -311,6 +311,14 @@ static int64_t restart_value(struct gb_ctxstate *st, uint32_t itype)
 
 /* ---- array shadow ----------------------------------------------------------------- */
 
+/* An enabled array that reads application memory. A NULL pointer is not one:
+ * the driver would fault on it, so an application that leaves such an array
+ * enabled must not be using it (the shader ignores the attribute). */
+static inline int is_client_array(const struct gb_carray *a)
+{
+	return a->enabled && a->buffer == 0 && a->ptr != NULL;
+}
+
 /* Arguments that no driver accepts. The driver is still told (it raises the
  * error); we just must not record such a call as the array's state. Kept
  * deliberately lenient: a false "invalid" would lose a valid client array. */
@@ -484,7 +492,7 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 	if (!cx)
 		return 0;
 	for (int i = 0; i < CA_COUNT; i++)
-		if (v->a[i].enabled && v->a[i].buffer == 0)
+		if (is_client_array(&v->a[i]))
 			nclient++;
 	if (st->list_mode) {
 		/*
@@ -518,6 +526,13 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 	}
 	if (nclient && ctx_is_core(st)) {
 		/* the driver would raise this; do not be more permissive */
+		if (getenv("GB_TRACE_OPS"))
+			for (int i = 0; i < CA_COUNT; i++)
+				if (is_client_array(&v->a[i]))
+					fprintf(stderr, "c: core context, "
+						"client array in slot %d "
+						"(type %#x size %d)\n", i,
+						v->a[i].type, v->a[i].size);
 		gb_cl_gl_error(0x0502 /* INVALID_OPERATION */);
 		return 1;
 	}
@@ -621,11 +636,17 @@ attrs:;
 	uint32_t na = 0;
 	for (uint32_t s = 0; s < CA_COUNT; s++) {
 		const struct gb_carray *a = &v->a[s];
-		if (!a->enabled || a->buffer != 0)
+		if (!is_client_array(a))
 			continue;
 		int eb = gb_attrib_elem_bytes(a->type, a->size);
 		if (!a->ptr || eb <= 0 || a->size < 1 ||
 		    (a->size > 4 && a->size != 0x80E1) || a->stride < 0) {
+			if (getenv("GB_TRACE_OPS"))
+				fprintf(stderr, "c: client array slot %u "
+					"unusable: ptr=%p type=%#x size=%d "
+					"stride=%d buffer=%u\n", s, a->ptr,
+					a->type, a->size, a->stride,
+					a->buffer);
 			gb_cl_gl_error(0x0502);
 			return 1;
 		}
@@ -1746,7 +1767,7 @@ static int indirect_expand_buffer(struct gb_ctxstate *st, GLenum mode,
 	int client = 0;
 
 	for (int i = 0; i < CA_COUNT; i++)
-		if (v->a[i].enabled && v->a[i].buffer == 0)
+		if (is_client_array(&v->a[i]))
 			client = 1;
 	if (!client)
 		return 0;
@@ -1935,7 +1956,7 @@ GB_API void glMultiDrawArrays(GLenum mode, const GLint *first,
 	if (st && drawcount > 0 && first && count) {
 		int client = 0;
 		for (int i = 0; i < CA_COUNT; i++)
-			if (st->vao->a[i].enabled && st->vao->a[i].buffer == 0)
+			if (is_client_array(&st->vao->a[i]))
 				client = 1;
 		if (client) {
 			for (GLsizei i = 0; i < drawcount; i++)

@@ -164,3 +164,41 @@ GB_API void glShaderSource(GLuint shader, GLsizei count,
 	free(lens);
 }
 
+
+/* ---- ARB_shading_language_include: lengths < 0 mean "NUL terminated" ------------ */
+
+static GLint str_len(GLint len, const GLchar *s)
+{
+	return (len < 0 && s) ? (GLint)strlen(s) : len;
+}
+
+GB_API void glNamedStringARB(GLenum type, GLint namelen, const GLchar *name,
+			     GLint stringlen, const GLchar *string)
+{
+	gbx_glNamedStringARB(type, str_len(namelen, name), name,
+			     str_len(stringlen, string), string);
+}
+
+GB_API void glDeleteNamedStringARB(GLint namelen, const GLchar *name)
+{
+	gbx_glDeleteNamedStringARB(str_len(namelen, name), name);
+}
+
+GB_API GLboolean glIsNamedStringARB(GLint namelen, const GLchar *name)
+{
+	return gbx_glIsNamedStringARB(str_len(namelen, name), name);
+}
+
+GB_API void glGetNamedStringARB(GLint namelen, const GLchar *name,
+				GLsizei bufSize, GLint *stringlen,
+				GLchar *string)
+{
+	gbx_glGetNamedStringARB(str_len(namelen, name), name, bufSize,
+				stringlen, string);
+}
+
+GB_API void glGetNamedStringivARB(GLint namelen, const GLchar *name,
+				  GLenum pname, GLint *params)
+{
+	gbx_glGetNamedStringivARB(str_len(namelen, name), name, pname, params);
+}

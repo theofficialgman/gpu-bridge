@@ -606,6 +606,9 @@ static void *worker_main(void *arg)
 		stats = getenv("GB_STATS") != NULL;
 	/* GB_TRACE_OPS: one line per request on stderr (debugging aid) */
 	int trace_ops = getenv("GB_TRACE_OPS") != NULL;
+	/* GB_TRACE_ERRORS: name the request after which a GL error appeared
+	 * (the error is put back, so the application still sees it) */
+	int trace_errs = getenv("GB_TRACE_ERRORS") != NULL;
 
 	t_this = t;
 	for (;;) {
@@ -668,6 +671,20 @@ static void *worker_main(void *arg)
 			gb_srv_manual_dispatch(t, &h, &r);
 		} else {
 			gb_sv_proto_error(t, &h);
+		}
+		if (trace_errs && h.opcode < GB_OP_COUNT) {
+			struct gb_errs e;
+
+			gb_sv_err_pop(&e);
+			for (int i = 0; i < e.n; i++) {
+				char tb[128];
+				int tn = snprintf(tb, sizeof(tb),
+						  "ERR 0x%x after %s\n", e.e[i],
+						  h.opcode ? gb_op_names[h.opcode]
+							   : "opx");
+				(void)!write(2, tb, (size_t)tn);
+			}
+			gb_sv_err_raise(&e);
 		}
 		gb_tmp_reset(t);
 		gb_sv_fd_release(t);

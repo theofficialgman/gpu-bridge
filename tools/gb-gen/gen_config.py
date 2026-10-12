@@ -169,6 +169,9 @@ ALL_MANUAL = MANUAL["all"]
 # Generated encoders/decoders, but the public symbol is hand-written
 # (client-side shadow state); the wrapper calls gbx_<name>().
 _ARRAY_STATE = {
+    # explicit-length strings where a negative length means NUL-terminated
+    "glNamedStringARB", "glDeleteNamedStringARB", "glIsNamedStringARB",
+    "glGetNamedStringARB", "glGetNamedStringivARB",
     # errors while the buffer is mapped (the client holds the mappings)
     "glBufferSubData", "glGetBufferSubData", "glCopyBufferSubData",
     "glClearBufferData", "glClearBufferSubData", "glNamedBufferSubData",
