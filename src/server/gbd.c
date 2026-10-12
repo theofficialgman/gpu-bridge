@@ -802,5 +802,15 @@ int main(int argc, char **argv)
 
 	if (gb_native_init())
 		return 3;
-	return serve(sock);
+	int rc = serve(sock);
+
+	/*
+	 * The client is gone (or the protocol broke). Leave at once: a worker
+	 * may be inside a driver call that never returns (a pathological
+	 * shader link, minutes at 1 GB) and the driver's atexit teardown would
+	 * wait for it, leaving an orphaned server that holds the test's pipes
+	 * and its memory.
+	 */
+	fflush(NULL);
+	_exit(rc);
 }
