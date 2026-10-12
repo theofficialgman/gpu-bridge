@@ -502,9 +502,10 @@ def emit_client(cmd, public, opname):
             L.append(f"\tif (__n_{n} < 0) __n_{n} = 0;")
             L.append(f"\tuint32_t __l_{n} = GB_NULL_LEN;")
             L.append(f"\tif ({n}) {{ uint64_t __sum = 0;")
+            # a NULL entry is sent as the empty string (the drivers treat
+            # it as a name that does not exist)
             L.append(f"\t  for (int64_t __i = 0; __i < __n_{n}; __i++) "
-                     f"{{ if (!{n}[__i]) {{ gb_cl_set_error(__cx, __op); "
-                     f"{retstmt} }} __sum += strlen({n}[__i]) + 1; }}")
+                     f"__sum += {n}[__i] ? strlen({n}[__i]) + 1 : 1;")
             L.append(f"\t  if (__sum > GB_MAX_ARRAY_BYTES) "
                      f"{{ gb_cl_set_error(__cx, __op); {retstmt} }}")
             L.append(f"\t  __l_{n} = (uint32_t)__sum; }}")
@@ -613,8 +614,9 @@ def emit_client(cmd, public, opname):
             L.append(f"\tif (__l_{n} != GB_NULL_LEN) {{ char *__d = "
                      f"gb_w_blob(&__w, __l_{n});")
             L.append(f"\t  for (int64_t __i = 0; __i < __n_{n}; __i++) {{ "
-                     f"size_t __k = strlen({n}[__i]) + 1; "
-                     f"memcpy(__d, {n}[__i], __k); __d += __k; }} }}")
+                     f"size_t __k = {n}[__i] ? strlen({n}[__i]) + 1 : 1; "
+                     f"if ({n}[__i]) memcpy(__d, {n}[__i], __k); "
+                     f"else *__d = 0; __d += __k; }} }}")
         elif k[0] in ("arr_in", "attrib", "arr_out"):
             pbo = k[5] if k[0] != "attrib" else None
             if k[0] == "arr_out":

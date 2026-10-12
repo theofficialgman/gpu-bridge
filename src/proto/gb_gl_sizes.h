@@ -189,7 +189,12 @@ static inline int gb_format_components(uint32_t f)
 	case 0x1906: /* ALPHA */
 	case 0x1909: /* LUMINANCE */
 	case 0x8D94: /* RED_INTEGER */
+	case 0x8D95: /* GREEN_INTEGER_EXT */
+	case 0x8D96: /* BLUE_INTEGER_EXT */
+	case 0x8D97: /* ALPHA_INTEGER_EXT */
+	case 0x8D9C: /* LUMINANCE_INTEGER_EXT */
 		return 1;
+	case 0x8D9D: /* LUMINANCE_ALPHA_INTEGER_EXT */
 	case 0x190A: /* LUMINANCE_ALPHA */
 	case 0x8227: /* RG */
 	case 0x8228: /* RG_INTEGER */
@@ -422,6 +427,8 @@ static inline int64_t gb_map2_count(uint32_t target, int64_t ustride,
 /* Bytes of one vertex-attribute element (all components), or -1. */
 static inline int gb_attrib_elem_bytes(uint32_t type, int size)
 {
+	if (size == 0x80E1) /* GL_BGRA: four components, reordered */
+		size = 4;
 	switch (type) {
 	case 0x1400: case 0x1401: return size;       /* BYTE, UNSIGNED_BYTE */
 	case 0x1402: case 0x1403: return 2 * size;   /* SHORT, UNSIGNED_SHORT */

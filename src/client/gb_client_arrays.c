@@ -624,8 +624,8 @@ attrs:;
 		if (!a->enabled || a->buffer != 0)
 			continue;
 		int eb = gb_attrib_elem_bytes(a->type, a->size);
-		if (!a->ptr || eb <= 0 || a->size < 1 || a->size > 4 ||
-		    a->stride < 0) {
+		if (!a->ptr || eb <= 0 || a->size < 1 ||
+		    (a->size > 4 && a->size != 0x80E1) || a->stride < 0) {
 			gb_cl_gl_error(0x0502);
 			return 1;
 		}

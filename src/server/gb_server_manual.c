@@ -1481,7 +1481,8 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		int eb = gb_attrib_elem_bytes(a[i].type, (int)a[i].size);
 		int64_t stride = a[i].stride ? (int64_t)a[i].stride : eb;
 		if (a[i].slot >= CA_COUNT || eb <= 0 || a[i].size < 1 ||
-		    a[i].size > 4 || stride < 0 || stride > (1 << 16))
+		    (a[i].size > 4 && a[i].size != 0x80E1) || stride < 0 ||
+		    stride > (1 << 16))
 			goto bad;
 		uint64_t elems;
 		if (a[i].divisor == 0) {
