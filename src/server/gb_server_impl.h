@@ -158,6 +158,8 @@ int64_t gb_sv_sz_ctex_dsa(struct gb_sth *t, int multi, uint32_t tex_or_unit,
 int64_t gb_sv_sz_progstring_named(struct gb_sth *t, uint32_t program,
 				  uint32_t target);
 int64_t gb_sv_sz_pixelmap(struct gb_sth *t, int wsz, uint32_t map);
+int64_t gb_sv_sz_map(struct gb_sth *t, int wsz, uint32_t target,
+		     uint32_t query);
 int64_t gb_sv_sz_uniformblock(struct gb_sth *t, int wsz, uint32_t program,
 			      uint32_t block, uint32_t pname);
 int64_t gb_sv_sz_progstring(struct gb_sth *t, uint32_t target,
@@ -206,6 +208,7 @@ int64_t gb_sv_sz_progstring(struct gb_sth *t, uint32_t target,
 #define GB_SZS_progstring_named(t, op, wsz, pg, tg) \
 	gb_sv_sz_progstring_named((t), (pg), (tg))
 #define GB_SZS_pixelmap(t, op, wsz, m) gb_sv_sz_pixelmap((t), (wsz), (m))
+#define GB_SZS_map(t, op, wsz, tg, q) gb_sv_sz_map((t), (wsz), (tg), (q))
 #define GB_SZS_uniformblock(t, op, wsz, p, b, pn) \
 	gb_sv_sz_uniformblock((t), (wsz), (p), (b), (pn))
 #define GB_SZS_progstring(t, op, wsz, tg, pn) \
@@ -225,6 +228,7 @@ void gb_srv_scratch_free(struct gb_sth *t);
  * when an argument cannot be sized and the call is dropped). */
 void gb_sv_raise_invalid(void);
 void gb_sv_raise_enum(void);
+void gb_sv_raise_operation(void);
 
 /* GB_STATS: time spent inside the native driver call, per opcode. */
 extern int gb_stats_on;

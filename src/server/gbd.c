@@ -219,6 +219,18 @@ void gb_sv_raise_invalid(void)
 		fn_glDeleteTextures(-1, NULL); /* INVALID_VALUE, no effect */
 }
 
+void gb_sv_raise_operation(void)
+{
+	GB_NATIVE(glEndTransformFeedback, void, (void));
+	GB_NATIVE(glEndList, void, (void));
+
+	/* both are INVALID_OPERATION without an open feedback / list */
+	if (fn_glEndTransformFeedback)
+		fn_glEndTransformFeedback();
+	else if (fn_glEndList)
+		fn_glEndList();
+}
+
 void gb_sv_raise_enum(void)
 {
 	GB_NATIVE(glBindTexture, void, (GLenum, GLuint));

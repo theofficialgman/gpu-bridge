@@ -320,6 +320,45 @@ int64_t gb_sv_sz_pixelmap(struct gb_sth *t, int wsz, uint32_t map)
 	return (int64_t)geti(map - 0x0C70 + 0x0CB0) * wsz;
 }
 
+/* glGetMap{d,f,i}v: GL_ORDER / GL_DOMAIN have fixed counts; GL_COEFF is
+ * components * order (map1) or components * uorder * vorder (map2). */
+int64_t gb_sv_sz_map(struct gb_sth *t, int wsz, uint32_t target,
+		     uint32_t query)
+{
+	static const int8_t comps[9] = { 4, 1, 3, 1, 2, 3, 4, 3, 4 };
+	int two;
+	int c;
+
+	if (target >= 0x0D90 && target <= 0x0D98) {
+		two = 0;
+		c = comps[target - 0x0D90];
+	} else if (target >= 0x0DB0 && target <= 0x0DB8) {
+		two = 1;
+		c = comps[target - 0x0DB0];
+	} else {
+		return -1;
+	}
+	switch (query) {
+	case 0x0A01: /* ORDER */
+		return (int64_t)(two ? 2 : 1) * wsz;
+	case 0x0A02: /* DOMAIN */
+		return (int64_t)(two ? 4 : 2) * wsz;
+	case 0x0A00: { /* COEFF */
+		GB_NATIVE(glGetMapiv, void, (GLenum, GLenum, GLint *));
+		GLint ord[2] = { 0, 0 };
+
+		if (!fn_glGetMapiv)
+			return -1;
+		fn_glGetMapiv(target, 0x0A01, ord);
+		if (ord[0] < 0 || ord[1] < 0)
+			return -1;
+		return (int64_t)c * ord[0] * (two ? ord[1] : 1) * wsz;
+	}
+	default:
+		return -1;
+	}
+}
+
 int64_t gb_sv_sz_uniformblock(struct gb_sth *t, int wsz, uint32_t program,
 			      uint32_t block, uint32_t pname)
 {

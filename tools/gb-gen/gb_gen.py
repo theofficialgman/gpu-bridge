@@ -180,12 +180,16 @@ ID_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 PBO_UNPACK_RE = re.compile(cfg.PBO_UNPACK_REGEX)
 PBO_PACK_RE = re.compile(cfg.PBO_PACK_REGEX)
+QUERY_RE = re.compile(r"^glGetQueryObject(i|ui|i64|ui64)v(ARB|EXT)?$")
 
 
 def pbo_kind(cmd, base, pname):
     """'pack' | 'unpack' | None for a pointer parameter."""
     n = cmd
     kind = None
+    if QUERY_RE.match(n):
+        # the result pointer is a buffer offset while GL_QUERY_BUFFER is bound
+        return "query" if pname == "params" else None
     if PBO_PACK_RE.match(n) or n in cfg.PBO_PACK_EXTRA:
         kind = "pack"
     elif PBO_UNPACK_RE.match(n) or n in cfg.PBO_UNPACK_EXTRA:
@@ -208,9 +212,14 @@ def parse_len(cmd, pname, expr, params):
     override = cfg.LEN_OVERRIDES.get((cmd, pname))
     if override:
         expr = override
+    pnames = {p["name"] for p in params}
+    if (expr is None or expr == "1") and "pname" in pnames and \
+            pname_class(cmd) != "generic":
+        # the registry gives no length, but the command is a known
+        # pname-keyed getter/setter: its count follows the enum
+        expr = "COMPSIZE(pname)"
     if expr is None:
         return None
-    pnames = {p["name"] for p in params}
     for entry in cfg.SERVER_SIZED:
         rx, key, cands = entry[:3]
         if len(entry) > 3 and entry[3] != pname:
@@ -502,7 +511,8 @@ def emit_client(cmd, public, opname):
         elif k[0] in ("arr_in", "arr_out") and k[4][0] == "server":
             pbo = k[5]
             if pbo:
-                bound = "GB_BUF_PACK" if pbo == "pack" else "GB_BUF_UNPACK"
+                bound = {"pack": "GB_BUF_PACK", "unpack": "GB_BUF_UNPACK",
+                         "query": "GB_BUF_QUERY"}[pbo]
                 L.append(f"\tint __pbo_{n} = gb_cl_buf_bound(__cx, {bound});")
                 L.append(f"\tuint32_t __l_{n} = __pbo_{n} ? GB_PBO_LEN : "
                          f"({n} ? GB_SRV_LEN : GB_NULL_LEN);")
@@ -515,7 +525,8 @@ def emit_client(cmd, public, opname):
             L.append(f"\tint64_t __n_{n} = {cexp};")
             L.append(f"\tif (__n_{n} < 0) __n_{n} = 0; /* unsized */")
             if pbo:
-                bound = "GB_BUF_PACK" if pbo == "pack" else "GB_BUF_UNPACK"
+                bound = {"pack": "GB_BUF_PACK", "unpack": "GB_BUF_UNPACK",
+                         "query": "GB_BUF_QUERY"}[pbo]
                 L.append(f"\tint __pbo_{n} = gb_cl_buf_bound(__cx, {bound});")
                 L.append(f"\tuint32_t __l_{n} = __pbo_{n} ? GB_PBO_LEN : "
                          f"({n} ? (uint32_t)(__n_{n} * {k[3]}) : "
@@ -526,9 +537,15 @@ def emit_client(cmd, public, opname):
             else:
                 L.append(f"\tuint32_t __l_{n} = {n} ? (uint32_t)(__n_{n} * "
                          f"{k[3]}) : GB_NULL_LEN;")
+                # a count no buffer can hold: uniforms report
+                # INVALID_OPERATION (count beyond the array), the rest
+                # INVALID_VALUE
+                gle = "0x0502" if re.match(
+                    r"^gl(Program)?Uniform", cmd.name) else "0x0501"
                 L.append(f"\tif ({n} && __n_{n} * {k[3]} > "
                          f"GB_MAX_ARRAY_BYTES) "
-                         f"{{ gb_cl_set_error(__cx, __op); {retstmt} }}")
+                         f"{{ gb_cl_set_error(__cx, __op); "
+                         f"gb_cl_gl_error({gle}); {retstmt} }}")
         elif k[0] == "attrib":
             if k[4] == "egl":
                 scan = f"gb_attrib_count_{k[1]}({n})"
@@ -616,7 +633,7 @@ def emit_client(cmd, public, opname):
                 L.append(f"\tif (__l_{n} != GB_NULL_LEN) {{")
             L.append(f"\t\tvoid *__d = gb_w_blob(&__w, __l_{n});")
             if mode == "raw":
-                L.append(f"\t\tmemcpy(__d, {n}, __l_{n});")
+                L.append(f"\t\tgb_cl_copy_in(__d, {n}, __l_{n});")
             else:
                 L.append(f"\t\tfor (int64_t __i = 0; __i < __n_{n}; __i++) {{")
                 if mode == "widen":
@@ -665,7 +682,14 @@ def emit_client(cmd, public, opname):
                          f"GB_MAX_ARRAY_BYTES) {{")
             else:
                 L.append(f"\t    if (__s && {n} && __rl == __l_{n}) {{")
-            if mode == "raw":
+            if mode == "raw" and k[1] in ("GLchar", "GLcharARB", "char"):
+                # A string out-parameter: the driver writes the characters
+                # and the terminator only, never the whole bufSize (the
+                # application's buffer may be exactly as long as the name).
+                L.append(f"\t      {{ size_t __k = strnlen((const char *)"
+                         f"__s, __rl); if (__k < __rl) __k++; "
+                         f"memcpy({n}, __s, __k); }}")
+            elif mode == "raw":
                 L.append(f"\t      memcpy({n}, __s, __rl);")
             elif mode == "widen":
                 L.append(f"\t      for (int64_t __i = 0; __i < __n_{n}; "
@@ -928,12 +952,21 @@ def emit_server(cmd, opname):
     # driver dereferences it): skip the call and raise INVALID_VALUE.
     uns = [f"uns_{p['name']}" for p in P
            if p["k"][0] in ("arr_in", "arr_out")]
+    # A sync name the server never issued is INVALID_VALUE (a NULL handle
+    # would be silently ignored by the driver)
+    if not cmd.name.startswith("glIsSync"):
+        uns += [f"(h_{p['name']} && !a_{p['name']})" for p in P
+                if p["k"][0] == "handle" and p["k"][1] == "GLSYNC"]
     L.append(f"\tint __skip = {' || '.join(uns) if uns else '0'};")
     # Format/type problems are enum errors; anything else a value error.
     enum_err = any(p["k"][0] == "arr_out" and p["k"][4][0] == "server" and
                    p["k"][4][1] in ("pixels_tex", "ctex") for p in P)
+    # A uniform that cannot be read (bad location, unlinked program) is
+    # INVALID_OPERATION, not INVALID_VALUE.
+    op_err = any(p["k"][0] == "arr_out" and p["k"][4][0] == "server" and
+                 p["k"][4][1] == "uniform" for p in P)
     L.append("\tif (__skip) gb_sv_raise_%s();" %
-             ("enum" if enum_err else "invalid"))
+             ("enum" if enum_err else "operation" if op_err else "invalid"))
     L.append("\tuint64_t __t0 = gb_stat_now();")
     L.append(f"\tif (fn_{cmd.name} && !__skip) " +
              ("ret = " if cmd.rk[0] != "void" else "") +

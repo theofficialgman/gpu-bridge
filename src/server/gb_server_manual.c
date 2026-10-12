@@ -559,7 +559,7 @@ static void h_debug_str(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		 c = gb_r_u32(r), d = gb_r_u32(r), slen = gb_r_u32(r);
 	const char *str = NULL;
 
-	if (r->err || sub > 3 || slen > (1u << 20))
+	if (r->err || sub > 3 || (slen != GB_NULL_LEN && slen > (1u << 20)))
 		goto bad;
 	if (slen != GB_NULL_LEN) {
 		str = gb_r_blob(r, slen);

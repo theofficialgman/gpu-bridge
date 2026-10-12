@@ -169,6 +169,11 @@ ALL_MANUAL = MANUAL["all"]
 # Generated encoders/decoders, but the public symbol is hand-written
 # (client-side shadow state); the wrapper calls gbx_<name>().
 _ARRAY_STATE = {
+    # errors while the buffer is mapped (the client holds the mappings)
+    "glBufferSubData", "glGetBufferSubData", "glCopyBufferSubData",
+    "glClearBufferData", "glClearBufferSubData", "glNamedBufferSubData",
+    "glGetNamedBufferSubData", "glCopyNamedBufferSubData",
+    "glClearNamedBufferData", "glClearNamedBufferSubData",
     "glBindBuffer", "glBindBufferARB", "glDeleteBuffers", "glDeleteBuffersARB",
     "glEnableVertexAttribArray", "glDisableVertexAttribArray",
     "glEnableVertexAttribArrayARB", "glDisableVertexAttribArrayARB",
@@ -251,6 +256,12 @@ FORCE_SYNC = {"glFinish", "glXSwapBuffers", "glXWaitGL", "glXWaitX"}
 
 # Commands whose registry entry lacks a usable len=.
 LEN_OVERRIDES = {
+    # evaluator / pixel-map getters: the element count depends on map state;
+    # the server computes it (SERVER_SIZED "map" / "pixelmap")
+    **{(f"glGet{n}Map{t}v{a}", "v"): "1" for n in ("", "n") for t in "dfi"
+       for a in ("", "ARB") if not (n == "" and a)},
+    **{(f"glGetnPixelMap{t}v{a}", "values"): "1" for t in ("f", "ui", "us")
+       for a in ("", "ARB")},
     ("eglChooseConfig", "configs"): "config_size",
     ("eglGetConfigs", "configs"): "config_size",
     # array commands whose count is the 'count' parameter (x components)
@@ -406,7 +417,8 @@ SERVER_SIZED = [
     (r"^glGetProgramStringNV$", "progstring_nv", [["id", "pname"]]),
     (r"^glGetTexImage$", "pixels_tex", [["target", "level", "format", "type"]]),
     (r"^glGetCompressedTexImage(ARB)?$", "ctex", [["target", "level"]]),
-    (r"^glGetPixelMap(f|ui|us)v$", "pixelmap", [["map"]]),
+    (r"^glGet(n)?PixelMap(f|ui|us)v(ARB)?$", "pixelmap", [["map"]]),
+    (r"^glGet(n)?Map(d|f|i)v(ARB)?$", "map", [["target", "query"]]),
     (r"^glGetActiveUniformBlockiv$", "uniformblock",
      [["program", "uniformBlockIndex", "pname"]]),
     (r"^glGetProgramStringARB$", "progstring", [["target", "pname"]]),
@@ -417,21 +429,33 @@ SERVER_SIZED = [
 PNAME_CLASSES = [
     (r"^glGet(Boolean|Double|Float|Integer|Integer64)v$", "getv"),
     (r"^glGet(Boolean|Double|Float|Integer|Integer64)i_v$", "geti_v"),
-    (r"^glGet(Boolean|Double|Float|Integer|Integer64)_?vEXT$", "getv"),
-    (r"^gl(Get)?Light[fi]v$", "light"),
-    (r"^gl(Get)?Material[fi]v$", "material"),
-    (r"^gl(Get)?TexEnv[fi]v$", "texenv"),
-    (r"^gl(Get)?TexGen[dfi]v$", "texgen"),
-    (r"^gl(Get)?LightModel[fi]v$", "lightmodel"),
-    (r"^glFog[fi]v$", "fog"),
-    (r"^glPointParameter[fi]v(ARB|EXT)?$", "pointparam"),
-    (r"^gl(Get)?(Tex|Sampler)Parameter(f|i|Iiv|Iuiv|fv|iv)?(EXT|ARB)?$",
-     "texparam"),
-    (r"^gl(Get)?TextureParameter.*$", "texparam"),
+    (r"^glGet(Boolean|Double|Float|Integer)_?vEXT$", "getv"),
+    (r"^glGet(Fixed|Integer64|UnsignedByte)v(OES|APPLE|EXT)?$", "getv"),
+    (r"^glGet(Boolean|Double|Float|Integer|UnsignedByte)i_v(EXT|NV|OES)$",
+     "geti_v"),
+    (r"^gl(Get)?Light[fix]v(OES)?$", "light"),
+    (r"^gl(Get)?Material[fix]v(OES)?$", "material"),
+    (r"^gl(Get)?(Multi)?TexEnv[fix]v(OES|EXT)?$", "texenv"),
+    (r"^gl(Get)?(Multi)?TexGen[dfix]v(OES|EXT)?$", "texgen"),
+    (r"^gl(Get)?LightModel[fix]v(OES)?$", "lightmodel"),
+    (r"^glFog[fix]v(OES)?$", "fog"),
+    (r"^glPointParameter[fix]v(ARB|EXT|NV|OES|SGIS)?$", "pointparam"),
+    # texture / sampler parameters, every spelling (legacy, EXT, DSA)
+    (r"^gl(Get)?(Tex|Sampler|MultiTex|Texture)Parameter"
+     r"(f|i|x|Ii|Iui|I)?v?(EXT|ARB|OES)?$", "texparam"),
     (r"^glGet(Boolean|Double|Float|Integer)IndexedvEXT$", "geti_v"),
     (r"^glGetIntegerui64vNV$", "getv"),
     (r"^glGetIntegerui64i_vNV$", "geti_v"),
     (r"^glClear(Named)?(Framebuffer|Buffer)(f|i|ui)v$", "clearbuffer"),
+    # image-processing parameters: scale/bias/border colour are RGBA
+    (r"^gl(Get)?(Convolution|ColorTable)Parameter[fix]v(EXT|SGI|OES)?$",
+     "imgparam"),
+    # the one generic attribute query that returns more than a scalar
+    (r"^glGetVertexAttrib(I|L)?(f|d|i|ui|Li64|Lui64|i64|ui64)v"
+     r"(EXT|NV|ARB)?$", "vattrib"),
+    (r"^glGetVertexAttribL(i64|ui64)v(NV|ARB)?$", "vattrib"),
+    (r"^glPatchParameterfv$", "patch"),
+    (r"^glGetMultisamplefv(NV)?$", "multisample"),
 ]
 
 # File descriptors. FD_PARAMS: (command, parameter) that is an fd the driver

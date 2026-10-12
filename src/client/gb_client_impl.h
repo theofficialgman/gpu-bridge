@@ -99,7 +99,8 @@ struct gb_map {
 	uint32_t target;     /* target it was mapped through (0 = named API) */
 	int64_t offset, length;
 	uint32_t flags;      /* GL_MAP_* bits (legacy glMapBuffer translated) */
-	void *shadow;
+	void *shadow;        /* what the application sees */
+	void *alloc;         /* what was allocated (shadow is inside it) */
 };
 
 struct gb_ctxstate {
@@ -227,6 +228,12 @@ struct gb_ctxstate *gb_state_for(uint32_t ctx_id);
 struct gb_ctxstate *gb_cur_state(void);
 struct gb_ctxstate *gb_cur_state_raw(void); /* even between glBegin/glEnd */
 int gb_cl_buf_bound(struct gb_cl *cx, int which);
+/* Copy application memory into a message. The driver validates arguments
+ * before it reads a data pointer, so an application may legally pass a
+ * pointer that is never dereferenced (tests of error paths do); a fault
+ * while reading is absorbed here and the unreadable tail is sent as zeros.
+ * Returns 0 if the whole range was readable. */
+int gb_cl_copy_in(void *dst, const void *src, size_t n);
 /* Buffer currently bound to a generic target (0 if none/unknown target). */
 uint32_t gb_state_bound(struct gb_ctxstate *st, uint32_t target);
 /* Record a binding to a generic buffer target. */

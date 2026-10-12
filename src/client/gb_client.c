@@ -16,6 +16,8 @@
 #include <fcntl.h>
 #include <libgen.h>
 #include <pthread.h>
+#include <setjmp.h>
+#include <signal.h>
 #include <spawn.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -998,4 +1000,68 @@ void gb_cl_xsync(Display *dpy)
 	if (next_req && last_proc && next_req(dpy) - 1 <= last_proc(dpy))
 		return; /* nothing outstanding */
 	xsync(dpy, 0);
+}
+
+/* ---- fault-tolerant copy of application memory ---------------------------- */
+
+/* volatile: the compiler must not drop the store around a memcpy it knows
+ * cannot touch the variable; only the fault handler reads it */
+static __thread sigjmp_buf *volatile copy_jmp;
+static struct sigaction copy_prev[2]; /* SIGSEGV, SIGBUS */
+static pthread_once_t copy_once = PTHREAD_ONCE_INIT;
+
+static void copy_fault(int sig, siginfo_t *si, void *uc)
+{
+	if (copy_jmp) {
+		sigset_t s;
+
+		sigemptyset(&s);
+		sigaddset(&s, SIGSEGV);
+		sigaddset(&s, SIGBUS);
+		pthread_sigmask(SIG_UNBLOCK, &s, NULL);
+		siglongjmp(*copy_jmp, 1);
+	}
+	/* not ours: hand it to whoever was installed before us */
+	const struct sigaction *p = &copy_prev[sig == SIGBUS];
+
+	if (p->sa_flags & SA_SIGINFO) {
+		p->sa_sigaction(sig, si, uc);
+	} else if (p->sa_handler != SIG_DFL && p->sa_handler != SIG_IGN) {
+		p->sa_handler(sig);
+	} else {
+		signal(sig, SIG_DFL);
+		raise(sig);
+	}
+}
+
+static void copy_install(void)
+{
+	struct sigaction sa;
+
+	memset(&sa, 0, sizeof sa);
+	sa.sa_sigaction = copy_fault;
+	sa.sa_flags = SA_SIGINFO | SA_NODEFER;
+	sigemptyset(&sa.sa_mask);
+	sigaction(SIGSEGV, &sa, &copy_prev[0]);
+	sigaction(SIGBUS, &sa, &copy_prev[1]);
+}
+
+int gb_cl_copy_in(void *dst, const void *src, size_t n)
+{
+	sigjmp_buf jb;
+	sigjmp_buf *volatile saved;
+
+	pthread_once(&copy_once, copy_install);
+	saved = copy_jmp;
+	if (sigsetjmp(jb, 0)) {
+		copy_jmp = saved;
+		/* the destination may be partly written: make the rest zero by
+		 * clearing all of it (the data is not meaningful anyway) */
+		memset(dst, 0, n);
+		return -1;
+	}
+	copy_jmp = &jb;
+	memcpy(dst, src, n);
+	copy_jmp = saved;
+	return 0;
 }

@@ -159,6 +159,17 @@ static inline int gb_pname_count_class(int cls, uint32_t pname,
 		return (pname == 0x1004 || pname == 0x8E46) ? 4 : 1;
 	case GB_PNC_clearbuffer:
 		return pname == 0x1800 ? 4 : 1; /* COLOR vs DEPTH/STENCIL */
+	case GB_PNC_imgparam:
+		/* CONVOLUTION_BORDER_COLOR, FILTER_SCALE, FILTER_BIAS,
+		 * COLOR_TABLE_SCALE, COLOR_TABLE_BIAS */
+		return (pname == 0x8154 || pname == 0x8156 || pname == 0x8157 ||
+			pname == 0x80D6 || pname == 0x80D7) ? 4 : 1;
+	case GB_PNC_vattrib:
+		return pname == 0x8626 ? 4 : 1; /* CURRENT_VERTEX_ATTRIB */
+	case GB_PNC_patch:
+		return pname == 0x8E74 ? 4 : pname == 0x8E73 ? 2 : 1;
+	case GB_PNC_multisample:
+		return pname == 0x8E50 ? 2 : 1; /* SAMPLE_POSITION */
 	default:
 		return pname == 0x8267 ? 3 : 1; /* COMPUTE_WORK_GROUP_SIZE */
 	}

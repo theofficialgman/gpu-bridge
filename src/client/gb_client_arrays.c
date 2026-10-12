@@ -67,7 +67,7 @@ void gb_state_free(uint32_t ctx_id)
 	if (cx && cx->cur == s)
 		cx->cur = NULL;
 	for (int i = 0; i < GB_MAX_MAPS; i++)
-		free(s->maps[i].shadow);
+		free(s->maps[i].alloc);
 	while (s->vaos) {
 		struct gb_vao *v = s->vaos;
 
@@ -218,6 +218,8 @@ int gb_cl_buf_bound(struct gb_cl *cx, int which)
 
 	if (!st)
 		return 0;
+	if (which == GB_BUF_QUERY)
+		return gb_state_bound(st, 0x9192 /* QUERY_BUFFER */) != 0;
 	return which == GB_BUF_PACK ? st->pack_buffer != 0
 				    : st->unpack_buffer != 0;
 }
@@ -309,6 +311,40 @@ static int64_t restart_value(struct gb_ctxstate *st, uint32_t itype)
 
 /* ---- array shadow ----------------------------------------------------------------- */
 
+/* Arguments that no driver accepts. The driver is still told (it raises the
+ * error); we just must not record such a call as the array's state. Kept
+ * deliberately lenient: a false "invalid" would lose a valid client array. */
+static int pointer_args_invalid(int slot, int size, uint32_t type, int stride)
+{
+	static const uint32_t types[] = {
+		0x1400, 0x1401, 0x1402, 0x1403, 0x1404, 0x1405, 0x1406, 0x140A,
+		0x140B, 0x140C, 0x8D9F, 0x8368, 0x8C3B,
+	};
+	int known = 0;
+
+	if (stride < 0)
+		return 1;
+	for (unsigned i = 0; i < sizeof types / sizeof types[0]; i++)
+		known |= types[i] == type;
+	if (!known)
+		return 1;
+	if (slot == CA_WEIGHT || slot == CA_MATRIXINDEX)
+		return 0;
+	if (size == 0x80E1 /* BGRA */)
+		return !(type == 0x1401 || type == 0x8D9F || type == 0x8368);
+	if (size < 1 || size > 4)
+		return 1;
+	if ((type == 0x8D9F || type == 0x8368) && size != 4)
+		return 1;
+	if (type == 0x8C3B && size != 3)
+		return 1;
+	return 0;
+}
+
+/* Record a *Pointer() call. Returns 0: buffer-backed, send it as is;
+ * 1: handled (error raised), send nothing; 2: client memory, shadowed here --
+ * send it with a NULL pointer so the driver validates it and tracks
+ * size/type/stride (the pointer itself it can never use). */
 int gb_arr_pointer(struct gb_ctxstate *st, int slot, int size, uint32_t type,
 		   int normalized, int integer, int is_long, int stride,
 		   const void *ptr)
@@ -327,15 +363,17 @@ int gb_arr_pointer(struct gb_ctxstate *st, int slot, int size, uint32_t type,
 		gb_cl_gl_error(0x0502);
 		return 1;
 	}
-	a->size = size;
-	a->type = type;
-	a->normalized = (uint8_t)normalized;
-	a->integer = (uint8_t)integer;
-	a->is_long = (uint8_t)is_long;
-	a->stride = stride;
-	a->ptr = ptr;
-	a->buffer = st->array_buffer;
-	return st->array_buffer == 0;
+	if (!pointer_args_invalid(slot, size, type, stride)) {
+		a->size = size;
+		a->type = type;
+		a->normalized = (uint8_t)normalized;
+		a->integer = (uint8_t)integer;
+		a->is_long = (uint8_t)is_long;
+		a->stride = stride;
+		a->ptr = ptr;
+		a->buffer = st->array_buffer;
+	}
+	return st->array_buffer == 0 ? 2 : 0;
 }
 
 void gb_arr_enable(struct gb_ctxstate *st, int slot, int on)
@@ -740,6 +778,12 @@ static int array_state_query(GLenum pname, int64_t *out)
 	const struct gb_carray *a = &st->vao->a[slot];
 	int is_set = a->type != 0;
 
+	/* Only arrays in client memory are unknown to the driver. Buffer-backed
+	 * arrays (and everything set through the direct-state-access calls,
+	 * which the shadow does not follow) are answered by the driver. */
+	if (!is_set || a->buffer != 0)
+		return 0;
+
 	switch (what) {
 	case SIZE:
 		*out = is_set ? a->size : 4;
@@ -896,7 +940,7 @@ static void delete_buffers(GLsizei n, const GLuint *buffers)
 		/* deleting a mapped buffer unmaps it */
 		for (int m = 0; m < GB_MAX_MAPS; m++)
 			if (st->maps[m].buffer == b) {
-				free(st->maps[m].shadow);
+				free(st->maps[m].alloc);
 				memset(&st->maps[m], 0, sizeof(st->maps[m]));
 			}
 		if (st->array_buffer == b)
@@ -1020,10 +1064,15 @@ GB_API void glVertexAttribPointer(GLuint index, GLint size, GLenum type,
 {
 	struct gb_ctxstate *st = gb_cur_state_raw();
 
-	if (st && GENERIC_POINTER(index) >= 0 &&
-	    gb_arr_pointer(st, GENERIC_POINTER(index), size, type, normalized,
-			   0, 0, stride, pointer))
-		return;
+	if (st && GENERIC_POINTER(index) >= 0) {
+		int r_ = gb_arr_pointer(st, GENERIC_POINTER(index), size, type, normalized,
+			   0, 0, stride, pointer);
+
+		if (r_ == 1)
+			return;
+		if (r_ == 2)
+			pointer = NULL;
+	}
 	gbx_glVertexAttribPointer(index, size, type, normalized, stride,
 				  pointer);
 }
@@ -1033,10 +1082,15 @@ GB_API void glVertexAttribIPointer(GLuint index, GLint size, GLenum type,
 {
 	struct gb_ctxstate *st = gb_cur_state_raw();
 
-	if (st && GENERIC_POINTER(index) >= 0 &&
-	    gb_arr_pointer(st, GENERIC_POINTER(index), size, type, 0, 1, 0,
-			   stride, pointer))
-		return;
+	if (st && GENERIC_POINTER(index) >= 0) {
+		int r_ = gb_arr_pointer(st, GENERIC_POINTER(index), size, type, 0, 1, 0,
+			   stride, pointer);
+
+		if (r_ == 1)
+			return;
+		if (r_ == 2)
+			pointer = NULL;
+	}
 	gbx_glVertexAttribIPointer(index, size, type, stride, pointer);
 }
 
@@ -1273,9 +1327,15 @@ GB_API void glClientActiveTextureARB(GLenum texture)
 #define FIXED_POINTER(slot_, size_, type_, stride_, ptr_, send_)           \
 	do {                                                               \
 		struct gb_ctxstate *st_ = gb_cur_state();                  \
-		if (st_ && gb_arr_pointer(st_, (slot_), (size_), (type_), 0, \
-					  0, 0, (stride_), (ptr_)))        \
-			return;                                            \
+		if (st_) {                                                 \
+			int r_ = gb_arr_pointer(st_, (slot_), (size_),     \
+						(type_), 0, 0, 0,          \
+						(stride_), (ptr_));        \
+			if (r_ == 1)                                       \
+				return;                                    \
+			if (r_ == 2)                                       \
+				(ptr_) = NULL;                             \
+		}                                                          \
 		send_;                                                     \
 	} while (0)
 
@@ -1360,9 +1420,14 @@ GB_API void glVertexAttribPointerNV(GLuint index, GLint fsize, GLenum type,
 	struct gb_ctxstate *st = gb_cur_state_raw();
 	int slot = nv_attrib_slot(index);
 
-	if (st && slot >= 0 &&
-	    gb_arr_pointer(st, slot, fsize, type, 0, 0, 0, stride, pointer))
-		return;
+	if (st && slot >= 0) {
+		int r_ = gb_arr_pointer(st, slot, fsize, type, 0, 0, 0, stride, pointer);
+
+		if (r_ == 1)
+			return;
+		if (r_ == 2)
+			pointer = NULL;
+	}
 	gbx_glVertexAttribPointerNV(index, fsize, type, stride, pointer);
 }
 
@@ -1404,10 +1469,15 @@ GB_API void glVertexAttribLPointer(GLuint index, GLint size, GLenum type,
 {
 	struct gb_ctxstate *st = gb_cur_state_raw();
 
-	if (st && GENERIC_POINTER(index) >= 0 &&
-	    gb_arr_pointer(st, GENERIC_POINTER(index), size, type, 0, 0, 1,
-			   stride, pointer))
-		return;
+	if (st && GENERIC_POINTER(index) >= 0) {
+		int r_ = gb_arr_pointer(st, GENERIC_POINTER(index), size, type, 0, 0, 1,
+			   stride, pointer);
+
+		if (r_ == 1)
+			return;
+		if (r_ == 2)
+			pointer = NULL;
+	}
 	gbx_glVertexAttribLPointer(index, size, type, stride, pointer);
 }
 
@@ -2039,10 +2109,15 @@ GB_API void glMultiTexCoordPointerEXT(GLenum texunit, GLint size, GLenum type,
 	struct gb_ctxstate *st = gb_cur_state_raw();
 	GLuint unit = texunit - 0x84C0;
 
-	if (st && unit < GB_MAX_TEXUNITS &&
-	    gb_arr_pointer(st, CA_TEX0 + (int)unit, size, type, 0, 0, 0, stride,
-			   pointer))
-		return;
+	if (st && unit < GB_MAX_TEXUNITS) {
+		int r_ = gb_arr_pointer(st, CA_TEX0 + (int)unit, size, type, 0, 0, 0, stride,
+			   pointer);
+
+		if (r_ == 1)
+			return;
+		if (r_ == 2)
+			pointer = NULL;
+	}
 	gbx_glMultiTexCoordPointerEXT(texunit, size, type, stride, pointer);
 }
 

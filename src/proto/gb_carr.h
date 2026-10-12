@@ -33,7 +33,7 @@ enum gb_carr_slot {
 #define GB_CA_LONG (1u << 2)
 
 /* Buffer-binding kinds the generated encoders ask the client about. */
-enum { GB_BUF_PACK = 1, GB_BUF_UNPACK = 2 };
+enum { GB_BUF_PACK = 1, GB_BUF_UNPACK = 2, GB_BUF_QUERY = 3 };
 /* Pixel store source for size rules. */
 enum { GB_PM_UNPACK = 0, GB_PM_PACK = 1 };
 
