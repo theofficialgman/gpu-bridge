@@ -205,6 +205,84 @@ static void test_string_getters(void)
 	glDeleteShader(sh);
 }
 
+static void test_uniform_queries(void)
+{
+	const char *vs =
+		"#version 150\nuniform float a;\nuniform vec2 b;\n"
+		"uniform mat2 c;\nuniform U { vec4 u0; float u1; } blk;\n"
+		"void main(){ gl_Position = vec4(a + b.x + c[0][0] + blk.u0.x"
+		" + blk.u1); }\n";
+	GLuint sh = glCreateShader(GL_VERTEX_SHADER), p = glCreateProgram();
+	GLuint idx[8];
+	const char *names[3] = { "a", "does_not_exist", "c" };
+	char name[64];
+	GLsizei len;
+	GLint v[8];
+
+	glShaderSource(sh, 1, &vs, NULL);
+	glCompileShader(sh);
+	glAttachShader(p, sh);
+	glLinkProgram(p);
+	{
+		GLint ok = 0;
+		char lg[512] = "";
+
+		glGetProgramiv(p, GL_LINK_STATUS, &ok);
+		if (!ok) {
+			glGetShaderInfoLog(sh, sizeof lg, NULL, lg);
+			printf("  link failed: %s\n", lg);
+			glGetProgramInfoLog(p, sizeof lg, NULL, lg);
+			printf("  %s\n", lg);
+		}
+	}
+
+	memset(idx, 0xaa, sizeof idx);
+	glGetUniformIndices(p, 0, names, idx);
+	CHECK(idx[0] == 0xaaaaaaaau, "count 0 wrote %x", idx[0]);
+	memset(idx, 0xaa, sizeof idx);
+	glGetUniformIndices(p, 3, names, idx);
+	CHECK(idx[1] == GL_INVALID_INDEX, "unknown name -> %x", idx[1]);
+	CHECK(idx[0] != GL_INVALID_INDEX && idx[2] != GL_INVALID_INDEX,
+	      "known names -> %x %x", idx[0], idx[2]);
+	err();
+
+	/* names and indices of the block uniforms */
+	GLuint blk = glGetUniformBlockIndex(p, "U");
+	CHECK(blk != GL_INVALID_INDEX, "block index");
+	memset(name, 'Q', sizeof name);
+	len = -1;
+	glGetActiveUniformBlockName(p, blk, sizeof name, &len, name);
+	CHECK(len == 1 && !strcmp(name, "U"), "block name '%s' len %d", name,
+	      len);
+	glGetActiveUniformBlockName(p, 99, sizeof name, &len, name);
+	EXPECT_ERR(GL_INVALID_VALUE, "block name bad index");
+	v[0] = -7;
+	glGetActiveUniformBlockiv(p, 99, GL_UNIFORM_BLOCK_BINDING, v);
+	EXPECT_ERR(GL_INVALID_VALUE, "blockiv bad index");
+	glGetActiveUniformBlockiv(p, blk, 0x1234, v);
+	EXPECT_ERR(GL_INVALID_ENUM, "blockiv bad pname");
+	memset(v, 0xaa, sizeof v);
+	glGetActiveUniformBlockiv(p, blk, GL_UNIFORM_BLOCK_ACTIVE_UNIFORMS, v);
+	CHECK(v[0] == 2, "block active uniforms %d", v[0]);
+	memset(v, 0xaa, sizeof v);
+	glGetActiveUniformBlockiv(p, blk, GL_UNIFORM_BLOCK_ACTIVE_UNIFORM_INDICES,
+				  v);
+	CHECK(v[0] != (GLint)0xaaaaaaaa && v[1] != (GLint)0xaaaaaaaa &&
+	      v[2] == (GLint)0xaaaaaaaa, "block uniform indices %d %d %d", v[0],
+	      v[1], v[2]);
+	GLuint ui[2] = { 0, 99 };
+	glGetActiveUniformsiv(p, 2, ui, GL_UNIFORM_TYPE, v);
+	EXPECT_ERR(GL_INVALID_VALUE, "uniformsiv bad index");
+	glGetActiveUniformsiv(p, 1, ui, 0x1234, v);
+	EXPECT_ERR(GL_INVALID_ENUM, "uniformsiv bad pname");
+	memset(name, 'Q', sizeof name);
+	glGetActiveUniformName(p, idx[0], sizeof name, &len, name);
+	CHECK(len == 1 && !strcmp(name, "a"), "uniform name '%s' %d", name, len);
+	glDeleteProgram(p);
+	glDeleteShader(sh);
+	err();
+}
+
 static void test_buffers(void)
 {
 	GLuint b[2];
@@ -358,9 +436,13 @@ int main(void)
 	}
 	printf("GL_VERSION %s\n", glGetString(GL_VERSION));
 	err();
+	if (!have_ext("GL_ARB_uniform_buffer_object") &&
+	    atof((const char *)glGetString(GL_VERSION)) < 3.1)
+		printf("no UBOs\n");
 
 	test_getter_counts();
 	test_string_getters();
+	test_uniform_queries();
 	test_buffers();
 	test_pointer_errors();
 	test_sync_errors();
