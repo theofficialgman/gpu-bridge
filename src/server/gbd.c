@@ -231,6 +231,42 @@ void gb_sv_raise_operation(void)
 		fn_glEndList();
 }
 
+void gb_sv_err_pop(struct gb_errs *e)
+{
+	GB_NATIVE(glGetError, GLenum, (void));
+
+	e->n = 0;
+	if (!fn_glGetError)
+		return;
+	while (e->n < 8) {
+		GLenum c = fn_glGetError();
+
+		if (c == 0)
+			break;
+		e->e[e->n++] = c;
+	}
+}
+
+void gb_sv_err_raise(const struct gb_errs *e)
+{
+	GB_NATIVE(glUniform1i, void, (GLint, GLint));
+
+	for (int i = 0; i < e->n; i++) {
+		switch (e->e[i]) {
+		case 0x0500: gb_sv_raise_enum(); break;
+		case 0x0501: gb_sv_raise_invalid(); break;
+		case 0x0502:
+			/* an invalid (not -1) location is an error with or
+			 * without a current program, and changes nothing */
+			if (fn_glUniform1i)
+				fn_glUniform1i(-2, 0);
+			break;
+		default: /* OUT_OF_MEMORY etc.: cannot be re-raised */
+			break;
+		}
+	}
+}
+
 void gb_sv_raise_enum(void)
 {
 	GB_NATIVE(glBindTexture, void, (GLenum, GLuint));

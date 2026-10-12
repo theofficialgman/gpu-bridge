@@ -969,11 +969,29 @@ def emit_server(cmd, opname):
                  p["k"][4][1] == "uniform" for p in P)
     L.append("\tif (__skip) gb_sv_raise_%s();" %
              ("enum" if enum_err else "operation" if op_err else "invalid"))
+    # A getter that fails leaves the application's output untouched: find
+    # out whether *this* call raised an error (preserving any error that was
+    # already pending, which glGetError would otherwise consume) and, if so,
+    # send no data back.
+    outs_ = [p for p in P if p["k"][0] == "arr_out"]
+    chk = (cmd.api == "gl" and cmd.sync and outs_ and
+           cmd.name not in ("glGetError", "glGetString", "glGetStringi"))
+    if chk:
+        L.append("\tstruct gb_errs __e0, __e1;")
+        L.append("\tint __chk = (__h->flags & GB_CMD_F_WANT_REPLY) && "
+                 "!__skip;")
+        L.append("\tif (__chk) gb_sv_err_pop(&__e0);")
     L.append("\tuint64_t __t0 = gb_stat_now();")
     L.append(f"\tif (fn_{cmd.name} && !__skip) " +
              ("ret = " if cmd.rk[0] != "void" else "") +
              f"fn_{cmd.name}({args});")
     L.append("\tgb_stat_native(__op, __t0);")
+    if chk:
+        L.append("\tif (__chk) { gb_sv_err_pop(&__e1); "
+                 "gb_sv_err_raise(&__e0); gb_sv_err_raise(&__e1); }")
+        for p in outs_:
+            L.append(f"\tif (__skip || (__chk && __e1.n)) "
+                     f"lr_{p['name']} = GB_NULL_LEN;")
     # descriptors the driver took ownership of (on success) stay open
     for (cn, pn) in cfg.FD_PARAMS:
         if cn == cmd.name:

@@ -254,8 +254,12 @@ static void test_uniform_queries(void)
 	glGetActiveUniformBlockName(p, blk, sizeof name, &len, name);
 	CHECK(len == 1 && !strcmp(name, "U"), "block name '%s' len %d", name,
 	      len);
+	memset(name, 'Q', sizeof name);
+	len = -77;
 	glGetActiveUniformBlockName(p, 99, sizeof name, &len, name);
 	EXPECT_ERR(GL_INVALID_VALUE, "block name bad index");
+	CHECK(len == -77 && name[0] == 'Q',
+	      "outputs of a failed call were modified (len %d)", len);
 	v[0] = -7;
 	glGetActiveUniformBlockiv(p, 99, GL_UNIFORM_BLOCK_BINDING, v);
 	EXPECT_ERR(GL_INVALID_VALUE, "blockiv bad index");

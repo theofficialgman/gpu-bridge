@@ -230,6 +230,15 @@ void gb_sv_raise_invalid(void);
 void gb_sv_raise_enum(void);
 void gb_sv_raise_operation(void);
 
+/* The errors a call left pending (glGetError drained), kept so they can be
+ * put back: see the getter handling in the generated server. */
+struct gb_errs {
+	int n;
+	unsigned e[8];
+};
+void gb_sv_err_pop(struct gb_errs *e);
+void gb_sv_err_raise(const struct gb_errs *e);
+
 /* GB_STATS: time spent inside the native driver call, per opcode. */
 extern int gb_stats_on;
 uint64_t gb_stat_mono_ns(void);
