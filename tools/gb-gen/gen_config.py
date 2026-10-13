@@ -68,6 +68,10 @@ GLX_EXTENSIONS = {
 # needs a single bridge connection per process. It is installed under all of
 # the usual sonames (libGL.so.1, libEGL.so.1, libGLESv2.so.2, ...).
 # (registry, feature api, versions) and (registry, ext apis, (names, prefixes))
+# Number of translation units each generated source is split into (the
+# compiler's cost for a unit grows faster than its size).
+GEN_CHUNKS = 16
+
 LIBS = {
     "all": {
         "features": [("egl", "egl", EGL_VERSIONS),

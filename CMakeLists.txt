@@ -88,11 +88,25 @@ endif()
 
 # --- code generation ---------------------------------------------------------
 set(GB_GEN_DIR ${CMAKE_BINARY_DIR}/gen)
+set(GB_GEN_CHUNKS 16) # keep equal to GEN_CHUNKS in tools/gb-gen/gen_config.py
+set(GB_GEN_CLIENT_SRC ${GB_GEN_DIR}/gb_client_all_gen_tab.c)
+set(GB_GEN_SERVER_SRC ${GB_GEN_DIR}/gb_server_gen_tab.c)
+foreach(i RANGE 0 15)
+  string(LENGTH "${i}" _l)
+  if(_l EQUAL 1)
+    set(_k "0${i}")
+  else()
+    set(_k "${i}")
+  endif()
+  list(APPEND GB_GEN_CLIENT_SRC ${GB_GEN_DIR}/gb_client_all_gen_${_k}.c)
+  list(APPEND GB_GEN_SERVER_SRC ${GB_GEN_DIR}/gb_server_gen_${_k}.c)
+endforeach()
 set(GB_GEN_OUT
     ${GB_GEN_DIR}/gb_ops.h ${GB_GEN_DIR}/gb_handle_kinds.h
     ${GB_GEN_DIR}/gb_pname_classes.h
-    ${GB_GEN_DIR}/gb_client_all_gen.c ${GB_GEN_DIR}/gb_client_all_gen.h
-    ${GB_GEN_DIR}/gb_server_gen.c)
+    ${GB_GEN_DIR}/gb_client_all_gen.h ${GB_GEN_DIR}/gb_client_all_protos.h
+    ${GB_GEN_DIR}/gb_server_gen.h
+    ${GB_GEN_CLIENT_SRC} ${GB_GEN_SERVER_SRC})
 add_custom_command(
   OUTPUT ${GB_GEN_OUT}
   COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/gb-gen/gb_gen.py
@@ -106,11 +120,11 @@ add_custom_target(gb_generated DEPENDS ${GB_GEN_OUT})
 if(NOT GB_PURE32)
   add_executable(gbd src/server/gbd.c src/server/gb_handle.c
                      src/server/gb_server_manual.c src/server/gb_server_x11.c
-                     src/server/gb_server_sizes.c ${GB_GEN_DIR}/gb_server_gen.c)
+                     src/server/gb_server_sizes.c ${GB_GEN_SERVER_SRC})
   add_dependencies(gbd gb_generated)
   target_include_directories(gbd PRIVATE src/server ${GB_GEN_DIR})
   target_link_libraries(gbd gb_proto Threads::Threads ${CMAKE_DL_LIBS})
-  set_source_files_properties(${GB_GEN_DIR}/gb_server_gen.c PROPERTIES
+  set_source_files_properties(${GB_GEN_SERVER_SRC} PROPERTIES
                               COMPILE_FLAGS "-Wno-unused-label -Wno-unused-variable")
 endif()
 
@@ -131,7 +145,7 @@ set(GB_CLIENT_SRC src/client/gb_client.c src/client/gb_client_arrays.c
                   src/client/gb_client_strings.c src/client/gb_client_map.c
                   src/client/gb_client_debug.c
                   src/client/gb_client_gl.c src/client/gb_client_glx.c
-                  ${GB_GEN_DIR}/gb_client_all_gen.c)
+                  ${GB_GEN_CLIENT_SRC})
 set(GB_SONAME_ALIASES libEGL.so.1 libGLESv2.so.2 libGLESv1_CM.so.1
                       libGLX.so.0 libOpenGL.so.0)
 function(gb_add_bridge name proto_target shimdir)
@@ -150,7 +164,7 @@ function(gb_add_bridge name proto_target shimdir)
       COMMENT "${shimdir}/${alias} -> libGL.so.1.7.0")
   endforeach()
 endfunction()
-set_source_files_properties(${GB_GEN_DIR}/gb_client_all_gen.c PROPERTIES
+set_source_files_properties(${GB_GEN_CLIENT_SRC} PROPERTIES
                             COMPILE_FLAGS "-Wno-unused-variable")
 if(NOT GB_PURE32)
   gb_add_bridge(gb64_glx gb_proto shim64)
