@@ -404,6 +404,102 @@ Not yet covered: other piglit groups (GL 3.x/4.x, GLES2/3 on the ES API,
 shaders), glew-utils, the xscreensaver GL hacks, and large applications
 (each needs its own arm64 baseline first).
 
+### Full piglit profile on the Tegra (44,224 tests)
+
+The complete `quick`-profile test list (the same list the x86_64 dev loop
+runs), live on the X server `:0`, EGL vendor forced to NVIDIA on both sides,
+33 resumable chunks (`~/gb/pg/full_run.sh`), arm64 native first, then armhf
+bridged.
+
+| | pass | fail | crash | skip | other |
+|---|---|---|---|---|---|
+| native arm64 | 37,513 | 2,852 | 12 | 3,837 | 10 warn |
+| bridged armhf (first sweep) | 37,077 | 2,934 | 358 | 3,838 | 6 timeout, 1 incomplete, 10 warn |
+
+First sweep: **492 differences (1.1%)**. Of those, 338 are not bridge
+defects: all the `vs_in` double-attribute tests
+(`arb_vertex_attrib_64bit`, `glsl-4.10`, `glsl-4.20`) crash with SIGBUS inside
+piglit's own parser (`vertex_attrib_description::parse_datum` stores a double
+through an odd address; ARM faults on the unaligned `strd`, x86 does not). They
+crash the same way on plain Mesa llvmpipe with no bridge. That left about 154
+real differences, which the re-runs below worked through (~one re-run of just
+the difference set takes ~10 minutes: `/tmp/rerun_diff.sh <name>`).
+
+After the fixes below, the sequential (-j1, no overlapping windows) check of
+the remaining differences is: persistent buffer mappings (about 21 tests),
+`max-ssbo-size` (native crashes, bridged times out: driver memory behaviour),
+the 32-bit-only `depth-clear-precision-check` hang, and four open items
+(`egl_khr_fence_sync` display-per-thread semantics, `ext_direct_state_access`
+`named-buffers` map subtests and `vao` (native fails that one too; bridged
+aborts), plus a group of tests whose result changes run to run on *both*
+sides (`arb_sample_shading`, multisample default-framebuffer depthstencil,
+`arb_cull_distance`, the pixel-buffer-object readbacks when two test windows
+overlap under `-j2`).
+
+What the differences turned out to be (all fixed, all with a regression check
+in `tests/loopback/state_smoke.c` where it can run on the Radeon):
+
+* **Element counts of getters/setters.** The registry gives no length for many
+  DSA/EXT/OES spellings, so the count defaulted to 1: `glGetTextureParameter*`
+  swizzle/border colour, `glGetVertexAttribI*iv`/`L*dv` current value,
+  `glPatchParameterfv` (tessellation levels were silently 0, nothing drawn),
+  `glGetMultisamplefv`, fixed-point (`x`) light/material/texenv/fog arrays,
+  `glDepthRangeArrayfvOES`, sample locations, `GL_TEXTURE_CROP_RECT_OES`,
+  `OES_matrix_get`. Rule now: a command with a `pname` and no/1-element length
+  is sized by its pname class (`PNAME_CLASSES`).
+* **Outputs written that the driver did not write.** A string getter copied the
+  whole `bufSize` (overran an exactly-sized buffer: heap corruption in
+  `glsl-getactiveuniform-length`); a getter that raised an error returned
+  zeros over the application's variables (UBO negative tests); a readback with
+  `GL_PACK_ROW_LENGTH`/skip overwrote the bytes between rows. Now: strings
+  copy up to the terminator; a getter that raised an error returns no data
+  (the server pops/restores the error queue around the call); sparse pixel
+  packs send the application's current bytes along (`GB_PREFILL_BIT`).
+* **Client-memory data the driver would never have read.** Error-path tests
+  pass bad pointers on purpose; copies of application memory are now fault
+  tolerant (`gb_cl_copy_in`, volatile `jmp` slot: a plain store was optimised
+  away). Enabled arrays with a NULL pointer are not uploaded.
+* **State the shadow keeps that the driver also needs.** Client-memory
+  `*Pointer` calls are now also sent (with a NULL pointer) so the driver
+  validates size/type/stride/error and tracks the state; pointer queries ask
+  the driver unless the pointer is client memory. Primitive restart
+  (`NV`/`3.1`/fixed index) is tracked so the restart index does not count as a
+  vertex when sizing client-array uploads.
+* **Indirect draws.** Compatibility-profile `glDrawArraysIndirect` etc. with
+  the command structure in client memory, and indirect draws with client
+  vertex arrays, are expanded into ordinary draws on the client.
+* **Mapped buffers.** Mapping pointers are 256-byte aligned relative to the
+  buffer start (`GL_MIN_MAP_BUFFER_ALIGNMENT`), value errors precede state
+  errors, and `glBufferSubData`/`glCopyBufferSubData`/`glClearBuffer*`/
+  `glGet*BufferSubData` on a mapped buffer raise `INVALID_OPERATION`;
+  `BUFFER_MAPPED`-style queries work for the DSA spellings.
+* **Error codes.** Unreadable/oversized uniform arrays and uniform getters with
+  a bad location are `INVALID_OPERATION`, unknown sync names `INVALID_VALUE`,
+  `glGetVertexAttribPointerv` checks the driver's `MAX_VERTEX_ATTRIBS`,
+  indexed pointer queries accept only the indexed pnames.
+* **ES contexts.** A context older than the ES version that made a function
+  core only has it under its extension spelling; the server picks the
+  `OES`/`EXT`/`KHR` entry point from a generated introduction table.
+* **Smaller things.** `GL_BGRA` vertex arrays from client memory,
+  `ARB_shading_language_include` negative lengths, `LUMINANCE_ALPHA_INTEGER`
+  and friends in the pixel-size table, NULL entries in string arrays,
+  `GL_QUERY_BUFFER` result pointers (an offset while a query buffer is bound),
+  evaluator getters (`glGetMap*v`, `glGetnMap*v`, `glGetnPixelMap*v`).
+
+Debugging aids added: `GB_TRACE_ERRORS=1` (server names the request after
+which a GL error appeared; the error is put back), and the client prints why a
+client-array draw was refused under `GB_TRACE_OPS=1`.
+
+### Build time
+
+The generated sources are split into 16 translation units each
+(`GEN_CHUNKS`). One 4.3 MB unit took 75 s on the fast dev machine even at
+`-O0` (93% of it parsing function bodies; the cost per function grows with the
+size of the unit: 200 functions 0.4 s, 800 3.5 s, 1,600 24 s) and ~8 minutes on
+the Tegra under load, and one unit cannot use more than one core. With the
+split a full rebuild is ~22 s on the dev machine and ~3 minutes cold on the
+Tegra.
+
 ## Real applications
 
 See `docs/target-report.md` for the armhf `glmark2` (96.1% of native, all 33
