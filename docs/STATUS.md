@@ -468,6 +468,18 @@ in `tests/loopback/state_smoke.c` where it can run on the Radeon):
 * **Indirect draws.** Compatibility-profile `glDrawArraysIndirect` etc. with
   the command structure in client memory, and indirect draws with client
   vertex arrays, are expanded into ordinary draws on the client.
+* **Persistent mappings** (`GL_MAP_PERSISTENT_BIT`, GL 4.4 / ES via
+  `ARB_buffer_storage`) are emulated: the shadow copy stays alive and is kept
+  in step with the server's buffer at the commands that can consume the
+  application's writes (draws, dispatches, copies, readbacks, fences, swaps:
+  changed 4 KiB blocks are uploaded) or produce data the application reads
+  (`glFinish`, `glClientWaitSync`, `glMemoryBarrier`, swaps: the buffer is
+  re-read, keeping blocks the application changed itself). It is a model of
+  "coherent enough for fence-synchronised use", not shared memory: a
+  coherent mapping polled without any fence or barrier will not see GPU
+  writes. Uploads go through a server-side map (`OPX_BufferWrite`) because
+  `glBufferSubData` is an error on immutable storage without
+  `GL_DYNAMIC_STORAGE_BIT`.
 * **Mapped buffers.** Mapping pointers are 256-byte aligned relative to the
   buffer start (`GL_MIN_MAP_BUFFER_ALIGNMENT`), value errors precede state
   errors, and `glBufferSubData`/`glCopyBufferSubData`/`glClearBuffer*`/
