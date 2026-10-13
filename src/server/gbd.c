@@ -77,6 +77,29 @@ int gb_native_init(void)
 	return 0;
 }
 
+static void *gl_lookup(const char *name)
+{
+	void *p = NULL;
+
+	if (g_gles)
+		p = dlsym(g_gles, name);
+	if (!p && g_egl)
+		p = dlsym(g_egl, name);
+	if (!p && g_gl)
+		p = dlsym(g_gl, name);
+	if (!p && g_egl) {
+		void *(*gpa)(const char *) = dlsym(g_egl, "eglGetProcAddress");
+		if (gpa)
+			p = gpa(name);
+	}
+	if (!p && g_gl) {
+		void *(*gpa)(const char *) = dlsym(g_gl, "glXGetProcAddressARB");
+		if (gpa)
+			p = gpa(name);
+	}
+	return p;
+}
+
 void *gb_native_sym(const char *name)
 {
 	void *p = NULL;
@@ -105,21 +128,25 @@ void *gb_native_sym(const char *name)
 		return p;
 	}
 	/* OpenGL / OpenGL ES entry points */
-	if (g_gles)
-		p = dlsym(g_gles, name);
-	if (!p && g_egl)
-		p = dlsym(g_egl, name);
-	if (!p && g_gl)
-		p = dlsym(g_gl, name);
-	if (!p && g_egl) {
-		void *(*gpa)(const char *) = dlsym(g_egl, "eglGetProcAddress");
-		if (gpa)
-			p = gpa(name);
-	}
-	if (!p && g_gl) {
-		void *(*gpa)(const char *) = dlsym(g_gl, "glXGetProcAddressARB");
-		if (gpa)
-			p = gpa(name);
+	p = gl_lookup(name);
+	if (!p) {
+		/*
+		 * The same function under another vendor suffix: an ES 2
+		 * context only has glDrawElementsBaseVertexOES where the
+		 * client (and the desktop spelling) says glDrawElementsBaseVertex.
+		 */
+		static const char *const sfx[] = { "OES", "EXT", "KHR", "ARB",
+						   "NV" };
+		char buf[160];
+		size_t n = strlen(name);
+
+		if (n + 4 < sizeof buf)
+			for (unsigned i = 0; i < sizeof sfx / sizeof sfx[0] && !p;
+			     i++) {
+				memcpy(buf, name, n);
+				strcpy(buf + n, sfx[i]);
+				p = gl_lookup(buf);
+			}
 	}
 	return p;
 }

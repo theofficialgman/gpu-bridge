@@ -74,6 +74,7 @@ static inline int gb_pname_count_class(int cls, uint32_t pname,
 		case 0x0BA7: /* PROJECTION_MATRIX */
 		case 0x0BA8: /* TEXTURE_MATRIX */
 		case 0x80B1: /* COLOR_MATRIX */
+		case 0x898D: case 0x898E: case 0x898F: /* OES_matrix_get */
 		case 0x84E3: case 0x84E4: case 0x84E5: case 0x84E6: /* TRANSPOSE_* */
 			return 16;
 		case 0x0BA2: /* VIEWPORT */
@@ -156,7 +157,9 @@ static inline int gb_pname_count_class(int cls, uint32_t pname,
 	case GB_PNC_pointparam:
 		return pname == 0x8129 ? 3 : 1;
 	case GB_PNC_texparam:
-		return (pname == 0x1004 || pname == 0x8E46) ? 4 : 1;
+		/* BORDER_COLOR, SWIZZLE_RGBA, TEXTURE_CROP_RECT_OES */
+		return (pname == 0x1004 || pname == 0x8E46 ||
+			pname == 0x8B9D) ? 4 : 1;
 	case GB_PNC_clearbuffer:
 		return pname == 0x1800 ? 4 : 1; /* COLOR vs DEPTH/STENCIL */
 	case GB_PNC_imgparam:
