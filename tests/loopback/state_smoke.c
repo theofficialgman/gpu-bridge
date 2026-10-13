@@ -183,6 +183,45 @@ static void test_attrib_errors(void)
 	CHECK(glGetError() == GL_NO_ERROR, "VertexAttrib4f: second error");
 }
 
+/* glGetTextureSubImage on a cube map: one face per z slice */
+static void test_get_texture_sub_image(void)
+{
+	GLuint tex;
+	unsigned char face[6][4 * 4 * 4], got[4 * 4 * 4];
+
+	if (!have_ext("GL_ARB_get_texture_sub_image"))
+		return;
+	glGenTextures(1, &tex);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, tex);
+	glTexStorage2D(GL_TEXTURE_CUBE_MAP, 1, GL_RGBA8, 4, 4);
+	for (int f = 0; f < 6; f++) {
+		for (unsigned i = 0; i < sizeof face[f]; i++)
+			face[f][i] = (unsigned char)(f * 40 + i);
+		glTexSubImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + f, 0, 0, 0, 4, 4,
+				GL_RGBA, GL_UNSIGNED_BYTE, face[f]);
+	}
+	err();
+	for (int f = 0; f < 6; f++) {
+		memset(got, 0xEE, sizeof got);
+		glGetTextureSubImage(tex, 0, 0, 0, f, 4, 4, 1, GL_RGBA,
+				     GL_UNSIGNED_BYTE, sizeof got, got);
+		CHECK(!memcmp(got, face[f], sizeof got),
+		      "cube face %d: first bytes %02x %02x (want %02x %02x)", f,
+		      got[0], got[1], face[f][0], face[f][1]);
+	}
+	/* a 2D slice of all six at once */
+	{
+		unsigned char all[6 * 4 * 4 * 4];
+
+		memset(all, 0xEE, sizeof all);
+		glGetTextureSubImage(tex, 0, 0, 0, 0, 4, 4, 6, GL_RGBA,
+				     GL_UNSIGNED_BYTE, sizeof all, all);
+		CHECK(!memcmp(all + 3 * 64, face[3], 64), "all faces: face 3");
+	}
+	EXPECT_ERR(GL_NO_ERROR, "GetTextureSubImage");
+	glDeleteTextures(1, &tex);
+}
+
 static void test_string_getters(void)
 {
 	const char *vs =
@@ -473,6 +512,7 @@ int main(void)
 		printf("no UBOs\n");
 
 	test_getter_counts();
+	test_get_texture_sub_image();
 	test_attrib_errors();
 	test_string_getters();
 	test_uniform_queries();

@@ -992,6 +992,13 @@ def emit_server(cmd, opname):
         for p in outs_:
             L.append(f"\tif (__skip || (__chk && __e1.n)) "
                      f"lr_{p['name']} = GB_NULL_LEN;")
+    # EGL: a call that returns EGL_FALSE leaves the application's outputs
+    # untouched
+    if (cmd.api == "egl" and cmd.sync and cmd.ret.strip() == "EGLBoolean"
+            and any(p["k"][0] == "arr_out" for p in P)):
+        for p in P:
+            if p["k"][0] == "arr_out":
+                L.append(f"\tif (!ret) lr_{p['name']} = GB_NULL_LEN;")
     # descriptors the driver took ownership of (on success) stay open
     for (cn, pn) in cfg.FD_PARAMS:
         if cn == cmd.name:
