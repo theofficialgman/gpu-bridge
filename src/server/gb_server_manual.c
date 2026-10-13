@@ -1206,6 +1206,55 @@ bad:
  * range is not inside the buffer (the draw would be invalid) so that no GL
  * error is raised behind the application's back.
  */
+/* glGetPointerv and friends for arrays the client does not shadow: the value
+ * (a buffer offset, as the driver stores it) is the driver's to report. */
+static void h_get_pointer(struct gb_sth *t, const struct gb_cmd_hdr *h,
+			  struct gb_r *r)
+{
+	uint32_t kind = gb_r_u32(r), a = gb_r_u32(r), b = gb_r_u32(r),
+		 c = gb_r_u32(r);
+	void *p = NULL;
+
+	if (r->err || kind > 3)
+		goto bad;
+	GB_NATIVE(glGetPointerv, void, (GLenum, void **));
+	GB_NATIVE(glGetPointeri_vEXT, void, (GLenum, GLuint, void **));
+	GB_NATIVE(glGetVertexArrayPointeri_vEXT, void,
+		  (GLuint, GLuint, GLenum, void **));
+	GB_NATIVE(glGetVertexAttribPointerv, void, (GLuint, GLenum, void **));
+	switch (kind) {
+	case 0: /* glGetPointerv(pname = a) */
+		if (fn_glGetPointerv)
+			fn_glGetPointerv(a, &p);
+		break;
+	case 1: /* glGetPointeri_vEXT(pname = a, index = b) */
+		if (fn_glGetPointeri_vEXT)
+			fn_glGetPointeri_vEXT(a, b, &p);
+		break;
+	case 2: /* glGetVertexArrayPointeri_vEXT(vaobj = a, index = b, pname = c) */
+		if (fn_glGetVertexArrayPointeri_vEXT)
+			fn_glGetVertexArrayPointeri_vEXT(a, b, c, &p);
+		break;
+	default: /* glGetVertexAttribPointerv(index = a, pname = b) */
+		if (fn_glGetVertexAttribPointerv)
+			fn_glGetVertexAttribPointerv(a, b, &p);
+		break;
+	}
+	if (h->flags & GB_CMD_F_WANT_REPLY) {
+		struct gb_out o;
+		struct gb_w w;
+
+		if (!gb_sv_reply_begin(t, h, &o, 24)) {
+			gb_w_init(&w, o.p);
+			gb_w_u64(&w, (uint64_t)(uintptr_t)p);
+			gb_sv_reply_end(t, &o);
+		}
+	}
+	return;
+bad:
+	gb_sv_proto_error(t, h);
+}
+
 static void h_element_max(struct gb_sth *t, const struct gb_cmd_hdr *h,
 			  struct gb_r *r)
 {
@@ -1637,6 +1686,7 @@ void gb_srv_manual_dispatch(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	case GB_OPX_GLXFBConfigs: h_glx_fbconfigs(t, h, r); break;
 	case GB_OPX_BufferRead: h_buffer_read(t, h, r); break;
 	case GB_OPX_ElementMax: h_element_max(t, h, r); break;
+	case GB_OPX_GetPointer: h_get_pointer(t, h, r); break;
 	case GB_OPX_EglDevice: h_egl_device(t, h, r); break;
 	case GB_OPX_Ping: h_ping(t, h, r); break;
 	case GB_OPX_BlobFuncs: h_blob_funcs(t, h, r); break;

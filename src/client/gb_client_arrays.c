@@ -319,6 +319,13 @@ static inline int is_client_array(const struct gb_carray *a)
 	return a->enabled && a->buffer == 0 && a->ptr != NULL;
 }
 
+/* The pointer the application passed for client-memory data (enabled or
+ * not); a buffer offset is the driver's to report. */
+static inline int client_pointer(const struct gb_carray *a)
+{
+	return a->buffer == 0 && a->ptr != NULL;
+}
+
 /* Arguments that no driver accepts. The driver is still told (it raises the
  * error); we just must not record such a call as the array's state. Kept
  * deliberately lenient: a false "invalid" would lose a valid client array. */
@@ -2000,6 +2007,36 @@ GB_API void glMultiDrawElementsBaseVertex(GLenum mode, const GLsizei *count,
 					 basevertex[i]);
 }
 
+/* Ask the driver for an array pointer the client does not shadow (a buffer
+ * offset, or state set through the direct-state-access calls). */
+static void *driver_pointer(uint32_t kind, uint32_t a, uint32_t b, uint32_t c)
+{
+	struct gb_cl *cx = gb_cl_get();
+	struct gb_out o;
+	struct gb_w w;
+	void *p = NULL;
+
+	if (!cx || gb_cl_msg_begin(cx, &o, &w, GB_OPX_GetPointer, 32,
+				   GB_CMD_F_WANT_REPLY))
+		return NULL;
+	gb_w_u32(&w, kind);
+	gb_w_u32(&w, a);
+	gb_w_u32(&w, b);
+	gb_w_u32(&w, c);
+	gb_cl_end(cx, &o);
+
+	struct gb_in in;
+	if (gb_cl_wait_reply(cx, &in, GB_OPX_GetPointer))
+		return NULL;
+	struct gb_r r;
+	gb_r_init(&r, in.p, in.size);
+	uint64_t v = gb_r_u64(&r);
+	if (!r.err)
+		p = (void *)(uintptr_t)v;
+	gb_in_release(&in);
+	return p;
+}
+
 GB_API void glGetVertexAttribPointerv(GLuint index, GLenum pname,
 				      void **pointer)
 {
@@ -2020,7 +2057,10 @@ GB_API void glGetVertexAttribPointerv(GLuint index, GLenum pname,
 		gb_cl_gl_error(0x0501);
 		return;
 	}
-	*pointer = st ? (void *)st->vao->a[CA_GENERIC0 + index].ptr : NULL;
+	if (st && client_pointer(&st->vao->a[CA_GENERIC0 + index]))
+		*pointer = (void *)st->vao->a[CA_GENERIC0 + index].ptr;
+	else
+		*pointer = driver_pointer(3, index, pname, 0);
 }
 
 GB_API void glGetVertexAttribPointervARB(GLuint index, GLenum pname,
@@ -2065,7 +2105,10 @@ GB_API void glGetPointerv(GLenum pname, void **params)
 		*params = NULL;
 		return;
 	}
-	*params = st ? (void *)st->vao->a[slot].ptr : NULL;
+	if (st && client_pointer(&st->vao->a[slot]))
+		*params = (void *)st->vao->a[slot].ptr;
+	else
+		*params = driver_pointer(0, pname, 0, 0);
 }
 
 /* ---- EXT_direct_state_access client-array entry points ---------------------------------- */
@@ -2091,7 +2134,9 @@ static int pointer_slot(GLenum pname, GLuint index)
 GB_API void glGetPointeri_vEXT(GLenum pname, GLuint index, void **params)
 {
 	struct gb_ctxstate *st = gb_cur_state_raw();
-	int slot = pointer_slot(pname, index);
+	/* the indexed query only knows the per-unit / per-attribute pointers */
+	int slot = (pname == 0x8092 || pname == 0x8645)
+			   ? pointer_slot(pname, index) : -1;
 
 	if (!params)
 		return;
@@ -2100,7 +2145,10 @@ GB_API void glGetPointeri_vEXT(GLenum pname, GLuint index, void **params)
 		*params = NULL;
 		return;
 	}
-	*params = (void *)st->vao->a[slot].ptr;
+	if (client_pointer(&st->vao->a[slot]))
+		*params = (void *)st->vao->a[slot].ptr;
+	else
+		*params = driver_pointer(1, pname, index, 0);
 }
 
 GB_API void glGetPointerIndexedvEXT(GLenum pname, GLuint index, void **params)
@@ -2117,12 +2165,15 @@ GB_API void glGetVertexArrayPointeri_vEXT(GLuint vaobj, GLuint index,
 
 	if (!param)
 		return;
-	if (slot < 0 || !v) {
-		gb_cl_gl_error(slot < 0 ? 0x0500 : 0x0502);
+	if (slot < 0) {
+		gb_cl_gl_error(0x0500);
 		*param = NULL;
 		return;
 	}
-	*param = (void *)v->a[slot].ptr;
+	if (v && client_pointer(&v->a[slot]))
+		*param = (void *)v->a[slot].ptr;
+	else
+		*param = driver_pointer(2, vaobj, index, pname);
 }
 
 GB_API void glGetVertexArrayPointervEXT(GLuint vaobj, GLenum pname,
