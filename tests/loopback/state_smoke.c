@@ -155,6 +155,34 @@ static void test_getter_counts(void)
 	(void)vao;
 }
 
+/* an invalid index must leave exactly one error and write nothing */
+static void test_attrib_errors(void)
+{
+	GLint max = 0;
+	GLfloat f[4] = { -1, -1, -1, -1 };
+	GLint iv[4] = { -2, -2, -2, -2 };
+	GLvoid *ptr = (GLvoid *)0x1;
+
+	glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &max);
+	err();
+	glGetVertexAttribfv(max, GL_CURRENT_VERTEX_ATTRIB, f);
+	CHECK(glGetError() == GL_INVALID_VALUE, "GetVertexAttribfv error");
+	CHECK(glGetError() == GL_NO_ERROR, "GetVertexAttribfv: second error");
+	CHECK(f[0] == -1 && f[3] == -1, "GetVertexAttribfv wrote %g", f[0]);
+	glGetVertexAttribiv(max, GL_VERTEX_ATTRIB_ARRAY_ENABLED, iv);
+	CHECK(glGetError() == GL_INVALID_VALUE, "GetVertexAttribiv error");
+	CHECK(glGetError() == GL_NO_ERROR, "GetVertexAttribiv: second error");
+	glGetVertexAttribPointerv(max, GL_VERTEX_ATTRIB_ARRAY_POINTER, &ptr);
+	CHECK(glGetError() == GL_INVALID_VALUE, "GetVertexAttribPointerv error");
+	CHECK(glGetError() == GL_NO_ERROR, "GetVertexAttribPointerv: second");
+	glEnableVertexAttribArray(max);
+	CHECK(glGetError() == GL_INVALID_VALUE, "Enable error");
+	CHECK(glGetError() == GL_NO_ERROR, "Enable: second error");
+	glVertexAttrib4f(max, 1, 2, 3, 4);
+	CHECK(glGetError() == GL_INVALID_VALUE, "VertexAttrib4f error");
+	CHECK(glGetError() == GL_NO_ERROR, "VertexAttrib4f: second error");
+}
+
 static void test_string_getters(void)
 {
 	const char *vs =
@@ -445,6 +473,7 @@ int main(void)
 		printf("no UBOs\n");
 
 	test_getter_counts();
+	test_attrib_errors();
 	test_string_getters();
 	test_uniform_queries();
 	test_buffers();

@@ -116,6 +116,7 @@ struct gb_ctxstate {
 	uint32_t client_active_tex; /* texture unit index */
 	int8_t core;                /* -1 unknown, 0 compat/ES, 1 core profile */
 	int8_t es;                  /* -1 unknown, 0 desktop GL, 1 OpenGL ES */
+	int32_t max_attribs;        /* GL_MAX_VERTEX_ATTRIBS, 0 = not queried */
 	/* Primitive restart (GL 3.1 / NV_primitive_restart / fixed index): the
 	 * client needs the index to leave it out of the vertex-range scan that
 	 * sizes client-array uploads. */

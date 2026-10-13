@@ -2009,7 +2009,14 @@ GB_API void glGetVertexAttribPointerv(GLuint index, GLenum pname,
 		gb_cl_gl_error(0x0500);
 		return;
 	}
-	if (index >= GB_MAX_GENERIC || !pointer) {
+	if (st && !st->max_attribs) {
+		GLint m = 0;
+
+		gbx_glGetIntegerv(0x8869 /* MAX_VERTEX_ATTRIBS */, &m);
+		st->max_attribs = m > 0 ? m : GB_MAX_GENERIC;
+	}
+	if (index >= GB_MAX_GENERIC || !pointer ||
+	    (st && index >= (GLuint)st->max_attribs)) {
 		gb_cl_gl_error(0x0501);
 		return;
 	}

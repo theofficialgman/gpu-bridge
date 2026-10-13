@@ -105,7 +105,7 @@ set(GB_GEN_OUT
     ${GB_GEN_DIR}/gb_ops.h ${GB_GEN_DIR}/gb_handle_kinds.h
     ${GB_GEN_DIR}/gb_pname_classes.h
     ${GB_GEN_DIR}/gb_client_all_gen.h ${GB_GEN_DIR}/gb_client_all_protos.h
-    ${GB_GEN_DIR}/gb_server_gen.h
+    ${GB_GEN_DIR}/gb_server_gen.h ${GB_GEN_DIR}/gb_es_intro.h
     ${GB_GEN_CLIENT_SRC} ${GB_GEN_SERVER_SRC})
 add_custom_command(
   OUTPUT ${GB_GEN_OUT}

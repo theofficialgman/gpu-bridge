@@ -24,6 +24,7 @@
 #include <unistd.h>
 
 #include "gb_server_impl.h"
+#include "gb_es_intro.h"
 
 static int g_debug;
 static void *g_egl, *g_gles, *g_gl;
@@ -128,7 +129,53 @@ void *gb_native_sym(const char *name)
 		return p;
 	}
 	/* OpenGL / OpenGL ES entry points */
-	p = gl_lookup(name);
+	/*
+	 * An ES context older than 3.2 may only offer a core-era function under
+	 * its extension spelling (glDrawElementsBaseVertexOES): the client
+	 * folds OES/EXT spellings into the core name, so a context that lacks
+	 * the core function must be given the extension one. Newer contexts
+	 * and desktop GL keep the exact name.
+	 */
+	static int es_ver = -1; /* 0: not ES (or undecided), else 10*major+minor */
+
+	if (es_ver < 0) {
+		const char *(*gs)(unsigned) = gl_lookup("glGetString");
+		const char *v = gs ? gs(0x1F02 /* VERSION */) : NULL;
+
+		if (v) { /* only decided once a context answered */
+			es_ver = 0;
+			if (!strncmp(v, "OpenGL ES", 9)) {
+				while (*v && (*v < '0' || *v > '9'))
+					v++;
+				es_ver = (v[0] - '0') * 10 +
+					 ((v[1] == '.' && v[2] >= '0') ?
+						  v[2] - '0' : 0);
+			}
+		}
+	}
+	if (es_ver > 0) {
+		int late = 0;
+
+		for (int i = 0; gb_es_intro[i].name; i++)
+			if (!strcmp(gb_es_intro[i].name, name)) {
+				late = gb_es_intro[i].ver > es_ver;
+				break;
+			}
+		if (late) {
+			static const char *const sfx[] = { "OES", "EXT", "KHR" };
+			char buf[160];
+			size_t n = strlen(name);
+
+			if (n + 4 < sizeof buf)
+				for (unsigned i = 0; i < 3 && !p; i++) {
+					memcpy(buf, name, n);
+					strcpy(buf + n, sfx[i]);
+					p = gl_lookup(buf);
+				}
+		}
+	}
+	if (!p)
+		p = gl_lookup(name);
 	if (!p) {
 		/*
 		 * The same function under another vendor suffix: an ES 2
