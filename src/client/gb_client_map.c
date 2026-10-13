@@ -316,16 +316,12 @@ GB_API void glGetBufferPointerv(GLenum target, GLenum pname, void **params)
 
 /* BUFFER_MAPPED etc. describe the client-side mapping, not the server's
  * (which is never mapped). */
-static int map_param(GLenum target, GLenum pname, int64_t *out)
+static int map_param_buf(uint32_t buf, GLenum pname, int64_t *out)
 {
 	struct gb_ctxstate *st = gb_cur_state();
 	struct gb_map *m;
-	uint32_t buf;
 
-	if (!st)
-		return 0;
-	buf = gb_state_bound(st, target);
-	if (!buf)
+	if (!st || !buf)
 		return 0;
 	m = gb_state_map(st, buf);
 	switch (pname) {
@@ -357,6 +353,13 @@ static int map_param(GLenum target, GLenum pname, int64_t *out)
 	default:
 		return 0;
 	}
+}
+
+static int map_param(GLenum target, GLenum pname, int64_t *out)
+{
+	struct gb_ctxstate *st = gb_cur_state();
+
+	return st ? map_param_buf(gb_state_bound(st, target), pname, out) : 0;
 }
 
 GB_API void glGetBufferParameteriv(GLenum target, GLenum pname, GLint *params)
@@ -563,5 +566,43 @@ GB_API void glClearNamedBufferSubData(GLuint buffer, GLenum internalformat,
 	if (!mapped_busy(0, buffer))
 		gbx_glClearNamedBufferSubData(buffer, internalformat, offset,
 					      size, format, type, data);
+}
+#endif
+
+#ifdef GB_LIB_GL
+GB_API void glGetNamedBufferParameteriv(GLuint buffer, GLenum pname,
+					GLint *params)
+{
+	int64_t v;
+
+	if (params && map_param_buf(buffer, pname, &v)) {
+		*params = (GLint)v;
+		return;
+	}
+	gbx_glGetNamedBufferParameteriv(buffer, pname, params);
+}
+
+GB_API void glGetNamedBufferParameterivEXT(GLuint buffer, GLenum pname,
+					   GLint *params)
+{
+	int64_t v;
+
+	if (params && map_param_buf(buffer, pname, &v)) {
+		*params = (GLint)v;
+		return;
+	}
+	gbx_glGetNamedBufferParameterivEXT(buffer, pname, params);
+}
+
+GB_API void glGetNamedBufferParameteri64v(GLuint buffer, GLenum pname,
+					  GLint64 *params)
+{
+	int64_t v;
+
+	if (params && map_param_buf(buffer, pname, &v)) {
+		*params = v;
+		return;
+	}
+	gbx_glGetNamedBufferParameteri64v(buffer, pname, params);
 }
 #endif
