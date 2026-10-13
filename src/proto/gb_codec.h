@@ -17,6 +17,9 @@
 #include "gb_proto.h"
 
 /* Sentinel byte-length meaning "this pointer argument was NULL". */
+/* length word of a pixel-pack output: the application's current bytes follow
+ * (the transfer leaves gaps the driver does not write) */
+#define GB_PREFILL_BIT 0x40000000u
 #define GB_NULL_LEN 0xFFFFFFFFu
 /* Pointer argument is a buffer-object offset (a pixel pack/unpack buffer is
  * bound): the blob is 8 bytes holding the offset, not data. */

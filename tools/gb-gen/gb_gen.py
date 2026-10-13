@@ -201,6 +201,29 @@ def pbo_kind(cmd, base, pname):
     return None
 
 
+def pack_sparse_expr(cmd, pname_):
+    """C expression: does this pixel-pack transfer leave gaps in the
+    application's buffer (row length / skip / image height / row padding)?
+    The driver then only writes the texels; everything else must keep the
+    application's bytes, so the client sends them along. None: not a
+    candidate (compressed images, server-sized data)."""
+    names = {p["name"] for p in cmd.params}
+    if not (PBO_PACK_RE.match(cmd.name) or cmd.name in cfg.PBO_PACK_EXTRA):
+        return None
+    if "Compressed" in cmd.name or "Polygon" in cmd.name or "PixelMap" in \
+            cmd.name or "Histogram" in cmd.name or "Minmax" in cmd.name or \
+            "ColorTable" in cmd.name or "Convolution" in cmd.name or \
+            "Separable" in cmd.name:
+        return None
+    if {"format", "type"} <= names and {"width", "height"} <= names:
+        d = "depth" if "depth" in names else "1"
+        return (f"gb_cl_pack_sparse(__cx, (int64_t)width, (int64_t)height, "
+                f"(int64_t){d}, format, type)")
+    if {"format", "type"} <= names:
+        return "gb_cl_pack_sparse(__cx, -1, -1, -1, format, type)"
+    return None
+
+
 def pname_class(name):
     for rx, cls in cfg.PNAME_CLASSES:
         if re.match(rx, name):
@@ -535,6 +558,11 @@ def emit_client(cmd, public, opname):
                 L.append(f"\tif (!__pbo_{n} && {n} && __n_{n} * {k[3]} > "
                          f"GB_MAX_ARRAY_BYTES) "
                          f"{{ gb_cl_set_error(__cx, __op); {retstmt} }}")
+                if k[0] == "arr_out" and pbo == "pack" and k[2] == "raw":
+                    sx = pack_sparse_expr(cmd, n)
+                    if sx:
+                        L.append(f"\tint __pf_{n} = (!__pbo_{n} && {n} && "
+                                 f"__n_{n} > 0 && {sx});")
             else:
                 L.append(f"\tuint32_t __l_{n} = {n} ? (uint32_t)(__n_{n} * "
                          f"{k[3]}) : GB_NULL_LEN;")
@@ -579,6 +607,10 @@ def emit_client(cmd, public, opname):
         elif k[0] == "arr_out" and k[5]:
             L.append(f"\tif (__l_{n} == GB_PBO_LEN) __t = "
                      f"GB_ALIGN_UP(__t, 8u) + 8u;")
+            if (k[5] == "pack" and k[2] == "raw" and k[4][0] != "server"
+                    and pack_sparse_expr(cmd, n)):
+                L.append(f"\tif (__pf_{n}) __t = GB_ALIGN_UP(__t, 8u) + "
+                         f"__l_{n};")
     L.append("\t__t = GB_ALIGN_UP(__t, 8u);")
 
     flags = "GB_CMD_F_WANT_REPLY" if cmd.sync else "0"
@@ -602,6 +634,11 @@ def emit_client(cmd, public, opname):
         elif k[0] == "xvis":
             L.append(f"\tgb_w_u32(&__w, __xv_{n});")
             L.append(f"\tgb_w_u32(&__w, __xs_{n});")
+        elif (k[0] == "arr_out" and k[5] == "pack" and k[2] == "raw"
+              and k[4][0] != "server" and pack_sparse_expr(cmd, n)):
+            # high bit pattern: the application's current bytes follow
+            L.append(f"\tgb_w_u32(&__w, __l_{n} | (__pf_{n} ? "
+                     f"GB_PREFILL_BIT : 0));")
         else:
             L.append(f"\tgb_w_u32(&__w, __l_{n});")
     for p in P:
@@ -624,6 +661,11 @@ def emit_client(cmd, public, opname):
                     L.append(f"\tif (__l_{n} == GB_PBO_LEN) {{ uint64_t "
                              f"__off = (uint64_t)(uintptr_t){n}; "
                              f"memcpy(gb_w_blob(&__w, 8), &__off, 8); }}")
+                    if (pbo == "pack" and k[2] == "raw" and
+                            k[4][0] != "server" and pack_sparse_expr(cmd, n)):
+                        L.append(f"\tif (__pf_{n}) {{ void *__d = "
+                                 f"gb_w_blob(&__w, __l_{n}); "
+                                 f"gb_cl_copy_in(__d, {n}, __l_{n}); }}")
                 continue
             mode, wsz = (k[2], k[3])
             if pbo:
@@ -772,6 +814,12 @@ def emit_server(cmd, opname):
             L.append(f"\tuint32_t xs_{n} = gb_r_u32(__r);")
         else:
             L.append(f"\tuint32_t l_{n} = gb_r_u32(__r);")
+            if (k[0] == "arr_out" and k[5] == "pack" and k[2] == "raw" and
+                    k[4][0] != "server" and pack_sparse_expr(cmd, n)):
+                L.append(f"\tint pf_{n} = 0;")
+                L.append(f"\tif (l_{n} < 0x80000000u && "
+                         f"(l_{n} & GB_PREFILL_BIT)) "
+                         f"{{ pf_{n} = 1; l_{n} &= ~GB_PREFILL_BIT; }}")
     L.append("\tif (__r->err) goto proto_error;")
 
     for p in P:
@@ -936,6 +984,11 @@ def emit_server(cmd, opname):
             esz = 8 if mode == "widen" else wsz
             L.append(f"\t\to_{n} = gb_tmp_zero(__t, (size_t)n_{n} * "
                      f"{esz} + 512);")
+            if (pbo == "pack" and mode == "raw" and
+                    pack_sparse_expr(cmd, n)):
+                L.append(f"\t\tif (pf_{n}) {{ const void *pb_ = "
+                         f"gb_r_blob(__r, l_{n}); if (!pb_) goto "
+                         f"proto_error; memcpy(o_{n}, pb_, l_{n}); }}")
             L.append("\t}")
             if pbo:
                 L.append(f"\t{p['ctype']} a_{n} = (l_{n} == GB_PBO_LEN) ? "

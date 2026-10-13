@@ -224,6 +224,37 @@ int gb_cl_buf_bound(struct gb_cl *cx, int which)
 				    : st->unpack_buffer != 0;
 }
 
+int gb_cl_pack_sparse(struct gb_cl *cx, int64_t w, int64_t h, int64_t d,
+		      uint32_t format, uint32_t type)
+{
+	struct gb_ctxstate *st = cx ? cx->cur : NULL;
+	const struct gb_pixstore *ps;
+
+	if (!st)
+		return 0;
+	ps = &st->pack;
+	if (ps->skip_pixels || ps->skip_rows || ps->skip_images)
+		return 1;
+	if (w < 0 || h < 0 || d < 0)
+		return ps->row_length != 0 || ps->image_height != 0;
+	if (w == 0 || h == 0 || d == 0)
+		return 0;
+	/* tightly packed size vs the span the transfer covers */
+	struct gb_pixstore dense = *ps;
+
+	dense.row_length = dense.image_height = 0;
+	dense.skip_pixels = dense.skip_rows = dense.skip_images = 0;
+	dense.alignment = 1;
+	int64_t tight = gb_pixel_bytes3(format, type, w, h, d > 1 ? d : GB_DEPTH_2D,
+					&dense);
+	int64_t span = gb_pixel_bytes3(format, type, w, h, d > 1 ? d : GB_DEPTH_2D,
+				       ps);
+
+	if (tight < 0 || span < 0)
+		return ps->row_length != 0 || ps->image_height != 0;
+	return span != tight;
+}
+
 /* ---- size-rule inputs ----------------------------------------------------------- */
 
 int gb_cl_geti(void *ctx, uint32_t pname)

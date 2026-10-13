@@ -222,6 +222,31 @@ static void test_get_texture_sub_image(void)
 	glDeleteTextures(1, &tex);
 }
 
+/* a pixel-pack transfer with row length / skip leaves the other bytes alone */
+static void test_pack_gaps(void)
+{
+	unsigned char buf[8 * 4 * 4];
+	int bad = 0;
+
+	glClearColor(0.f, 0.f, 0.f, 0.f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	memset(buf, 0xEE, sizeof buf);
+	glPixelStorei(GL_PACK_ROW_LENGTH, 8);
+	glPixelStorei(GL_PACK_SKIP_PIXELS, 4);
+	glReadPixels(0, 0, 4, 4, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+	glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+	glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
+	/* first four pixels of each row (rows are 8 pixels wide) untouched? */
+	for (int row = 0; row < 4; row++)
+		for (int i = 0; i < 16; i++)
+			if (buf[row * 32 + i] != 0xEE)
+				bad++;
+	CHECK(bad == 0, "%d bytes outside the transfer were overwritten", bad);
+	/* the transfer itself landed in the second half of each row */
+	CHECK(buf[16] != 0xEE, "transfer not written");
+	err();
+}
+
 static void test_string_getters(void)
 {
 	const char *vs =
@@ -513,6 +538,7 @@ int main(void)
 
 	test_getter_counts();
 	test_get_texture_sub_image();
+	test_pack_gaps();
 	test_attrib_errors();
 	test_string_getters();
 	test_uniform_queries();

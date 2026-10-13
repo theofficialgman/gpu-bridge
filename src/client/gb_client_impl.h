@@ -229,6 +229,10 @@ struct gb_ctxstate *gb_state_for(uint32_t ctx_id);
 struct gb_ctxstate *gb_cur_state(void);
 struct gb_ctxstate *gb_cur_state_raw(void); /* even between glBegin/glEnd */
 int gb_cl_buf_bound(struct gb_cl *cx, int which);
+/* Does a pixel-pack transfer with the current PACK state leave bytes of the
+ * application's buffer unwritten? dims < 0: unknown. */
+int gb_cl_pack_sparse(struct gb_cl *cx, int64_t w, int64_t h, int64_t d,
+		      uint32_t format, uint32_t type);
 /* Copy application memory into a message. The driver validates arguments
  * before it reads a data pointer, so an application may legally pass a
  * pointer that is never dereferenced (tests of error paths do); a fault
