@@ -247,6 +247,61 @@ static void test_pack_gaps(void)
 	err();
 }
 
+/* ARB_buffer_storage persistent mappings: written data reaches the GPU at the
+ * next command that uses it, GPU-written data shows up after a fence */
+static void test_persistent_map(void)
+{
+	GLuint b[2];
+	const GLbitfield sflags = GL_MAP_READ_BIT | GL_MAP_WRITE_BIT |
+				  GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
+	unsigned char src[256], chk[256];
+
+	if (!have_ext("GL_ARB_buffer_storage"))
+		return;
+	for (int i = 0; i < 256; i++)
+		src[i] = (unsigned char)(i * 7 + 1);
+	glGenBuffers(2, b);
+	glBindBuffer(GL_COPY_READ_BUFFER, b[0]);
+	glBufferStorage(GL_COPY_READ_BUFFER, 8192, NULL, sflags);
+	glBindBuffer(GL_COPY_WRITE_BUFFER, b[1]);
+	glBufferStorage(GL_COPY_WRITE_BUFFER, 8192, NULL, GL_DYNAMIC_STORAGE_BIT);
+	err();
+	/* application -> GPU */
+	unsigned char *p = glMapBufferRange(GL_COPY_READ_BUFFER, 0, 8192,
+					    sflags);
+	CHECK(p != NULL, "persistent map");
+	if (p) {
+		memcpy(p + 4096, src, sizeof src);
+		glCopyBufferSubData(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER,
+				    4096, 0, sizeof src);
+		memset(chk, 0, sizeof chk);
+		glGetBufferSubData(GL_COPY_WRITE_BUFFER, 0, sizeof chk, chk);
+		CHECK(!memcmp(chk, src, sizeof src), "write reached the buffer");
+		/* GPU -> application */
+		unsigned char more[256];
+		for (int i = 0; i < 256; i++)
+			more[i] = (unsigned char)(255 - i);
+		glBufferSubData(GL_COPY_WRITE_BUFFER, 0, sizeof more, more);
+		glCopyBufferSubData(GL_COPY_WRITE_BUFFER, GL_COPY_READ_BUFFER, 0,
+				    0, sizeof more);
+		GLsync f = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+		glClientWaitSync(f, GL_SYNC_FLUSH_COMMANDS_BIT, 1000000000);
+		glDeleteSync(f);
+		CHECK(!memcmp(p, more, sizeof more), "GPU write visible: %02x %02x",
+		      p[0], p[1]);
+		/* the earlier application write is still there */
+		CHECK(!memcmp(p + 4096, src, sizeof src), "earlier write kept");
+		CHECK(glUnmapBuffer(GL_COPY_READ_BUFFER) == GL_TRUE, "unmap");
+	}
+	/* not created persistent: refused */
+	glBindBuffer(GL_COPY_WRITE_BUFFER, b[1]);
+	CHECK(glMapBufferRange(GL_COPY_WRITE_BUFFER, 0, 64,
+			       GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT) == NULL,
+	      "non-persistent storage mapped persistently");
+	EXPECT_ERR(GL_INVALID_OPERATION, "persistent map of plain storage");
+	glDeleteBuffers(2, b);
+}
+
 static void test_string_getters(void)
 {
 	const char *vs =
@@ -539,6 +594,7 @@ int main(void)
 	test_getter_counts();
 	test_get_texture_sub_image();
 	test_pack_gaps();
+	test_persistent_map();
 	test_attrib_errors();
 	test_string_getters();
 	test_uniform_queries();

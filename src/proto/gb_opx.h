@@ -48,6 +48,7 @@ enum gb_opx {
 	GB_OPX_ObjString,         /* kind (0 output layer, 1 port), dpy, obj, name -> str */
 	GB_OPX_ListDrawClient,    /* NV_command_list client command streams */
 	GB_OPX_ElementMax,        /* itype, count, byte off -> max index (i64, -1 = out of range) */
+	GB_OPX_BufferWrite,       /* mode, target|buffer, off64, len64, bytes (async) */
 	GB_OPX_GetPointer,        /* kind, a, b, c -> pointer-sized value (driver's) */
 	GB_OPX_END
 };

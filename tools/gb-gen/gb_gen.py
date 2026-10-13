@@ -479,6 +479,19 @@ def emit_client(cmd, public, opname):
         L.append(f"\t{ret_t} __ret = ({ret_t})0;")
         L.append("\tif (!__cx) return __ret;")
     retstmt = "return;" if cmd.rk[0] == "void" else "return __ret;"
+    if cmd.api == "gl":
+        what = []
+        if re.match(cfg.PERSIST_UP_REGEX, cmd.name):
+            what.append("GB_PS_UP")
+        if re.match(cfg.PERSIST_DOWN_REGEX, cmd.name):
+            what.append("GB_PS_DOWN")
+        if what:
+            L.append("\tif (__builtin_expect(gb_cl_persist_pending(__cx), "
+                     f"0)) gb_cl_persist_sync(__cx, {' | '.join(what)});")
+    elif cmd.name in ("eglSwapBuffers", "eglSwapBuffersWithDamageKHR",
+                      "eglSwapBuffersWithDamageEXT", "glXSwapBuffers"):
+        L.append("\tif (__builtin_expect(gb_cl_persist_pending(__cx), 0)) "
+                 "gb_cl_persist_sync(__cx, GB_PS_UP | GB_PS_DOWN);")
 
     names = {p["name"]: p["name"] for p in P}
     # The server uses its own X connection: make this app's pending X

@@ -640,3 +640,22 @@ ALIASES = {
 CTX_CHANGERS = {"eglMakeCurrent", "eglReleaseThread", "glXMakeCurrent",
                 "glXMakeContextCurrent", "glXMakeCurrentReadSGI",
                 "glXDestroyContext", "eglDestroyContext", "eglTerminate"}
+
+
+# Persistent buffer mappings are shadow copies; these commands are where the
+# GPU may consume the application's writes (UP) or produce data the
+# application will read (DOWN). See gb_cl_persist_sync.
+PERSIST_UP_REGEX = (
+    r"^gl(Multi)?(Draw|Dispatch|Clear)|^glFlush$|^glFinish$|"
+    r"^glFenceSync|^glMemoryBarrier|^gl(Copy|Blit|Read|Get)[A-Za-z]*"
+    r"(Pixels|TexImage|BufferSubData|ImageSubData|Framebuffer|"
+    r"TextureSubImage|CompressedTexImage)|"
+    r"^gl(Tex|Texture)(Sub)?Image|^glCopyNamedBufferSubData|"
+    r"^glBegin(Transform|Query|Conditional)|^glEndTransformFeedback|"
+    r"^glBufferSubData|^glNamedBufferSubData|^glClearBuffer|"
+    r"^glClearNamedBuffer|^glInvalidateBuffer|^glUnmapBuffer|"
+    r"^(egl|glX)SwapBuffers|^eglWaitClient|^glWaitSync|"
+    r"^glGetQueryObject|^glDispatchCompute|^glMultiDraw")
+PERSIST_DOWN_REGEX = (
+    r"^glFinish$|^glClientWaitSync|^glMemoryBarrier|^glGetSynciv|"
+    r"^glWaitSync|^(egl|glX)SwapBuffers|^eglWaitClient|^glFlush$")

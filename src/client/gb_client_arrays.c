@@ -529,6 +529,8 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 
 	if (!cx)
 		return 0;
+	if (__builtin_expect(gb_cl_persist_pending(cx), 0))
+		gb_cl_persist_sync(cx, GB_PS_UP);
 	for (int i = 0; i < CA_COUNT; i++)
 		if (is_client_array(&v->a[i]))
 			nclient++;

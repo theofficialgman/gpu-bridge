@@ -101,6 +101,7 @@ struct gb_map {
 	uint32_t flags;      /* GL_MAP_* bits (legacy glMapBuffer translated) */
 	void *shadow;        /* what the application sees */
 	void *alloc;         /* what was allocated (shadow is inside it) */
+	void *snap;          /* persistent: contents as of the last sync */
 };
 
 struct gb_ctxstate {
@@ -117,6 +118,7 @@ struct gb_ctxstate {
 	int8_t core;                /* -1 unknown, 0 compat/ES, 1 core profile */
 	int8_t es;                  /* -1 unknown, 0 desktop GL, 1 OpenGL ES */
 	int32_t max_attribs;        /* GL_MAX_VERTEX_ATTRIBS, 0 = not queried */
+	int npersist;               /* live persistent mappings */
 	/* Primitive restart (GL 3.1 / NV_primitive_restart / fixed index): the
 	 * client needs the index to leave it out of the vertex-range scan that
 	 * sizes client-array uploads. */
@@ -229,6 +231,16 @@ struct gb_ctxstate *gb_state_for(uint32_t ctx_id);
 struct gb_ctxstate *gb_cur_state(void);
 struct gb_ctxstate *gb_cur_state_raw(void); /* even between glBegin/glEnd */
 int gb_cl_buf_bound(struct gb_cl *cx, int which);
+/* Persistent mappings (GL_MAP_PERSISTENT_BIT) are shadow copies kept in step
+ * with the server's buffer at the commands that can consume (UP) or produce
+ * (DOWN) buffer contents. Called from generated encoders. */
+#define GB_PS_UP 1
+#define GB_PS_DOWN 2
+void gb_cl_persist_sync(struct gb_cl *cx, int what);
+static inline int gb_cl_persist_pending(struct gb_cl *cx)
+{
+	return cx->cur && cx->cur->npersist;
+}
 /* Does a pixel-pack transfer with the current PACK state leave bytes of the
  * application's buffer unwritten? dims < 0: unknown. */
 int gb_cl_pack_sparse(struct gb_cl *cx, int64_t w, int64_t h, int64_t d,

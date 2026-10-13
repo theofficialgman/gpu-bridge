@@ -443,6 +443,61 @@ bad:
  * Desktop GL: glGetBufferSubData / glGetNamedBufferSubData. ES has neither,
  * so a GL ES context reads through a transient READ mapping.
  */
+/* Upload bytes into a buffer by mapping it: glBufferSubData is an error for
+ * immutable storage created without GL_DYNAMIC_STORAGE_BIT, mapping is not. */
+static void h_buffer_write(struct gb_sth *t, const struct gb_cmd_hdr *h,
+			   struct gb_r *r)
+{
+	uint32_t mode = gb_r_u32(r), id = gb_r_u32(r);
+	uint64_t off = gb_r_u64(r), len = gb_r_u64(r);
+	const void *data;
+
+	if (r->err || len == 0 || len > GB_MAX_ARRAY_BYTES ||
+	    off > (1ull << 40) || mode > 1)
+		goto bad;
+	data = gb_r_blob(r, (uint32_t)len);
+	if (!data)
+		goto bad;
+
+	GB_NATIVE(glMapBufferRange, void *,
+		  (GLenum, GLintptr, GLsizeiptr, GLbitfield));
+	GB_NATIVE(glUnmapBuffer, GLboolean, (GLenum));
+	GB_NATIVE(glMapNamedBufferRange, void *,
+		  (GLuint, GLintptr, GLsizeiptr, GLbitfield));
+	GB_NATIVE(glUnmapNamedBuffer, GLboolean, (GLuint));
+	GB_NATIVE(glBufferSubData, void,
+		  (GLenum, GLintptr, GLsizeiptr, const void *));
+	GB_NATIVE(glNamedBufferSubData, void,
+		  (GLuint, GLintptr, GLsizeiptr, const void *));
+	void *p = NULL;
+
+	if (mode == 0 && fn_glMapBufferRange && fn_glUnmapBuffer) {
+		p = fn_glMapBufferRange(id, (GLintptr)off, (GLsizeiptr)len,
+					0x0002 /* MAP_WRITE_BIT */);
+		if (p) {
+			memcpy(p, data, (size_t)len);
+			fn_glUnmapBuffer(id);
+		} else if (fn_glBufferSubData) {
+			fn_glBufferSubData(id, (GLintptr)off, (GLsizeiptr)len,
+					   data);
+		}
+	} else if (mode == 1 && fn_glMapNamedBufferRange &&
+		   fn_glUnmapNamedBuffer) {
+		p = fn_glMapNamedBufferRange(id, (GLintptr)off, (GLsizeiptr)len,
+					     0x0002);
+		if (p) {
+			memcpy(p, data, (size_t)len);
+			fn_glUnmapNamedBuffer(id);
+		} else if (fn_glNamedBufferSubData) {
+			fn_glNamedBufferSubData(id, (GLintptr)off,
+						(GLsizeiptr)len, data);
+		}
+	}
+	return;
+bad:
+	gb_sv_proto_error(t, h);
+}
+
 static void h_buffer_read(struct gb_sth *t, const struct gb_cmd_hdr *h,
 			  struct gb_r *r)
 {
@@ -1686,6 +1741,7 @@ void gb_srv_manual_dispatch(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	case GB_OPX_GLXFBConfigs: h_glx_fbconfigs(t, h, r); break;
 	case GB_OPX_BufferRead: h_buffer_read(t, h, r); break;
 	case GB_OPX_ElementMax: h_element_max(t, h, r); break;
+	case GB_OPX_BufferWrite: h_buffer_write(t, h, r); break;
 	case GB_OPX_GetPointer: h_get_pointer(t, h, r); break;
 	case GB_OPX_EglDevice: h_egl_device(t, h, r); break;
 	case GB_OPX_Ping: h_ping(t, h, r); break;

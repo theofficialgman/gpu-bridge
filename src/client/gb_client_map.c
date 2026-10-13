@@ -78,18 +78,24 @@ static int buffer_read(int named, uint32_t id, int64_t off, int64_t len,
 static void buffer_write(const struct gb_map *m, int64_t rel_off,
 			 const void *p, int64_t n)
 {
+	struct gb_cl *cx = gb_cl_get();
+	struct gb_out o;
+	struct gb_w w;
 	int64_t off = m->offset + rel_off;
 
-	if (n <= 0)
+	if (n <= 0 || !cx)
 		return;
-	if (m->target) {
-		gbx_glBufferSubData(m->target, (GLintptr)off, (GLsizeiptr)n, p);
-	} else {
-#ifdef GB_LIB_GL
-		gbx_glNamedBufferSubData(m->buffer, (GLintptr)off, (GLsizeiptr)n,
-					 p);
-#endif
-	}
+	/* by mapping on the server: immutable storage without
+	 * GL_DYNAMIC_STORAGE_BIT does not accept glBufferSubData */
+	if (gb_cl_msg_begin(cx, &o, &w, GB_OPX_BufferWrite,
+			    GB_ALIGN_UP(40u, 8u) + (uint32_t)n, 0))
+		return;
+	gb_w_u32(&w, m->target ? 0u : 1u);
+	gb_w_u32(&w, m->target ? m->target : m->buffer);
+	gb_w_u64(&w, (uint64_t)off);
+	gb_w_u64(&w, (uint64_t)n);
+	memcpy(gb_w_blob(&w, (uint32_t)n), p, (size_t)n);
+	gb_cl_end(cx, &o);
 }
 
 static int64_t buffer_size(uint32_t target, uint32_t named_buf)
@@ -116,6 +122,97 @@ static uint32_t legacy_access_to_flags(GLenum access)
 	case 0x88BA: return MAP_READ | MAP_WRITE;   /* READ_WRITE */
 	default: return 0;
 	}
+}
+
+/* ---- persistent mappings ------------------------------------------------------ */
+
+#define PERSIST_BLOCK 4096
+
+/* Send what the application changed in a persistent mapping since the last
+ * sync. Ranges of a FLUSH_EXPLICIT mapping go out at the flush instead. */
+static void persist_up_one(struct gb_map *m)
+{
+	const uint8_t *sh = m->shadow;
+	uint8_t *sn = m->snap;
+	int64_t n = m->length;
+
+	if (!sn || !(m->flags & MAP_WRITE) || (m->flags & MAP_FLUSH_EXPLICIT))
+		return;
+	for (int64_t o = 0; o < n;) {
+		int64_t e = o + PERSIST_BLOCK < n ? o + PERSIST_BLOCK : n;
+
+		if (!memcmp(sh + o, sn + o, (size_t)(e - o))) {
+			o = e;
+			continue;
+		}
+		int64_t s = o;
+
+		/* extend the run over following changed blocks */
+		o = e;
+		while (o < n) {
+			e = o + PERSIST_BLOCK < n ? o + PERSIST_BLOCK : n;
+			if (!memcmp(sh + o, sn + o, (size_t)(e - o)))
+				break;
+			o = e;
+		}
+		buffer_write(m, s, sh + s, o - s);
+		memcpy(sn + s, sh + s, (size_t)(o - s));
+	}
+}
+
+/* Refresh the application's view of a persistent read mapping from the
+ * server's buffer (the GPU may have written it). Blocks the application
+ * itself changed since the last sync are left alone. */
+static void persist_down_one(struct gb_map *m)
+{
+	uint8_t *sh = m->shadow, *sn = m->snap;
+	int64_t n = m->length;
+	uint8_t *fresh;
+
+	if (!sn || !(m->flags & MAP_READ))
+		return;
+	fresh = malloc((size_t)n);
+	if (!fresh)
+		return;
+	if (buffer_read(m->target == 0, m->target ? m->target : m->buffer,
+			m->offset, n, fresh)) {
+		free(fresh);
+		return;
+	}
+	for (int64_t o = 0; o < n; o += PERSIST_BLOCK) {
+		int64_t e = o + PERSIST_BLOCK < n ? o + PERSIST_BLOCK : n;
+
+		if (!memcmp(sh + o, sn + o, (size_t)(e - o)))
+			memcpy(sh + o, fresh + o, (size_t)(e - o));
+		memcpy(sn + o, fresh + o, (size_t)(e - o));
+	}
+	free(fresh);
+}
+
+void gb_cl_persist_sync(struct gb_cl *cx, int what)
+{
+	struct gb_ctxstate *st = cx ? cx->cur : NULL;
+	static __thread int busy; /* the uploads below are hooked commands too */
+
+	if (!st || !st->npersist || busy)
+		return;
+	busy = 1;
+	for (int i = 0; i < GB_MAX_MAPS; i++) {
+		struct gb_map *m = &st->maps[i];
+
+		if (!m->buffer || !(m->flags & MAP_PERSISTENT))
+			continue;
+		if (what & GB_PS_UP)
+			persist_up_one(m);
+	}
+	if (what & GB_PS_DOWN)
+		for (int i = 0; i < GB_MAX_MAPS; i++) {
+			struct gb_map *m = &st->maps[i];
+
+			if (m->buffer && (m->flags & MAP_PERSISTENT))
+				persist_down_one(m);
+		}
+	busy = 0;
 }
 
 /* target != 0: through a binding; else `named` is the buffer name.
@@ -171,9 +268,22 @@ static void *do_map(uint32_t target, uint32_t named, int64_t offset,
 		return NULL;
 	}
 	if (flags & MAP_PERSISTENT) {
-		gb_cl_unsupported("persistent/coherent buffer mapping");
-		gb_cl_gl_error(0x0502);
-		return NULL;
+		/* the buffer must have been created with persistent storage */
+		GLint sf = 0;
+
+		if (target)
+			glGetBufferParameteriv(target, 0x8220 /* STORAGE_FLAGS */,
+					       &sf);
+#ifdef GB_LIB_GL
+		else
+			glGetNamedBufferParameteriv(named, 0x8220, &sf);
+#endif
+		if (!(sf & MAP_PERSISTENT) ||
+		    ((flags & MAP_READ) && !(sf & MAP_READ)) ||
+		    ((flags & MAP_WRITE) && !(sf & MAP_WRITE))) {
+			gb_cl_gl_error(0x0502);
+			return NULL;
+		}
 	}
 
 	struct gb_map *m = NULL;
@@ -217,6 +327,26 @@ static void *do_map(uint32_t target, uint32_t named, int64_t offset,
 	m->flags = flags;
 	m->shadow = shadow;
 	m->alloc = alloc;
+	m->snap = NULL;
+	if (flags & MAP_PERSISTENT) {
+		m->snap = malloc((size_t)length);
+		if (m->snap) {
+			if (need_fetch)
+				memcpy(m->snap, shadow, (size_t)length);
+			else if (buffer_read(target == 0,
+					     target ? target : named, offset,
+					     length, m->snap))
+				memset(m->snap, 0, (size_t)length);
+			if (!need_fetch)
+				memcpy(shadow, m->snap, (size_t)length);
+			st->npersist++;
+		} else {
+			free(alloc);
+			memset(m, 0, sizeof(*m));
+			gb_cl_gl_error(0x0505);
+			return NULL;
+		}
+	}
 	return shadow;
 }
 
@@ -239,8 +369,13 @@ static GLboolean do_unmap(uint32_t target, uint32_t named)
 		gb_cl_gl_error(0x0502);
 		return GL_FALSE;
 	}
-	if ((m->flags & MAP_WRITE) && !(m->flags & MAP_FLUSH_EXPLICIT))
+	if (m->flags & MAP_PERSISTENT) {
+		persist_up_one(m);
+		st->npersist--;
+		free(m->snap);
+	} else if ((m->flags & MAP_WRITE) && !(m->flags & MAP_FLUSH_EXPLICIT)) {
 		buffer_write(m, 0, m->shadow, m->length);
+	}
 	free(m->alloc);
 	memset(m, 0, sizeof(*m));
 	return GL_TRUE;
@@ -267,6 +402,9 @@ static void do_flush(uint32_t target, uint32_t named, int64_t offset,
 		return;
 	}
 	buffer_write(m, offset, (const uint8_t *)m->shadow + offset, length);
+	if (m->snap)
+		memcpy((uint8_t *)m->snap + offset,
+		       (const uint8_t *)m->shadow + offset, (size_t)length);
 }
 
 static void do_pointer(uint32_t target, uint32_t named, GLenum pname,
