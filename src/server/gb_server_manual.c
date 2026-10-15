@@ -74,6 +74,35 @@ static struct gb_scratch *scratch_for(struct gb_sth *t)
 	return s;
 }
 
+/* A context that is being destroyed takes its scratch buffers with it: the
+ * GL names inside are gone, and the next context may be given the same
+ * EGLContext/GLXContext value (and the same buffer names). */
+struct gb_sth *gb_sv_thread(int i);
+
+void gb_sv_scratch_drop(void *ctx)
+{
+	for (int i = 0; i < 64; i++) {
+		struct gb_sth *t = gb_sv_thread(i);
+
+		if (!t)
+			break;
+		for (struct gb_scratch **pp = &t->scratch; *pp;) {
+			struct gb_scratch *s = *pp;
+
+			if (s->ctx != ctx) {
+				pp = &s->next;
+				continue;
+			}
+			*pp = s->next;
+			free(s->sel);
+			free(s->sel_prev);
+			free(s->fb);
+			free(s->fb_prev);
+			free(s);
+		}
+	}
+}
+
 void gb_srv_scratch_free(struct gb_sth *t)
 {
 	while (t->scratch) {

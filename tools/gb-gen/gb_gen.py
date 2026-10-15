@@ -1047,6 +1047,8 @@ def emit_server(cmd, opname):
         L.append("\tint __chk = (__h->flags & GB_CMD_F_WANT_REPLY) && "
                  "!__skip;")
         L.append("\tif (__chk) gb_sv_err_pop(&__e0);")
+    if cmd.name in ("eglDestroyContext", "glXDestroyContext"):
+        L.append("\tgb_sv_scratch_drop((void *)a_ctx);")
     L.append("\tuint64_t __t0 = gb_stat_now();")
     L.append(f"\tif (fn_{cmd.name} && !__skip) " +
              ("ret = " if cmd.rk[0] != "void" else "") +

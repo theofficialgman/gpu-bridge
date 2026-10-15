@@ -784,6 +784,11 @@ static void *worker_main(void *arg)
 static struct gb_sth *g_threads[64];
 static int g_nthreads;
 
+struct gb_sth *gb_sv_thread(int i)
+{
+	return i >= 0 && i < g_nthreads ? g_threads[i] : NULL;
+}
+
 static void report_native(void)
 {
 	uint64_t total = 0, calls = 0;
