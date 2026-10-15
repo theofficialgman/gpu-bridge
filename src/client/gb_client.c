@@ -889,13 +889,30 @@ const struct gb_extlist *gb_cl_ext_list(void)
 
 /* ---- X11 helpers ------------------------------------------------------------------ */
 
+/*
+ * Xlib symbols the application's own libX11 provides. An application that
+ * loaded libX11 with dlopen(RTLD_LOCAL) (the CTS does) hides its symbols from
+ * RTLD_DEFAULT, so fall back to the handle of the library that is already
+ * loaded in this process.
+ */
+static void *x11_sym(const char *name)
+{
+	static void *h;
+	void *p = dlsym(RTLD_DEFAULT, name);
+
+	if (p)
+		return p;
+	if (!h)
+		h = dlopen("libX11.so.6", RTLD_LAZY | RTLD_NOLOAD);
+	return h ? dlsym(h, name) : NULL;
+}
+
 const char *gb_cl_xdisplay_string(Display *dpy)
 {
 	static char *(*xds)(Display *);
 
 	if (!xds)
-		xds = (char *(*)(Display *))dlsym(RTLD_DEFAULT,
-						  "XDisplayString");
+		xds = (char *(*)(Display *))x11_sym("XDisplayString");
 	return xds && dpy ? xds(dpy) : NULL;
 }
 
@@ -961,8 +978,7 @@ XVisualInfo *gb_cl_xvisual(Display *dpy, uint32_t vid, uint32_t scr)
 
 	if (!getvi)
 		getvi = (XVisualInfo *(*)(Display *, long, XVisualInfo *,
-					  int *))dlsym(RTLD_DEFAULT,
-						       "XGetVisualInfo");
+					  int *))x11_sym("XGetVisualInfo");
 	if (!getvi || !dpy)
 		return NULL;
 	memset(&tmpl, 0, sizeof(tmpl));
@@ -988,12 +1004,10 @@ void gb_cl_xsync(Display *dpy)
 	if (!dpy)
 		return;
 	if (!xsync) {
-		next_req = (unsigned long (*)(Display *))dlsym(
-			RTLD_DEFAULT, "XNextRequest");
-		last_proc = (unsigned long (*)(Display *))dlsym(
-			RTLD_DEFAULT, "XLastKnownRequestProcessed");
-		xsync = (int (*)(Display *, int))dlsym(RTLD_DEFAULT,
-						       "XSync");
+		next_req = (unsigned long (*)(Display *))x11_sym("XNextRequest");
+		last_proc = (unsigned long (*)(Display *))x11_sym(
+			"XLastKnownRequestProcessed");
+		xsync = (int (*)(Display *, int))x11_sym("XSync");
 	}
 	if (!xsync)
 		return;
