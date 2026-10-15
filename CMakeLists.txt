@@ -146,8 +146,12 @@ set(GB_CLIENT_SRC src/client/gb_client.c src/client/gb_client_arrays.c
                   src/client/gb_client_debug.c
                   src/client/gb_client_gl.c src/client/gb_client_glx.c
                   ${GB_GEN_CLIENT_SRC})
+# Besides the sonames, the unversioned development names: programs that
+# dlopen("libEGL.so") (the Khronos CTS does) must find the bridge too.
 set(GB_SONAME_ALIASES libEGL.so.1 libGLESv2.so.2 libGLESv1_CM.so.1
-                      libGLX.so.0 libOpenGL.so.0)
+                      libGLX.so.0 libOpenGL.so.0
+                      libEGL.so libGLESv2.so libGLESv1_CM.so libGLX.so
+                      libOpenGL.so)
 function(gb_add_bridge name proto_target shimdir)
   add_library(${name} SHARED ${GB_CLIENT_SRC})
   add_dependencies(${name} gb_generated)
