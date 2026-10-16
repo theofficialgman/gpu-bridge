@@ -512,6 +512,46 @@ the Tegra under load, and one unit cannot use more than one core. With the
 split a full rebuild is ~22 s on the dev machine and ~3 minutes cold on the
 Tegra.
 
+## Conformance: Khronos VK-GL-CTS on the Tegra
+
+VK-GL-CTS (`~/cts` on the Tegra) built twice: arm64 for the native baseline,
+armhf for the bridge. Only `Fail` (plus crash/hang) counts as a failure.
+Method: native arm64 first, then the same case lists through the bridge, then
+`ctscmp.py native bridged` to list only cases whose result differs; each
+differing case is re-run alone (`ctsone.sh`) to separate real bugs from
+session-state effects.
+
+Setup lessons:
+
+- With the `x11_egl_glx` target the default context factory is GLX; pass
+  `--deqp-gl-context-type=egl` for EGL runs (and force the NVIDIA EGL vendor
+  JSON on both sides). `cts-runner` only enumerates EGL configs.
+- CTS `dlopen("libEGL.so")` (unversioned) found the GLVND library, so the
+  shim installs unversioned `libEGL.so`/`libGLESv2.so`/... symlinks.
+- `cts-runner` runs in-process with no watchdog; the native driver
+  busy-loops on a few cases, so runs go through `ctsrun.py` (resumable, kills
+  a stalled session, remembers known hangs).
+- The `x11_egl_glx` CMake target does not enable GLES1; GLES1 cases need an
+  `x11_egl` build.
+
+Native baseline: ES 3.2 (EGL) 423,752 results, 1,625 Fail; GL 4.6 (EGL)
+950,784 results, 14,562 Fail.
+
+Bridged ES 3.2 vs native: 108 distinct cases differ out of ~188k results, and
+none is native-failing/bridged-passing. Remaining native-ok / bridged-not:
+
+- 62 Pass -> QualityWarning (timing/precision-class), 35 Pass -> NotSupported
+  (GLES1 not compiled into the armhf `x11_egl_glx` build, not a bridge issue).
+- 3 `GLES31.functional.debug`: asynchronous debug callbacks need a dedicated
+  upcall thread (see limitations).
+- 5 `EGL.functional.sharing` and the multithread render / thread-cleanup
+  cases: pass when run alone, crash only inside long sessions (unresolved).
+- 1 SSBO atomic case, 1 `draw_elements_base_vertex` overflow edge,
+  1 `primitive_restart` ResourceError.
+
+Bridged GL 4.6 and the GLX passes (`x11_egl_glx`, `--deqp-gl-context-type=glx`)
+are in progress.
+
 ## Real applications
 
 See `docs/target-report.md` for the armhf `glmark2` (96.1% of native, all 33
