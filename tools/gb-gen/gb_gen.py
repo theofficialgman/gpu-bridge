@@ -776,7 +776,9 @@ def emit_client(cmd, public, opname):
             elif mode == "raw" and n != "length" and any(
                     q["name"] == "length" and q["k"][0] == "arr_out" and
                     q["ctype"].replace(" ", "").endswith("*")
-                    for q in P) and k[1] not in ("GLchar", "GLcharARB"):
+                    for q in P) and k[1] not in ("GLchar", "GLcharARB") and \
+                    k[4][0] == "expr" and re.search(
+                        r"bufSize|bufsize|count|maxLength", str(k[4][1])):
                 # a result vector with a companion `length`: the driver
                 # writes `*length` elements, the rest of the application's
                 # buffer is not touched
