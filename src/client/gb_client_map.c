@@ -264,6 +264,11 @@ static void *do_map(uint32_t target, uint32_t named, int64_t offset,
 		offset = 0;
 		length = size;
 	}
+	if (!whole && length == 0 && offset >= 0 && gb_cl_es3_context(st)) {
+		/* ES: a zero length is an operation error, GL: a value error */
+		gb_cl_gl_error(0x0502);
+		return NULL;
+	}
 	if (offset < 0 || length < 0 || (!whole && length == 0) ||
 	    (!legacy && (flags & ~0xFFu)) || offset + length > size) {
 		gb_cl_gl_error(0x0501);

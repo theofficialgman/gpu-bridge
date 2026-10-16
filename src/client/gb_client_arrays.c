@@ -337,7 +337,7 @@ static int ctx_is_core(struct gb_ctxstate *st)
 /* The index that restarts the primitive for an index type, or -1 when
  * primitive restart is off. ES 3.0+ always restarts on the fixed index. */
 /* ES 3.0+ context? (st->es is computed once) */
-static int es3_context(struct gb_ctxstate *st)
+int gb_cl_es3_context(struct gb_ctxstate *st)
 {
 	if (st->es < 0) {
 		const char *v = (const char *)glGetString(GL_VERSION);
@@ -445,7 +445,7 @@ int gb_arr_pointer(struct gb_ctxstate *st, int slot, int size, uint32_t type,
 	}
 	/* ES 3.x: client memory is only for the default VAO */
 	if (st->array_buffer == 0 && ptr != NULL && st->vao != &st->vao0 &&
-	    es3_context(st)) {
+	    gb_cl_es3_context(st)) {
 		gb_cl_gl_error(0x0502);
 		return 1;
 	}
@@ -1920,7 +1920,7 @@ GB_API void glDrawArraysIndirect(GLenum mode, const void *indirect)
 			gbx_glDrawArraysIndirect(mode, indirect);
 		return;
 	}
-	if (es3_context(st)) { /* ES has no client-memory command structures */
+	if (gb_cl_es3_context(st)) { /* ES has no client-memory command structures */
 		gb_cl_gl_error(0x0502);
 		return;
 	}
@@ -1941,7 +1941,7 @@ GB_API void glDrawElementsIndirect(GLenum mode, GLenum type,
 			gbx_glDrawElementsIndirect(mode, type, indirect);
 		return;
 	}
-	if (es3_context(st)) {
+	if (gb_cl_es3_context(st)) {
 		gb_cl_gl_error(0x0502);
 		return;
 	}
@@ -1962,7 +1962,7 @@ GB_API void glMultiDrawArraysIndirect(GLenum mode, const void *indirect,
 						      stride);
 		return;
 	}
-	if (es3_context(st)) {
+	if (gb_cl_es3_context(st)) {
 		gb_cl_gl_error(0x0502);
 		return;
 	}
@@ -1985,7 +1985,7 @@ GB_API void glMultiDrawElementsIndirect(GLenum mode, GLenum type,
 							drawcount, stride);
 		return;
 	}
-	if (es3_context(st)) {
+	if (gb_cl_es3_context(st)) {
 		gb_cl_gl_error(0x0502);
 		return;
 	}
