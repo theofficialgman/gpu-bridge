@@ -274,6 +274,7 @@ LEN_OVERRIDES = {
        for a in ("", "ARB")},
     # arrays the registry sizes with nothing (default 1) although a count
     # parameter says how many there are
+    ("glGetProgramivNV", "params"): "1",
     ("glDepthRangeArrayfvOES", "v"): "count*2",
     ("glDepthRangeArrayfvNV", "v"): "count*2",
     ("glDepthRangeArraydvNV", "v"): "count*2",

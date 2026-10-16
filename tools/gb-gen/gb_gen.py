@@ -236,8 +236,8 @@ def parse_len(cmd, pname, expr, params):
     if override:
         expr = override
     pnames = {p["name"] for p in params}
-    if (expr is None or expr == "1") and "pname" in pnames and \
-            pname_class(cmd) != "generic":
+    if (expr is None or (expr is not None and expr.strip().isdigit())) and \
+            "pname" in pnames and pname_class(cmd) != "generic":
         # the registry gives no length, but the command is a known
         # pname-keyed getter/setter: its count follows the enum
         expr = "COMPSIZE(pname)"
