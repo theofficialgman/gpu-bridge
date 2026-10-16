@@ -660,3 +660,8 @@ PERSIST_UP_REGEX = (
 PERSIST_DOWN_REGEX = (
     r"^glFinish$|^glClientWaitSync|^glMemoryBarrier|^glGetSynciv|"
     r"^glWaitSync|^(egl|glX)SwapBuffers|^eglWaitClient|^glFlush$")
+
+
+# Array parameters whose (negative) count the driver quietly treats as 0
+# instead of reporting an error.
+NEG_COUNT_IS_ZERO = {("eglGetConfigs", "configs"), ("eglChooseConfig", "configs")}

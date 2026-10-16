@@ -568,6 +568,11 @@ def emit_client(cmd, public, opname):
                 bound = {"pack": "GB_BUF_PACK", "unpack": "GB_BUF_UNPACK",
                          "query": "GB_BUF_QUERY"}[pbo]
                 L.append(f"\tint __pbo_{n} = gb_cl_buf_bound(__cx, {bound});")
+                if pbo in ("pack", "unpack"):
+                    # a pixel buffer that is mapped may not be used
+                    L.append(f"\tif (__pbo_{n} && gb_cl_buf_mapped(__cx, "
+                             f"{bound})) {{ gb_cl_gl_error(0x0502); "
+                             f"{retstmt} }}")
                 L.append(f"\tuint32_t __l_{n} = __pbo_{n} ? GB_PBO_LEN : "
                          f"({n} ? GB_SRV_LEN : GB_NULL_LEN);")
             else:
@@ -582,6 +587,11 @@ def emit_client(cmd, public, opname):
                 bound = {"pack": "GB_BUF_PACK", "unpack": "GB_BUF_UNPACK",
                          "query": "GB_BUF_QUERY"}[pbo]
                 L.append(f"\tint __pbo_{n} = gb_cl_buf_bound(__cx, {bound});")
+                if pbo in ("pack", "unpack"):
+                    # a pixel buffer that is mapped may not be used
+                    L.append(f"\tif (__pbo_{n} && gb_cl_buf_mapped(__cx, "
+                             f"{bound})) {{ gb_cl_gl_error(0x0502); "
+                             f"{retstmt} }}")
                 L.append(f"\tuint32_t __l_{n} = __pbo_{n} ? GB_PBO_LEN : "
                          f"({n} ? (uint32_t)(__n_{n} * {k[3]}) : "
                          f"GB_NULL_LEN);")
@@ -1015,6 +1025,9 @@ def emit_server(cmd, opname):
             L.append(f"\tif (l_{n} != GB_NULL_LEN) {{")
             L.append(f"\t\tif (l_{n} > GB_MAX_ARRAY_BYTES) goto proto_error;")
             L.append(f"\t\tn_{n} = {cexp};")
+            if (cmd.name, n) in cfg.NEG_COUNT_IS_ZERO:
+                # the driver treats a negative size as an empty array
+                L.append(f"\t\tif (n_{n} < 0) n_{n} = 0;")
             L.append(f"\t\tuns_{n} = n_{n} < 0; if (uns_{n}) n_{n} = 0;")
             L.append(f"\t\tif (n_{n} * {wsz} != (int64_t)l_{n}) "
                      f"goto proto_error;")

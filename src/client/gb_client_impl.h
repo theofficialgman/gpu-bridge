@@ -232,6 +232,8 @@ struct gb_ctxstate *gb_state_for(uint32_t ctx_id);
 struct gb_ctxstate *gb_cur_state(void);
 struct gb_ctxstate *gb_cur_state_raw(void); /* even between glBegin/glEnd */
 int gb_cl_buf_bound(struct gb_cl *cx, int which);
+/* The bound pixel buffer has a (non-persistent) client mapping. */
+int gb_cl_buf_mapped(struct gb_cl *cx, int which);
 /* Persistent mappings (GL_MAP_PERSISTENT_BIT) are shadow copies kept in step
  * with the server's buffer at the commands that can consume (UP) or produce
  * (DOWN) buffer contents. Called from generated encoders. */

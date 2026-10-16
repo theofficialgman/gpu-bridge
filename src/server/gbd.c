@@ -341,29 +341,17 @@ int gb_sv_stash_take(struct gb_sth *t, unsigned *out)
 	return 1;
 }
 
+/*
+ * The errors a getter's own call raised were taken out of the driver to find
+ * out whether it failed. They are kept and returned by the next glGetError,
+ * in order, instead of being raised again: a synthetic call would make the
+ * driver report them a second time through the debug-message callback.
+ */
 void gb_sv_err_raise(const struct gb_errs *e)
 {
-	GB_NATIVE(glUniform1i, void, (GLint, GLint));
-
-	for (int i = 0; i < e->n; i++) {
-		switch (e->e[i]) {
-		case 0x0500: gb_sv_raise_enum(); break;
-		case 0x0501: gb_sv_raise_invalid(); break;
-		case 0x0502:
-			/* an invalid (not -1) location is an error with or
-			 * without a current program, and changes nothing */
-			if (fn_glUniform1i)
-				fn_glUniform1i(-2, 0);
-			break;
-		default:
-			/* OUT_OF_MEMORY, INVALID_FRAMEBUFFER_OPERATION, ...:
-			 * no side-effect-free call raises them, so the next
-			 * glGetError hands them back (see gb_sv_stash_take) */
-			if (t_this && t_this->err_nstash < 8)
-				t_this->err_stash[t_this->err_nstash++] = e->e[i];
-			break;
-		}
-	}
+	for (int i = 0; i < e->n; i++)
+		if (t_this && t_this->err_nstash < 8)
+			t_this->err_stash[t_this->err_nstash++] = e->e[i];
 }
 
 void gb_sv_raise_enum(void)

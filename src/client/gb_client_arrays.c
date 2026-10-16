@@ -213,6 +213,19 @@ static void vao_free(struct gb_ctxstate *st, uint32_t name)
 	}
 }
 
+int gb_cl_buf_mapped(struct gb_cl *cx, int which)
+{
+	struct gb_ctxstate *st = cx ? cx->cur : NULL;
+	uint32_t buf;
+	struct gb_map *m;
+
+	if (!st)
+		return 0;
+	buf = which == GB_BUF_PACK ? st->pack_buffer : st->unpack_buffer;
+	m = buf ? gb_state_map(st, buf) : NULL;
+	return m && !(m->flags & 0x40 /* MAP_PERSISTENT */);
+}
+
 int gb_cl_buf_bound(struct gb_cl *cx, int which)
 {
 	struct gb_ctxstate *st = cx ? cx->cur : NULL;
@@ -1910,6 +1923,10 @@ GB_API void glDrawArraysIndirect(GLenum mode, const void *indirect)
 			gbx_glDrawArraysIndirect(mode, indirect);
 		return;
 	}
+	if (es3_context(st)) { /* ES has no client-memory command structures */
+		gb_cl_gl_error(0x0502);
+		return;
+	}
 	if (!indirect_stride_ok(st, 1, 0, 16, &stride) || !indirect)
 		return;
 	indirect_arrays_client(mode, indirect, 1, stride);
@@ -1925,6 +1942,10 @@ GB_API void glDrawElementsIndirect(GLenum mode, GLenum type,
 		if (!st || !indirect_expand_buffer(st, mode, type, 1, indirect,
 						   1, 0))
 			gbx_glDrawElementsIndirect(mode, type, indirect);
+		return;
+	}
+	if (es3_context(st)) {
+		gb_cl_gl_error(0x0502);
 		return;
 	}
 	if (!indirect_stride_ok(st, 1, 0, 20, &stride) || !indirect)
@@ -1944,6 +1965,10 @@ GB_API void glMultiDrawArraysIndirect(GLenum mode, const void *indirect,
 						      stride);
 		return;
 	}
+	if (es3_context(st)) {
+		gb_cl_gl_error(0x0502);
+		return;
+	}
 	if (!indirect_stride_ok(st, drawcount, stride, 16, &stride) ||
 	    !indirect || !drawcount)
 		return;
@@ -1961,6 +1986,10 @@ GB_API void glMultiDrawElementsIndirect(GLenum mode, GLenum type,
 						   drawcount, stride))
 			gbx_glMultiDrawElementsIndirect(mode, type, indirect,
 							drawcount, stride);
+		return;
+	}
+	if (es3_context(st)) {
+		gb_cl_gl_error(0x0502);
 		return;
 	}
 	if (!indirect_stride_ok(st, drawcount, stride, 20, &stride) ||
