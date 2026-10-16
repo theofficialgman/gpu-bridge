@@ -302,6 +302,45 @@ static void test_persistent_map(void)
 	glDeleteBuffers(2, b);
 }
 
+static int g_dbg_n, g_dbg_pop;
+static void GLAPIENTRY count_cb(GLenum source, GLenum type, GLuint id,
+				GLenum severity, GLsizei length,
+				const GLchar *msg, const void *user)
+{
+	(void)source; (void)id; (void)severity; (void)length; (void)msg;
+	(void)user;
+	g_dbg_n++;
+	if (type == GL_DEBUG_TYPE_POP_GROUP)
+		g_dbg_pop++;
+}
+
+/* debug groups: each push/pop is reported exactly once */
+static void test_debug_groups(void)
+{
+	if (!have_ext("GL_KHR_debug"))
+		return;
+	g_dbg_n = g_dbg_pop = 0;
+	glEnable(GL_DEBUG_OUTPUT);
+	glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+	glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, NULL,
+			      GL_TRUE);
+	glDebugMessageCallback(count_cb, NULL);
+	glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, 1, -1, "group");
+	glPopDebugGroup();
+	glFinish();
+	CHECK(g_dbg_pop == 1, "pop-group messages: %d (all %d)", g_dbg_pop,
+	      g_dbg_n);
+	g_dbg_n = g_dbg_pop = 0;
+	glDebugMessageInsert(GL_DEBUG_SOURCE_APPLICATION, GL_DEBUG_TYPE_OTHER, 7,
+			     GL_DEBUG_SEVERITY_LOW, -1, "one");
+	glFinish();
+	CHECK(g_dbg_n == 1, "inserted message delivered %d times", g_dbg_n);
+	glDebugMessageCallback(NULL, NULL);
+	glDisable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+	glDisable(GL_DEBUG_OUTPUT);
+	err();
+}
+
 static void test_string_getters(void)
 {
 	const char *vs =
@@ -595,6 +634,7 @@ int main(void)
 	test_get_texture_sub_image();
 	test_pack_gaps();
 	test_persistent_map();
+	test_debug_groups();
 	test_attrib_errors();
 	test_string_getters();
 	test_uniform_queries();
