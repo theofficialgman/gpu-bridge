@@ -36,6 +36,7 @@ struct gb_ctxstate *gb_state_for(uint32_t ctx_id)
 		s->vao = &s->vao0;
 		s->core = -1;
 		s->es = -1;
+		s->es_restart = -1;
 		s->pack = (struct gb_pixstore){ 4, 0, 0, 0, 0, 0 };
 		s->unpack = (struct gb_pixstore){ 4, 0, 0, 0, 0, 0 };
 		s->next = g_states;
@@ -352,8 +353,17 @@ static int64_t restart_value(struct gb_ctxstate *st, uint32_t itype)
 			st->es = atoi(v) >= 3;
 		}
 	}
-	if (!st->es && !st->restart_fixed)
+	if (st->es) {
+		/* ES: ask the driver whether the fixed restart index is active
+		 * (an ES 2.0 context may report a 3.x version and still not
+		 * restart) */
+		if (st->es_restart < 0)
+			st->es_restart = glIsEnabled(0x8D69) ? 1 : 0;
+		if (!st->es_restart)
+			return -1;
+	} else if (!st->restart_fixed) {
 		return st->restart_on ? (int64_t)st->restart_index : -1;
+	}
 	return itype == 0x1401 ? 0xFF : itype == 0x1403 ? 0xFFFF : 0xFFFFFFFFll;
 }
 
