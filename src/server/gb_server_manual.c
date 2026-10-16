@@ -547,8 +547,9 @@ static void h_buffer_read(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	void *buf = gb_tmp_zero(t, (size_t)len + 8);
 	if (!buf)
 		goto bad;
-	int es = fn_eglGetCurrentContext &&
-		 fn_eglGetCurrentContext() != EGL_NO_CONTEXT;
+	int es = (fn_eglGetCurrentContext &&
+		  fn_eglGetCurrentContext() != EGL_NO_CONTEXT) ||
+		 gb_sv_ctx_is_es();
 
 	if (!es && mode == 0 && fn_glGetBufferSubData) {
 		fn_glGetBufferSubData(id, (GLintptr)off, (GLsizeiptr)len, buf);
@@ -1367,8 +1368,9 @@ static void h_element_max(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		fn_glGetBufferParameteriv(GL_ELEMENT_ARRAY_BUFFER,
 					  0x8764 /* BUFFER_SIZE */, &size);
 	if (size > 0 && off + len <= (uint64_t)size) {
-		int es = fn_eglGetCurrentContext &&
-			 fn_eglGetCurrentContext() != EGL_NO_CONTEXT;
+		int es = (fn_eglGetCurrentContext &&
+			  fn_eglGetCurrentContext() != EGL_NO_CONTEXT) ||
+			 gb_sv_ctx_is_es();
 		uint8_t *buf = gb_tmp(t, (size_t)len + 8);
 		const uint8_t *src = NULL;
 

@@ -51,6 +51,13 @@ static int flavor(void)
 	return fl;
 }
 
+/* Is the current context OpenGL ES (by its version string, not by which
+ * window-system API created it: GLX can make ES contexts too)? */
+int gb_sv_ctx_is_es(void)
+{
+	return flavor() != FL_DESKTOP;
+}
+
 static void pixstore(int mode, struct gb_pixstore *ps)
 {
 	int pack = mode == GB_PM_PACK, fl = flavor();

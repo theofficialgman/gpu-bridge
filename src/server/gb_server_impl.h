@@ -227,6 +227,7 @@ void gb_srv_manual_dispatch(struct gb_sth *t, const struct gb_cmd_hdr *h,
 			    struct gb_r *r);
 void gb_srv_scratch_free(struct gb_sth *t);
 void gb_sv_scratch_drop(void *ctx);
+int gb_sv_ctx_is_es(void);
 
 /* Raise GL_INVALID_VALUE on the current context without side effects (used
  * when an argument cannot be sized and the call is dropped). */
