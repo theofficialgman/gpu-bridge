@@ -215,6 +215,20 @@ void gb_cl_persist_sync(struct gb_cl *cx, int what)
 	busy = 0;
 }
 
+/* Buffer binding points. Anything else is GL_INVALID_ENUM, before any state
+ * is consulted. */
+static int target_valid(uint32_t t)
+{
+	switch (t) {
+	case 0x8892: case 0x8893: case 0x88EB: case 0x88EC: case 0x8F36:
+	case 0x8F37: case 0x8A11: case 0x8C8E: case 0x90D2: case 0x8C2A:
+	case 0x8F3F: case 0x90EE: case 0x92C0: case 0x9192: case 0x80EE:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
 /* target != 0: through a binding; else `named` is the buffer name.
  * whole != 0: legacy glMapBuffer (offset 0, length = buffer size). */
 static void *do_map(uint32_t target, uint32_t named, int64_t offset,
@@ -227,6 +241,10 @@ static void *do_map(uint32_t target, uint32_t named, int64_t offset,
 		return NULL;
 	if (st->in_begin) {
 		gb_cl_gl_error(0x0502);
+		return NULL;
+	}
+	if (target && !target_valid(target)) {
+		gb_cl_gl_error(0x0500);
 		return NULL;
 	}
 	if (target)
@@ -362,6 +380,10 @@ static GLboolean do_unmap(uint32_t target, uint32_t named)
 		gb_cl_gl_error(0x0502);
 		return GL_FALSE;
 	}
+	if (target && !target_valid(target)) {
+		gb_cl_gl_error(0x0500);
+		return GL_FALSE;
+	}
 	if (target)
 		buf = gb_state_bound(st, target);
 	m = buf ? gb_state_map(st, buf) : NULL;
@@ -390,6 +412,10 @@ static void do_flush(uint32_t target, uint32_t named, int64_t offset,
 
 	if (!st)
 		return;
+	if (target && !target_valid(target)) {
+		gb_cl_gl_error(0x0500);
+		return;
+	}
 	if (target)
 		buf = gb_state_bound(st, target);
 	m = buf ? gb_state_map(st, buf) : NULL;
@@ -414,6 +440,10 @@ static void do_pointer(uint32_t target, uint32_t named, GLenum pname,
 	uint32_t buf = named;
 	struct gb_map *m = NULL;
 
+	if (target && !target_valid(target)) {
+		gb_cl_gl_error(0x0500);
+		return;
+	}
 	if (pname != GL_BUFFER_MAP_POINTER_) {
 		gb_cl_gl_error(0x0500);
 		return;

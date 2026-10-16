@@ -322,6 +322,23 @@ static int ctx_is_core(struct gb_ctxstate *st)
 
 /* The index that restarts the primitive for an index type, or -1 when
  * primitive restart is off. ES 3.0+ always restarts on the fixed index. */
+/* ES 3.0+ context? (st->es is computed once) */
+static int es3_context(struct gb_ctxstate *st)
+{
+	if (st->es < 0) {
+		const char *v = (const char *)glGetString(GL_VERSION);
+
+		st->es = 0;
+		if (v && !strncmp(v, "OpenGL ES", 9)) {
+			v += 9;
+			while (*v && (*v < '0' || *v > '9'))
+				v++;
+			st->es = atoi(v) >= 3;
+		}
+	}
+	return st->es;
+}
+
 static int64_t restart_value(struct gb_ctxstate *st, uint32_t itype)
 {
 	if (st->es < 0) {
@@ -401,6 +418,12 @@ int gb_arr_pointer(struct gb_ctxstate *st, int slot, int size, uint32_t type,
 	 * error at the call (not at the draw), exactly as in the driver. */
 	if (st->array_buffer == 0 && ptr != NULL && ctx_is_core(st)) {
 		gb_cl_gl_error(0x0502 /* INVALID_OPERATION */);
+		return 1;
+	}
+	/* ES 3.x: client memory is only for the default VAO */
+	if (st->array_buffer == 0 && ptr != NULL && st->vao != &st->vao0 &&
+	    es3_context(st)) {
+		gb_cl_gl_error(0x0502);
 		return 1;
 	}
 	struct gb_carray *a = &st->vao->a[slot];
@@ -1196,11 +1219,29 @@ GB_API void glDrawElementsInstanced(GLenum mode, GLsizei count, GLenum type,
 	gbx_glDrawElementsInstanced(mode, count, type, indices, instancecount);
 }
 
+/* glDrawRangeElements* carry start/end only as a hint once the draw is turned
+ * into a plain indexed draw, so the one error they add (end < start) is
+ * raised here, after the enum errors the driver would report first. */
+static int range_invalid(GLenum mode, GLuint start, GLuint end, GLsizei count,
+			 GLenum type)
+{
+	int mode_ok = mode <= 0xE; /* POINTS .. PATCHES */
+	int type_ok = type == 0x1401 || type == 0x1403 || type == 0x1405;
+
+	if (mode_ok && type_ok && count >= 0 && end < start) {
+		gb_cl_gl_error(0x0501);
+		return 1;
+	}
+	return 0;
+}
+
 GB_API void glDrawRangeElements(GLenum mode, GLuint start, GLuint end,
 				GLsizei count, GLenum type, const void *indices)
 {
 	struct gb_ctxstate *st = gb_cur_state_raw();
 
+	if (range_invalid(mode, start, end, count, type))
+		return;
 	if (st && gb_draw_client(st, mode, 1, 0, count, type, indices, 0, 0, 0, 0))
 		return;
 	gbx_glDrawRangeElements(mode, start, end, count, type, indices);
@@ -1653,6 +1694,8 @@ GB_API void glDrawRangeElementsEXT(GLenum mode, GLuint start, GLuint end,
 {
 	struct gb_ctxstate *st = gb_cur_state_raw();
 
+	if (range_invalid(mode, start, end, count, type))
+		return;
 	if (st && gb_draw_client(st, mode, 1, 0, count, type, indices, 0, 0, 0, 0))
 		return;
 	gbx_glDrawRangeElementsEXT(mode, start, end, count, type, indices);
@@ -1676,6 +1719,8 @@ GB_API void glDrawRangeElementsBaseVertex(GLenum mode, GLuint start,
 {
 	struct gb_ctxstate *st = gb_cur_state_raw();
 
+	if (range_invalid(mode, start, end, count, type))
+		return;
 	if (st && gb_draw_client(st, mode, 1, 0, count, type, indices, 0, 0,
 				 basevertex, 0))
 		return;
