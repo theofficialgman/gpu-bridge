@@ -234,6 +234,7 @@ int gb_sv_ctx_is_es(void);
 void gb_sv_raise_invalid(void);
 void gb_sv_raise_enum(void);
 void gb_sv_raise_operation(void);
+void gb_sv_raise_egl_param(void);
 
 /* The errors a call left pending (glGetError drained), kept so they can be
  * put back: see the getter handling in the generated server. */

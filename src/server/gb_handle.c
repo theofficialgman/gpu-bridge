@@ -102,13 +102,25 @@ uint32_t gb_p2h(enum gb_handle_kind k, const void *p)
 
 void *gb_h2p(enum gb_handle_kind k, uint32_t id)
 {
-	if (!id || k <= HK_NONE || k >= HK_COUNT || (id >> 24) != (uint32_t)k)
+	if (!id || k <= HK_NONE || k >= HK_COUNT)
 		return NULL;
+	if ((id >> 24) != (uint32_t)k) /* not even this kind of name */
+		return (k != HK_XDPY && k != HK_GLSYNC)
+			       ? (void *)(uintptr_t)(0xdead000000000000ull | id)
+			       : NULL;
 	uint32_t idx = (id & 0xFFFFFF) - 1;
 	pthread_mutex_lock(&g_lock);
 	struct table *t = &g_tables[k];
 	void *p = idx < t->count ? (void *)t->slots[idx].ptr : NULL;
 	pthread_mutex_unlock(&g_lock);
+	/*
+	 * A name the application made up (or one that was destroyed): the
+	 * driver reports EGL_BAD_CONFIG / BAD_SURFACE ... for a handle it does
+	 * not know, but treats NULL as a different thing (no config, no
+	 * surface). Hand it an address no object can have.
+	 */
+	if (!p && k != HK_XDPY && k != HK_GLSYNC)
+		p = (void *)(uintptr_t)(0xdead000000000000ull | id);
 	return p;
 }
 

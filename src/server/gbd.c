@@ -293,6 +293,14 @@ void gb_sv_raise_invalid(void)
 		fn_glDeleteTextures(-1, NULL); /* INVALID_VALUE, no effect */
 }
 
+void gb_sv_raise_egl_param(void)
+{
+	GB_NATIVE(eglBindAPI, EGLBoolean, (EGLenum));
+
+	if (fn_eglBindAPI)
+		fn_eglBindAPI(0); /* EGL_BAD_PARAMETER, binds nothing */
+}
+
 void gb_sv_raise_operation(void)
 {
 	GB_NATIVE(glEndTransformFeedback, void, (void));

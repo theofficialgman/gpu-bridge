@@ -1060,8 +1060,13 @@ def emit_server(cmd, opname):
     # INVALID_OPERATION, not INVALID_VALUE.
     op_err = any(p["k"][0] == "arr_out" and p["k"][4][0] == "server" and
                  p["k"][4][1] == "uniform" for p in P)
-    L.append("\tif (__skip) gb_sv_raise_%s();" %
-             ("enum" if enum_err else "operation" if op_err else "invalid"))
+    if cmd.api == "egl":
+        # an EGL call we could not size: EGL_BAD_PARAMETER, not a GL error
+        L.append("\tif (__skip) gb_sv_raise_egl_param();")
+    else:
+        L.append("\tif (__skip) gb_sv_raise_%s();" %
+                 ("enum" if enum_err else "operation" if op_err
+                  else "invalid"))
     # A getter that fails leaves the application's output untouched: find
     # out whether *this* call raised an error (preserving any error that was
     # already pending, which glGetError would otherwise consume) and, if so,
