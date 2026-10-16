@@ -224,6 +224,23 @@ def pack_sparse_expr(cmd, pname_):
     return None
 
 
+def prefill_expr(cmd, p):
+    """C condition (client side) under which an output array travels with the
+    application's current bytes, or None. The driver writes only part of some
+    outputs (pixel packs with gaps, fewer values than the buffer holds, a
+    query that leaves its result alone); the rest must keep the
+    application's values, so the server starts from them."""
+    k = p["k"]
+    n = p["name"]
+    if k[0] != "arr_out" or k[2] != "raw" or k[4][0] == "server":
+        return None
+    if k[5] == "pack":
+        return pack_sparse_expr(cmd, n)
+    if k[5]:
+        return None
+    return f"__l_{n} <= 64"
+
+
 def pname_class(name):
     for rx, cls in cfg.PNAME_CLASSES:
         if re.match(rx, name):
@@ -571,11 +588,10 @@ def emit_client(cmd, public, opname):
                 L.append(f"\tif (!__pbo_{n} && {n} && __n_{n} * {k[3]} > "
                          f"GB_MAX_ARRAY_BYTES) "
                          f"{{ gb_cl_set_error(__cx, __op); {retstmt} }}")
-                if k[0] == "arr_out" and pbo == "pack" and k[2] == "raw":
-                    sx = pack_sparse_expr(cmd, n)
-                    if sx:
-                        L.append(f"\tint __pf_{n} = (!__pbo_{n} && {n} && "
-                                 f"__n_{n} > 0 && {sx});")
+                sx = prefill_expr(cmd, p)
+                if sx:
+                    L.append(f"\tint __pf_{n} = (!__pbo_{n} && {n} && "
+                             f"__n_{n} > 0 && ({sx}));")
             else:
                 L.append(f"\tuint32_t __l_{n} = {n} ? (uint32_t)(__n_{n} * "
                          f"{k[3]}) : GB_NULL_LEN;")
@@ -588,6 +604,10 @@ def emit_client(cmd, public, opname):
                          f"GB_MAX_ARRAY_BYTES) "
                          f"{{ gb_cl_set_error(__cx, __op); "
                          f"gb_cl_gl_error({gle}); {retstmt} }}")
+                sx = prefill_expr(cmd, p)
+                if sx:
+                    L.append(f"\tint __pf_{n} = ({n} && __n_{n} > 0 && "
+                             f"({sx}));")
         elif k[0] == "attrib":
             if k[4] == "egl":
                 scan = f"gb_attrib_count_{k[1]}({n})"
@@ -617,11 +637,11 @@ def emit_client(cmd, public, opname):
             else:
                 L.append(f"\tif (__l_{n} != GB_NULL_LEN) __t = "
                          f"GB_ALIGN_UP(__t, 8u) + __l_{n};")
-        elif k[0] == "arr_out" and k[5]:
-            L.append(f"\tif (__l_{n} == GB_PBO_LEN) __t = "
-                     f"GB_ALIGN_UP(__t, 8u) + 8u;")
-            if (k[5] == "pack" and k[2] == "raw" and k[4][0] != "server"
-                    and pack_sparse_expr(cmd, n)):
+        elif k[0] == "arr_out":
+            if k[5]:
+                L.append(f"\tif (__l_{n} == GB_PBO_LEN) __t = "
+                         f"GB_ALIGN_UP(__t, 8u) + 8u;")
+            if prefill_expr(cmd, p):
                 L.append(f"\tif (__pf_{n}) __t = GB_ALIGN_UP(__t, 8u) + "
                          f"__l_{n};")
     L.append("\t__t = GB_ALIGN_UP(__t, 8u);")
@@ -647,8 +667,7 @@ def emit_client(cmd, public, opname):
         elif k[0] == "xvis":
             L.append(f"\tgb_w_u32(&__w, __xv_{n});")
             L.append(f"\tgb_w_u32(&__w, __xs_{n});")
-        elif (k[0] == "arr_out" and k[5] == "pack" and k[2] == "raw"
-              and k[4][0] != "server" and pack_sparse_expr(cmd, n)):
+        elif k[0] == "arr_out" and prefill_expr(cmd, p):
             # high bit pattern: the application's current bytes follow
             L.append(f"\tgb_w_u32(&__w, __l_{n} | (__pf_{n} ? "
                      f"GB_PREFILL_BIT : 0));")
@@ -672,11 +691,10 @@ def emit_client(cmd, public, opname):
                     L.append(f"\tif (__l_{n} == GB_PBO_LEN) {{ uint64_t "
                              f"__off = (uint64_t)(uintptr_t){n}; "
                              f"memcpy(gb_w_blob(&__w, 8), &__off, 8); }}")
-                    if (pbo == "pack" and k[2] == "raw" and
-                            k[4][0] != "server" and pack_sparse_expr(cmd, n)):
-                        L.append(f"\tif (__pf_{n}) {{ void *__d = "
-                                 f"gb_w_blob(&__w, __l_{n}); "
-                                 f"gb_cl_copy_in(__d, {n}, __l_{n}); }}")
+                if prefill_expr(cmd, p):
+                    L.append(f"\tif (__pf_{n}) {{ void *__d = "
+                             f"gb_w_blob(&__w, __l_{n}); "
+                             f"gb_cl_copy_in(__d, {n}, __l_{n}); }}")
                 continue
             mode, wsz = (k[2], k[3])
             if pbo:
@@ -744,6 +762,19 @@ def emit_client(cmd, public, opname):
                 L.append(f"\t      {{ size_t __k = strnlen((const char *)"
                          f"__s, __rl); if (__k < __rl) __k++; "
                          f"memcpy({n}, __s, __k); }}")
+            elif mode == "raw" and n != "length" and any(
+                    q["name"] == "length" and q["k"][0] == "arr_out" and
+                    q["ctype"].replace(" ", "").endswith("*")
+                    for q in P) and k[1] not in ("GLchar", "GLcharARB"):
+                # a result vector with a companion `length`: the driver
+                # writes `*length` elements, the rest of the application's
+                # buffer is not touched
+                L.append(f"\t      {{ size_t __cp = __rl; if (length) {{ "
+                         f"int64_t __c = (int64_t)*length; "
+                         f"if (__c < 0) __c = 0; "
+                         f"if ((uint64_t)__c * {k[3]} < __cp) "
+                         f"__cp = (size_t)(__c * {k[3]}); }} "
+                         f"memcpy({n}, __s, __cp); }}")
             elif mode == "raw":
                 L.append(f"\t      memcpy({n}, __s, __rl);")
             elif mode == "widen":
@@ -825,8 +856,7 @@ def emit_server(cmd, opname):
             L.append(f"\tuint32_t xs_{n} = gb_r_u32(__r);")
         else:
             L.append(f"\tuint32_t l_{n} = gb_r_u32(__r);")
-            if (k[0] == "arr_out" and k[5] == "pack" and k[2] == "raw" and
-                    k[4][0] != "server" and pack_sparse_expr(cmd, n)):
+            if k[0] == "arr_out" and prefill_expr(cmd, p):
                 L.append(f"\tint pf_{n} = 0;")
                 L.append(f"\tif (l_{n} < 0x80000000u && "
                          f"(l_{n} & GB_PREFILL_BIT)) "
@@ -995,8 +1025,7 @@ def emit_server(cmd, opname):
             esz = 8 if mode == "widen" else wsz
             L.append(f"\t\to_{n} = gb_tmp_zero(__t, (size_t)n_{n} * "
                      f"{esz} + 512);")
-            if (pbo == "pack" and mode == "raw" and
-                    pack_sparse_expr(cmd, n)):
+            if prefill_expr(cmd, p):
                 L.append(f"\t\tif (pf_{n}) {{ const void *pb_ = "
                          f"gb_r_blob(__r, l_{n}); if (!pb_) goto "
                          f"proto_error; memcpy(o_{n}, pb_, l_{n}); }}")
