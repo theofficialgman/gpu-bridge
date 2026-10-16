@@ -1079,3 +1079,57 @@ int gb_cl_copy_in(void *dst, const void *src, size_t n)
 	copy_jmp = saved;
 	return 0;
 }
+
+/* One entry of a string array, read under the fault handler of
+ * gb_cl_copy_in. Returns the length; *p is the string or NULL. */
+static size_t safe_str_entry(const char *const *a, int64_t i, const char **p)
+{
+	sigjmp_buf jb;
+	sigjmp_buf *volatile saved;
+	size_t len = 0;
+
+	pthread_once(&copy_once, copy_install);
+	saved = copy_jmp;
+	*p = NULL;
+	if (sigsetjmp(jb, 0)) {
+		copy_jmp = saved;
+		*p = NULL;
+		return 0;
+	}
+	copy_jmp = &jb;
+	const char *s = a[i];
+
+	if (s) {
+		len = strlen(s);
+		*p = s;
+	}
+	copy_jmp = saved;
+	return len;
+}
+
+uint64_t gb_cl_strarr_size(const char *const *a, int64_t n)
+{
+	uint64_t sum = 0;
+
+	for (int64_t i = 0; i < n; i++) {
+		const char *p;
+
+		sum += safe_str_entry(a, i, &p) + 1;
+		if (sum > GB_MAX_ARRAY_BYTES)
+			break;
+	}
+	return sum;
+}
+
+void gb_cl_strarr_fill(char *dst, const char *const *a, int64_t n)
+{
+	for (int64_t i = 0; i < n; i++) {
+		const char *p;
+		size_t len = safe_str_entry(a, i, &p);
+
+		if (p && len)
+			gb_cl_copy_in(dst, p, len);
+		dst[len] = 0;
+		dst += len + 1;
+	}
+}

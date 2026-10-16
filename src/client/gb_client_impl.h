@@ -251,6 +251,10 @@ int gb_cl_pack_sparse(struct gb_cl *cx, int64_t w, int64_t h, int64_t d,
  * while reading is absorbed here and the unreadable tail is sent as zeros.
  * Returns 0 if the whole range was readable. */
 int gb_cl_copy_in(void *dst, const void *src, size_t n);
+/* A NULL-terminated-strings array whose entries the driver may never read
+ * (it validates `count` first): unreadable or NULL entries count as "". */
+uint64_t gb_cl_strarr_size(const char *const *a, int64_t n);
+void gb_cl_strarr_fill(char *dst, const char *const *a, int64_t n);
 /* Buffer currently bound to a generic target (0 if none/unknown target). */
 uint32_t gb_state_bound(struct gb_ctxstate *st, uint32_t target);
 /* Record a binding to a generic buffer target. */
