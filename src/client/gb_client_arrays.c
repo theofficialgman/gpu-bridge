@@ -744,12 +744,9 @@ attrs:;
 			if (!indexed)
 				src += (int64_t)first * stride;
 		} else {
-			if (!is_instanced) {
-				gb_cl_gl_error(0x0502);
-				return 1;
-			}
-			elems = (uint64_t)(instances - 1) / a->divisor +
-				baseinstance + 1;
+			/* a plain draw is one instance of an instanced draw */
+			elems = (uint64_t)((is_instanced ? instances : 1) - 1) /
+					a->divisor + baseinstance + 1;
 		}
 		uint64_t len = (elems - 1) * (uint64_t)stride + eb;
 		if (len > GB_MAX_ARRAY_BYTES || elems > (1u << 26)) {

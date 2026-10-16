@@ -183,6 +183,12 @@ GB_API void glGetObjectPtrLabel(const void *ptr, GLsizei bufSize,
 	gb_r_init(&r, in.p, in.size);
 	uint32_t n = gb_r_u32(&r);
 	(void)gb_r_u32(&r);
+	if (bufSize == 0) { /* length query */
+		if (length && !r.err)
+			*length = (GLsizei)n;
+		gb_in_release(&in);
+		return;
+	}
 	const char *s = n ? gb_r_blob(&r, n) : "";
 
 	if (!r.err && s && label && bufSize > 0) {

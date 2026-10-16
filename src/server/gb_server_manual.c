@@ -991,23 +991,25 @@ static void h_obj_ptr_label(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	GLsizei len = 0;
 	char *buf = gb_tmp_zero(t, bufsize + 8);
 
-	if (fn_glGetObjectPtrLabel && buf && bufsize)
+	/* bufSize 0 with no buffer asks for the label's length only */
+	if (fn_glGetObjectPtrLabel && buf)
 		fn_glGetObjectPtrLabel(gb_h2p(HK_GLSYNC, ptr), (GLsizei)bufsize,
-				       &len, buf);
-	if (len < 0 || (uint32_t)len > bufsize)
+				       &len, bufsize ? buf : NULL);
+	if (len < 0 || (bufsize && (uint32_t)len > bufsize) ||
+	    (uint32_t)len > (1u << 20))
 		len = 0;
 	if (h->flags & GB_CMD_F_WANT_REPLY) {
 		struct gb_out o;
 		struct gb_w w;
-		uint32_t total = GB_ALIGN_UP(GB_ALIGN_UP(16 + 8, 8u) + (uint32_t)len, 8u);
+		uint32_t data = bufsize ? (uint32_t)len : 0;
+		uint32_t total = GB_ALIGN_UP(GB_ALIGN_UP(16 + 8, 8u) + data, 8u);
 
 		if (!gb_sv_reply_begin(t, h, &o, total)) {
 			gb_w_init(&w, o.p);
 			gb_w_u32(&w, (uint32_t)len);
 			gb_w_u32(&w, 0);
-			if (len)
-				memcpy(gb_w_blob(&w, (uint32_t)len), buf,
-				       (size_t)len);
+			if (data)
+				memcpy(gb_w_blob(&w, data), buf, data);
 			gb_sv_reply_end(t, &o);
 		}
 	}
@@ -1623,10 +1625,10 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		if (a[i].divisor == 0) {
 			elems = nverts;
 		} else {
-			if (instances == 0 || a[i].slot < CA_GENERIC0)
+			if (a[i].slot < CA_GENERIC0)
 				goto bad;
-			elems = (uint64_t)(instances - 1) / a[i].divisor +
-				baseinstance + 1;
+			elems = (uint64_t)((instances ? instances : 1) - 1) /
+					a[i].divisor + baseinstance + 1;
 		}
 		if (elems == 0 || elems > (1u << 26))
 			goto bad;

@@ -765,7 +765,8 @@ def emit_client(cmd, public, opname):
                          f"GB_MAX_ARRAY_BYTES) {{")
             else:
                 L.append(f"\t    if (__s && {n} && __rl == __l_{n}) {{")
-            if mode == "raw" and k[1] in ("GLchar", "GLcharARB", "char"):
+            if mode == "raw" and k[1] in ("GLchar", "GLcharARB", "char") and \
+                    (cmd.name, n) not in cfg.NOT_A_STRING:
                 # A string out-parameter: the driver writes the characters
                 # and the terminator only, never the whole bufSize (the
                 # application's buffer may be exactly as long as the name).

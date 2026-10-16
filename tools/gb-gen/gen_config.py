@@ -665,3 +665,10 @@ PERSIST_DOWN_REGEX = (
 # Array parameters whose (negative) count the driver quietly treats as 0
 # instead of reporting an error.
 NEG_COUNT_IS_ZERO = {("eglGetConfigs", "configs"), ("eglChooseConfig", "configs")}
+
+# GLchar buffers that hold several NUL-terminated strings back to back (not
+# one string): copied whole.
+NOT_A_STRING = {("glGetDebugMessageLog", "messageLog"),
+                ("glGetDebugMessageLogKHR", "messageLog"),
+                ("glGetDebugMessageLogARB", "messageLog"),
+                ("glGetDebugMessageLogAMD", "message")}
