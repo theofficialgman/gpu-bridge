@@ -575,6 +575,10 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 
 	if (!cx)
 		return 0;
+	/* an invalid primitive mode is the driver's INVALID_ENUM, which it
+	 * reports before looking at anything else (indices, arrays) */
+	if (mode > 0xE)
+		return 0;
 	if (__builtin_expect(gb_cl_persist_pending(cx), 0))
 		gb_cl_persist_sync(cx, GB_PS_UP);
 	for (int i = 0; i < CA_COUNT; i++)
@@ -633,7 +637,7 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 			if (count < 0 || (is_instanced && instances <= 0))
 				return 0; /* let the driver report it */
 			if (count == 0)
-				return 1;
+				return 0; /* the driver still validates state */
 			int ib = itype == 0x1401 ? 1 : itype == 0x1403 ? 2
 					   : itype == 0x1405 ? 4 : 0;
 			uintptr_t eoff = (uintptr_t)indices;
@@ -664,7 +668,7 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 		if (count < 0 || (is_instanced && instances <= 0))
 			return 0; /* let the driver report it */
 		if (count == 0)
-			return 1;
+			return 0; /* the driver still validates state */
 		int ib = itype == 0x1401 ? 1 : itype == 0x1403 ? 2
 				   : itype == 0x1405 ? 4 : 0;
 		if (!ib) {
@@ -677,21 +681,41 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 		}
 		int64_t maxv = -1, rs = restart_value(st, itype);
 		int skipped = 0;
-		/* the indices are application memory: not necessarily aligned */
+		/* The indices are application memory: not necessarily aligned,
+		 * and not necessarily readable (an invalid call is rejected by
+		 * the driver before it looks at them, so tests pass junk). */
+		union { uint8_t b[256]; uint32_t w[64]; } ch;
+		int per = (int)sizeof ch.b / ib;
+
 		for (int32_t i = 0; i < count; i++) {
 			int64_t x;
+			int k = i % per;
 
+			if (k == 0) {
+				int32_t n = count - i < per ? count - i : per;
+
+				if (gb_cl_copy_in(ch.b, (const uint8_t *)indices +
+						  (size_t)i * ib,
+						  (size_t)n * ib)) {
+					/* unreadable: leave it to the driver
+					 * if the call is invalid anyway */
+					if (mode > 0xE)
+						return 0;
+					gb_cl_gl_error(0x0502);
+					return 1;
+				}
+			}
 			if (ib == 1) {
-				x = ((const uint8_t *)indices)[i];
+				x = ch.b[k];
 			} else if (ib == 2) {
 				uint16_t t;
 
-				memcpy(&t, (const uint8_t *)indices + 2 * i, 2);
+				memcpy(&t, ch.b + 2 * k, 2);
 				x = t;
 			} else {
 				uint32_t t;
 
-				memcpy(&t, (const uint8_t *)indices + 4 * i, 4);
+				memcpy(&t, ch.b + 4 * k, 4);
 				x = t;
 			}
 			if (x == rs) { /* restart marker, not a vertex */
