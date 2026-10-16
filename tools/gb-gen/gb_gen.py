@@ -1077,6 +1077,10 @@ def emit_server(cmd, opname):
     if cmd.name in ("eglDestroyContext", "glXDestroyContext"):
         L.append("\tgb_sv_scratch_drop((void *)a_ctx);")
     L.append("\tuint64_t __t0 = gb_stat_now();")
+    if cmd.name == "glGetError":
+        # errors the server took out of the driver and could not put back
+        L.append("\tif (gb_sv_stash_take(__t, &ret)) { /* stashed */ }")
+        L.append("\telse")
     L.append(f"\tif (fn_{cmd.name} && !__skip) " +
              ("ret = " if cmd.rk[0] != "void" else "") +
              f"fn_{cmd.name}({args});")

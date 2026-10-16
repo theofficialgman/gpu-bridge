@@ -453,7 +453,11 @@ static void do_pointer(uint32_t target, uint32_t named, GLenum pname,
 	if (st) {
 		if (target)
 			buf = gb_state_bound(st, target);
-		m = buf ? gb_state_map(st, buf) : NULL;
+		if (!buf) { /* the reserved name 0 is bound */
+			gb_cl_gl_error(0x0502);
+			return;
+		}
+		m = gb_state_map(st, buf);
 	}
 	*params = m ? m->shadow : NULL;
 }

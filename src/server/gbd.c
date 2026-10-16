@@ -321,6 +321,18 @@ void gb_sv_err_pop(struct gb_errs *e)
 	}
 }
 
+static __thread struct gb_sth *t_this; /* set in worker_main */
+
+int gb_sv_stash_take(struct gb_sth *t, unsigned *out)
+{
+	if (t->err_nstash <= 0)
+		return 0;
+	*out = t->err_stash[0];
+	memmove(t->err_stash, t->err_stash + 1,
+		(size_t)(--t->err_nstash) * sizeof t->err_stash[0]);
+	return 1;
+}
+
 void gb_sv_err_raise(const struct gb_errs *e)
 {
 	GB_NATIVE(glUniform1i, void, (GLint, GLint));
@@ -335,7 +347,12 @@ void gb_sv_err_raise(const struct gb_errs *e)
 			if (fn_glUniform1i)
 				fn_glUniform1i(-2, 0);
 			break;
-		default: /* OUT_OF_MEMORY etc.: cannot be re-raised */
+		default:
+			/* OUT_OF_MEMORY, INVALID_FRAMEBUFFER_OPERATION, ...:
+			 * no side-effect-free call raises them, so the next
+			 * glGetError hands them back (see gb_sv_stash_take) */
+			if (t_this && t_this->err_nstash < 8)
+				t_this->err_stash[t_this->err_nstash++] = e->e[i];
 			break;
 		}
 	}
@@ -550,7 +567,6 @@ struct gb_deferred {
 	uint8_t data[];
 };
 
-static __thread struct gb_sth *t_this; /* set in worker_main */
 
 struct gb_sth *gb_sv_this_thread(void)
 {

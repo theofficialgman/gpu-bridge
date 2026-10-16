@@ -48,6 +48,9 @@ struct gb_sth {
 	struct gb_scratch *scratch; /* client-array upload buffers per ctx */
 	void *ctx_key;              /* cached current EGL/GLX context */
 	int ctx_valid;              /* ctx_key is current (see CTX_CHANGERS) */
+	unsigned err_stash[8];      /* errors popped from the driver that cannot
+				     * be raised again; glGetError returns them */
+	int err_nstash;
 	/* upcalls (see gb_opx.h): queued from any thread, flushed by the worker */
 	pthread_mutex_t up_lock;
 	struct gb_upmsg *up_head, *up_tail;
@@ -239,6 +242,7 @@ struct gb_errs {
 };
 void gb_sv_err_pop(struct gb_errs *e);
 void gb_sv_err_raise(const struct gb_errs *e);
+int gb_sv_stash_take(struct gb_sth *t, unsigned *out);
 
 /* GB_STATS: time spent inside the native driver call, per opcode. */
 extern int gb_stats_on;
