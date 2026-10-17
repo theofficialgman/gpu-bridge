@@ -589,6 +589,25 @@ re-run alone against the native driver; the real bugs found, all fixed
 - Compressed uploads honor `GL_UNPACK_COMPRESSED_BLOCK_*` (the driver reads a
   sub-cuboid out of a larger one, past `imageSize`).
 
+### Bridged GL 4.6 over GLX vs native GLX
+
+Same lists, `--deqp-gl-context-type=glx`, config 1 only: 83,367 results.
+70,314 Pass/Pass, 9,114 NotSupported/NotSupported, 2,990 Fail/Fail,
+928 distinct differences; none is a remaining bridge bug:
+
+- 910 `KHR-Single-GL46.enhanced_layouts` cases: the NVIDIA GLSL compiler
+  itself crashes on one case (`varying_exceeding_components_ivec4`, native
+  too). Natively that kills the process and the harness resumes; the bridged
+  server died and every later call failed. `GB_ABORT_ON_SERVER_LOSS=1` makes
+  the client abort like a driver crash (the harness sets it); the cases pass
+  alone.
+- 10 `draw_elements_base_vertex_tests`: a bug in the new multi-draw message
+  (arrays must be 8-aligned blobs; wrong for odd draw counts), fixed.
+- 10 `transform_feedback` (pass alone) and 5 async-debug cases (limitation).
+
+GLES over GLX (`GLX_EXT_create_context_es2_profile`) works natively and
+bridged; the lists are queued (`~/cts/glxes.sh`).
+
 Still open: the 6 `GLES31.functional.debug` async-callback cases (limitation),
 the Pass->QualityWarning set (timing), and the EGL multithread crashes.
 
