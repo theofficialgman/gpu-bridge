@@ -608,8 +608,31 @@ Same lists, `--deqp-gl-context-type=glx`, config 1 only: 83,367 results.
 GLES over GLX (`GLX_EXT_create_context_es2_profile`) works natively and
 bridged; the lists are queued (`~/cts/glxes.sh`).
 
-Still open: the 6 `GLES31.functional.debug` async-callback cases (limitation),
-the Pass->QualityWarning set (timing), and the EGL multithread crashes.
+### Bridged ES 3.2 after the GL 4.6 fixes (EGL, re-run)
+
+187,793 results: distinct differences from native fell from 108 to 46: 35 are
+the GLES1 cases (not compiled into the armhf `x11_egl_glx` build; with the
+`x11_egl` build all 35 pass bridged), 5 `EGL.functional.sharing` and 1
+`primitive_restart` (pass alone: session state), 4 `GLES31.functional.debug`
+(3 async-callback cases, fixed afterwards, below).
+
+ES 3.2 over GLX (`GLX_EXT_create_context_es2_profile`, config 1): 21,045
+results, 13,352 Pass/Pass, 7,624 NotSupported, 67 Fail/Fail, 1 difference
+(`draw_elements_base_vertex_tests.overflow`: indices in client memory with
+buffer vertex data were sized as if vertex data had to travel; fixed).
+
+Async debug output: the server delivers the driver's messages as upcalls, but
+the client only took upcalls when the application next called into the
+library. Once a debug callback is registered, a helper thread now delivers the
+pending ones, only while the owner thread sleeps in a syscall and has made no
+call for ~12 ms (`GB_NO_UPCALL_THREAD=1` disables it). The three
+`debug.async` cases pass.
+
+Open: `GLES31.functional.debug.error_groups.case_13` fails (one
+INVALID_VALUE message fewer than expected) when run after the 33
+`error_filters` cases in the same process, bridged only, deterministic; it
+passes alone and the server/client callback counts are identical, so it is
+probably a severity/state difference, not lost messages.
 
 ## Real applications
 
