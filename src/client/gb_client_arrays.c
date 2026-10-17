@@ -748,11 +748,16 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 		}
 		if (maxv < 0 && skipped)
 			maxv = 0;
-		if (maxv < 0 || maxv >= (1 << 26)) {
+		if (!nclient) {
+			/* the vertex data is in buffers: only the indices travel,
+			 * whatever vertex numbers they (plus basevertex) name */
+			nverts = 0;
+		} else if (maxv < 0 || maxv >= (1 << 26)) {
 			gb_cl_gl_error(maxv < 0 ? 0x0502 : 0x0505);
 			return 1;
+		} else {
+			nverts = (uint32_t)maxv + 1;
 		}
-		nverts = (uint32_t)maxv + 1;
 		ibytes = (uint32_t)count * (uint32_t)ib;
 	} else {
 		if (!nclient)
