@@ -324,7 +324,16 @@ static void h_shader_source(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		memcpy(&l, blob + 4 * i, 4);
 		if (l > blen - off)
 			goto bad;
-		strs[i] = (const char *)blob + off;
+		/* a private NUL-terminated copy: the driver's compiler may read
+		 * past the length it was given (the message buffer continues
+		 * with other data there) */
+		char *cp = gb_tmp(t, (size_t)l + 16);
+
+		if (!cp)
+			goto bad;
+		memcpy(cp, blob + off, l);
+		cp[l] = 0;
+		strs[i] = cp;
 		lens[i] = (GLint)l;
 		off += l;
 	}
@@ -333,6 +342,12 @@ static void h_shader_source(struct gb_sth *t, const struct gb_cmd_hdr *h,
 
 	GB_NATIVE(glShaderSource, void,
 		  (GLuint, GLsizei, const GLchar *const *, const GLint *));
+	if (getenv("GB_DUMP_SHADERS")) { /* debugging aid: sources on stderr */
+		fprintf(stderr, "--- shader %u (%u strings)\n", shader, count);
+		for (uint32_t i = 0; i < count; i++)
+			fwrite(strs[i], 1, (size_t)lens[i], stderr);
+		fprintf(stderr, "\n--- end\n");
+	}
 	if (fn_glShaderSource)
 		fn_glShaderSource(shader, (GLsizei)count, strs, lens);
 	return;

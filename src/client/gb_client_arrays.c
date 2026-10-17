@@ -2181,7 +2181,8 @@ GB_API void glMultiDrawArrays(GLenum mode, const GLint *first,
  * Indices in a bound element buffer and no client-memory attributes: send one
  * real multi-draw, so gl_DrawID counts the draws as the application expects.
  * Wire (GB_OPX_MultiDrawElements): u32 mode, type, n, flags (1: basevertex
- * array follows), i32 counts[n], [i32 basevertex[n]], u64 offsets[n].
+ * array follows), then i32 counts[n], [i32 basevertex[n]], u64 offsets[n],
+ * each an 8-aligned blob.
  * Returns 0 if the draws need the expansion path (client memory involved).
  */
 static int multidraw_elements_wire(struct gb_ctxstate *st, GLenum mode,
@@ -2200,8 +2201,8 @@ static int multidraw_elements_wire(struct gb_ctxstate *st, GLenum mode,
 		if (is_client_array(&st->vao->a[i]))
 			return 0;
 	uint32_t n = (uint32_t)drawcount;
-	uint32_t sz = GB_ALIGN_UP(32u + 4u * n + (basevertex ? 4u * n : 0), 8u) +
-		      8u * n;
+	uint32_t sz = 32u + GB_ALIGN_UP(4u * n, 8u) +
+		      (basevertex ? GB_ALIGN_UP(4u * n, 8u) : 0) + 8u * n + 8u;
 
 	if (gb_cl_msg_begin(cx, &o, &w, GB_OPX_MultiDrawElements, sz, 0))
 		return 1;
@@ -2209,13 +2210,14 @@ static int multidraw_elements_wire(struct gb_ctxstate *st, GLenum mode,
 	gb_w_u32(&w, type);
 	gb_w_u32(&w, n);
 	gb_w_u32(&w, basevertex ? 1u : 0u);
-	for (uint32_t i = 0; i < n; i++)
-		gb_w_u32(&w, (uint32_t)count[i]);
+	/* each array is an 8-aligned blob, as the server reads them */
+	memcpy(gb_w_blob(&w, 4u * n), count, 4u * n);
 	if (basevertex)
-		for (uint32_t i = 0; i < n; i++)
-			gb_w_u32(&w, (uint32_t)basevertex[i]);
+		memcpy(gb_w_blob(&w, 4u * n), basevertex, 4u * n);
+	uint64_t *offs = gb_w_blob(&w, 8u * n);
+
 	for (uint32_t i = 0; i < n; i++)
-		gb_w_u64(&w, (uint64_t)(uintptr_t)indices[i]);
+		offs[i] = (uint64_t)(uintptr_t)indices[i];
 	gb_cl_end(cx, &o);
 	return 1;
 }

@@ -436,6 +436,24 @@ __attribute__((destructor)) static void stats_dtor(void)
 {
 	stats_report();
 }
+/*
+ * The server is gone. A native driver crash takes the application down with
+ * it; with GB_ABORT_ON_SERVER_LOSS=1 so does this (conformance harnesses
+ * then see a crash instead of a long tail of failing calls).
+ */
+static void gb_cl_lost(struct gb_cl *cx)
+{
+	static int abort_on_loss = -1;
+
+	if (abort_on_loss < 0)
+		abort_on_loss = getenv("GB_ABORT_ON_SERVER_LOSS") != NULL;
+	cx->lost = 1;
+	if (abort_on_loss) {
+		fprintf(stderr, "gpu-bridge: server died; aborting like a driver crash\n");
+		abort();
+	}
+}
+
 
 int gb_cl_begin(struct gb_cl *cx, struct gb_out *o, uint32_t op,
 		uint32_t total, uint32_t flags)
@@ -459,7 +477,7 @@ int gb_cl_begin(struct gb_cl *cx, struct gb_out *o, uint32_t op,
 	rc = gb_out_begin(o, &cx->chan.req, total);
 
 	if (rc) {
-		cx->lost = 1;
+		gb_cl_lost(cx);
 		dbg("send failed (%d): server lost", rc);
 		return rc;
 	}
@@ -477,7 +495,7 @@ static void upcall_reply(struct gb_cl *cx, uint32_t id, uint32_t seq,
 	uint32_t size = GB_ALIGN_UP((uint32_t)sizeof(struct gb_cmd_hdr) + len, 8u);
 
 	if (gb_out_begin(&o, &cx->chan.req, size)) {
-		cx->lost = 1;
+		gb_cl_lost(cx);
 		return;
 	}
 	struct gb_cmd_hdr h = { id, size, seq, GB_CMD_F_UPCALL | GB_CMD_F_REPLY };
@@ -486,7 +504,7 @@ static void upcall_reply(struct gb_cl *cx, uint32_t id, uint32_t seq,
 	if (len)
 		memcpy(o.p + sizeof(h), data, len);
 	if (gb_out_end(&o))
-		cx->lost = 1;
+		gb_cl_lost(cx);
 }
 
 /* blob cache callbacks, set with eglSetBlobCacheFuncsANDROID (gb_client_gl.c) */
@@ -591,7 +609,7 @@ void gb_cl_end(struct gb_cl *cx, struct gb_out *o)
 	uint32_t flags = ((const struct gb_cmd_hdr *)o->p)->flags;
 
 	if (gb_out_end(o))
-		cx->lost = 1;
+		gb_cl_lost(cx);
 	/* GL_DEBUG_OUTPUT_SYNCHRONOUS: the application expects its callback
 	 * before the offending call returns; async calls are made to
 	 * synchronise (the reply is preceded by the call's debug messages). */
@@ -631,7 +649,7 @@ int gb_cl_wait_reply(struct gb_cl *cx, struct gb_in *in, uint32_t op)
 		g_stat[stat_slot(op)].wait_ns += mono_ns() - t0;
 
 	if (rc) {
-		cx->lost = 1;
+		gb_cl_lost(cx);
 		dbg("reply wait failed (%d): server lost", rc);
 		return rc;
 	}
@@ -640,7 +658,7 @@ int gb_cl_wait_reply(struct gb_cl *cx, struct gb_in *in, uint32_t op)
 		dbg("reply desync: op %u/%u seq %u/%u", h.opcode, op, h.seq,
 		    cx->chan.seq);
 		gb_in_release(in);
-		cx->lost = 1;
+		gb_cl_lost(cx);
 		return -EPROTO;
 	}
 	return 0;
