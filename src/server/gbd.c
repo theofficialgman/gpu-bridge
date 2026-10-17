@@ -331,13 +331,34 @@ void gb_sv_err_pop(struct gb_errs *e)
 
 static __thread struct gb_sth *t_this; /* set in worker_main */
 
+/* A GL keeps one flag per error code: the stash never holds a code twice. */
+static void stash_add(struct gb_sth *t, unsigned code)
+{
+	for (int i = 0; i < t->err_nstash; i++)
+		if (t->err_stash[i] == code)
+			return;
+	if (t->err_nstash < 8)
+		t->err_stash[t->err_nstash++] = code;
+}
+
+/*
+ * glGetError: the oldest stashed error, with every other report of the same
+ * code folded into it (the driver may have raised it again since it was
+ * stashed). Other codes the driver holds move to the stash, in order.
+ */
 int gb_sv_stash_take(struct gb_sth *t, unsigned *out)
 {
+	struct gb_errs e;
+
 	if (t->err_nstash <= 0)
 		return 0;
 	*out = t->err_stash[0];
 	memmove(t->err_stash, t->err_stash + 1,
 		(size_t)(--t->err_nstash) * sizeof t->err_stash[0]);
+	gb_sv_err_pop(&e);
+	for (int i = 0; i < e.n; i++)
+		if (e.e[i] != *out)
+			stash_add(t, e.e[i]);
 	return 1;
 }
 
@@ -350,8 +371,8 @@ int gb_sv_stash_take(struct gb_sth *t, unsigned *out)
 void gb_sv_err_raise(const struct gb_errs *e)
 {
 	for (int i = 0; i < e->n; i++)
-		if (t_this && t_this->err_nstash < 8)
-			t_this->err_stash[t_this->err_nstash++] = e->e[i];
+		if (t_this)
+			stash_add(t_this, e->e[i]);
 }
 
 void gb_sv_raise_enum(void)

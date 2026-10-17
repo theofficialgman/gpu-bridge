@@ -10,6 +10,7 @@
  */
 #define _GNU_SOURCE
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "gb_server_impl.h"
@@ -58,6 +59,24 @@ int gb_sv_ctx_is_es(void)
 	return flavor() != FL_DESKTOP;
 }
 
+/* Desktop GL version at least major.minor (queried states exist only there) */
+static int desktop_at_least(int major, int minor)
+{
+	GB_NATIVE(glGetString, const GLubyte *, (GLenum));
+	const char *v = fn_glGetString ? (const char *)fn_glGetString(GL_VERSION)
+				       : NULL;
+	int ma, mi = 0;
+
+	if (!v || !strncmp(v, "OpenGL ES", 9))
+		return 0;
+	ma = atoi(v);
+	while (*v && *v != '.')
+		v++;
+	if (*v == '.')
+		mi = atoi(v + 1);
+	return ma > major || (ma == major && mi >= minor);
+}
+
 static void pixstore(int mode, struct gb_pixstore *ps)
 {
 	int pack = mode == GB_PM_PACK, fl = flavor();
@@ -73,6 +92,21 @@ static void pixstore(int mode, struct gb_pixstore *ps)
 		ps->image_height = geti(pack ? 0x806C : 0x806E);
 		ps->skip_images = geti(pack ? 0x806B : 0x806D);
 	}
+	if (!pack && fl == FL_DESKTOP && desktop_at_least(4, 2)) {
+		/* ARB_compressed_texture_pixel_storage (core in 4.2) */
+		ps->cb_width = geti(0x9127);
+		ps->cb_height = geti(0x9128);
+		ps->cb_depth = geti(0x9129);
+		ps->cb_size = geti(0x912A);
+	}
+}
+
+int64_t gb_sv_compressed_bytes(int64_t size, int64_t w, int64_t h, int64_t d)
+{
+	struct gb_pixstore ps;
+
+	pixstore(GB_PM_UNPACK, &ps);
+	return gb_compressed_bytes(size, w, h, d, &ps);
 }
 
 int64_t gb_sv_pixel_bytes(int mode, uint32_t format, uint32_t type, int64_t w,
@@ -384,6 +418,41 @@ int64_t gb_sv_sz_uniformblock(struct gb_sth *t, int wsz, uint32_t program,
 	if (!fn_glGetActiveUniformBlockiv)
 		return -1;
 	fn_glGetActiveUniformBlockiv(program, block, 0x8A42, &n);
+	return n < 0 ? -1 : (int64_t)n * wsz;
+}
+
+int64_t gb_sv_sz_subr_uniform(struct gb_sth *t, int wsz, uint32_t program,
+			      uint32_t shadertype, uint32_t index,
+			      uint32_t pname)
+{
+	GB_NATIVE(glGetActiveSubroutineUniformiv, void,
+		  (GLuint, GLenum, GLuint, GLenum, GLint *));
+	GLint n = 0;
+
+	if (pname != 0x8E4B /* COMPATIBLE_SUBROUTINES */)
+		return wsz;
+	if (!fn_glGetActiveSubroutineUniformiv)
+		return -1;
+	fn_glGetActiveSubroutineUniformiv(program, shadertype, index,
+					  0x8E4A /* NUM_COMPATIBLE_SUBROUTINES */,
+					  &n);
+	return n < 0 ? -1 : (int64_t)n * wsz;
+}
+
+int64_t gb_sv_sz_atomic_buf(struct gb_sth *t, int wsz, uint32_t program,
+			    uint32_t buffer, uint32_t pname)
+{
+	GB_NATIVE(glGetActiveAtomicCounterBufferiv, void,
+		  (GLuint, GLuint, GLenum, GLint *));
+	GLint n = 0;
+
+	if (pname != 0x92C6 /* ACTIVE_ATOMIC_COUNTER_INDICES */)
+		return wsz;
+	if (!fn_glGetActiveAtomicCounterBufferiv)
+		return -1;
+	fn_glGetActiveAtomicCounterBufferiv(program, buffer,
+					    0x92C5 /* ACTIVE_ATOMIC_COUNTERS */,
+					    &n);
 	return n < 0 ? -1 : (int64_t)n * wsz;
 }
 

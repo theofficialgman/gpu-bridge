@@ -572,8 +572,6 @@ static void h_buffer_read(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		goto bad;
 
 	GB_NATIVE(glGetBufferSubData, void, (GLenum, GLintptr, GLsizeiptr, void *));
-	GB_NATIVE(glGetNamedBufferSubData, void,
-		  (GLuint, GLintptr, GLsizeiptr, void *));
 	GB_NATIVE(glMapBufferRange, void *,
 		  (GLenum, GLintptr, GLsizeiptr, GLbitfield));
 	GB_NATIVE(glUnmapBuffer, GLboolean, (GLenum));
@@ -583,29 +581,36 @@ static void h_buffer_read(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	/* by the version string: an EGL context may be desktop GL */
 	int es = gb_sv_ctx_is_es();
 
-	if (!es && mode == 1 && fn_glGetNamedBufferSubData) {
-		fn_glGetNamedBufferSubData(id, (GLintptr)off, (GLsizeiptr)len,
-					   buf);
-	} else {
+	{
 		GLenum tg = id;
 		GLint prev = 0;
+		const void *p = NULL;
+		struct gb_errs e0, e1;
 
 		if (mode == 1) {
+			/* named buffer: bind it to a scratch target (also what
+			 * a map needs on a context without the DSA entries) */
 			prev = scratch_bind(id);
 			tg = GB_COPY_READ_BUFFER;
 		}
-		if (!es && fn_glGetBufferSubData) {
+		/* A READ mapping waits for the GPU work that writes the buffer
+		 * (shader stores, transform feedback); glGetBufferSubData may
+		 * not. It is refused for immutable storage without MAP_READ,
+		 * then the error is dropped and the sub-data read is used. */
+		gb_sv_err_pop(&e0);
+		if (fn_glMapBufferRange && fn_glUnmapBuffer)
+			p = fn_glMapBufferRange(tg, (GLintptr)off,
+						(GLsizeiptr)len,
+						0x0001 /* MAP_READ_BIT */);
+		if (p) {
+			memcpy(buf, p, (size_t)len);
+			fn_glUnmapBuffer(tg);
+		} else if (!es && fn_glGetBufferSubData) {
 			fn_glGetBufferSubData(tg, (GLintptr)off, (GLsizeiptr)len,
 					      buf);
-		} else if (fn_glMapBufferRange && fn_glUnmapBuffer) {
-			const void *p = fn_glMapBufferRange(tg, (GLintptr)off,
-							    (GLsizeiptr)len,
-							    0x0001 /* READ */);
-			if (p) {
-				memcpy(buf, p, (size_t)len);
-				fn_glUnmapBuffer(tg);
-			}
 		}
+		gb_sv_err_pop(&e1); /* ours: the app must not see them */
+		gb_sv_err_raise(&e0);
 		if (mode == 1)
 			scratch_restore(prev);
 	}
@@ -621,6 +626,68 @@ static void h_buffer_read(struct gb_sth *t, const struct gb_cmd_hdr *h,
 			memcpy(gb_w_blob(&w, (uint32_t)len), buf, (size_t)len);
 			gb_sv_reply_end(t, &o);
 		}
+	}
+	return;
+bad:
+	gb_sv_proto_error(t, h);
+}
+
+/*
+ * MultiDrawElements: one real multi-draw over a bound element buffer (the
+ * client expands the cases that involve client memory). Layout: see
+ * multidraw_elements_wire() in the client.
+ */
+static void h_multidraw_elements(struct gb_sth *t, const struct gb_cmd_hdr *h,
+				 struct gb_r *r)
+{
+	uint32_t mode = gb_r_u32(r), type = gb_r_u32(r), n = gb_r_u32(r),
+		 flags = gb_r_u32(r);
+	const int32_t *counts, *bv = NULL;
+	const uint64_t *offs;
+
+	if (r->err || n == 0 || n > 65536 || flags > 1)
+		goto bad;
+	counts = gb_r_blob(r, 4u * n);
+	if (flags)
+		bv = gb_r_blob(r, 4u * n);
+	offs = gb_r_blob(r, 8u * n);
+	if (r->err || !counts || (flags && !bv) || !offs)
+		goto bad;
+
+	GB_NATIVE(glMultiDrawElements, void,
+		  (GLenum, const GLsizei *, GLenum, const void *const *, GLsizei));
+	GB_NATIVE(glMultiDrawElementsEXT, void,
+		  (GLenum, const GLsizei *, GLenum, const void *const *, GLsizei));
+	GB_NATIVE(glMultiDrawElementsBaseVertex, void,
+		  (GLenum, const GLsizei *, GLenum, const void *const *, GLsizei,
+		   const GLint *));
+	GB_NATIVE(glMultiDrawElementsBaseVertexEXT, void,
+		  (GLenum, const GLsizei *, GLenum, const void *const *, GLsizei,
+		   const GLint *));
+	GB_NATIVE(glMultiDrawElementsBaseVertexOES, void,
+		  (GLenum, const GLsizei *, GLenum, const void *const *, GLsizei,
+		   const GLint *));
+	const void **ind = gb_tmp(t, sizeof(void *) * n + 8);
+
+	if (!ind)
+		goto bad;
+	for (uint32_t i = 0; i < n; i++)
+		ind[i] = (const void *)(uintptr_t)offs[i];
+	if (!flags) {
+		if (fn_glMultiDrawElements)
+			fn_glMultiDrawElements(mode, counts, type, ind, (GLsizei)n);
+		else if (fn_glMultiDrawElementsEXT)
+			fn_glMultiDrawElementsEXT(mode, counts, type, ind,
+						  (GLsizei)n);
+	} else if (fn_glMultiDrawElementsBaseVertex) {
+		fn_glMultiDrawElementsBaseVertex(mode, counts, type, ind,
+						 (GLsizei)n, bv);
+	} else if (fn_glMultiDrawElementsBaseVertexEXT) {
+		fn_glMultiDrawElementsBaseVertexEXT(mode, counts, type, ind,
+						    (GLsizei)n, bv);
+	} else if (fn_glMultiDrawElementsBaseVertexOES) {
+		fn_glMultiDrawElementsBaseVertexOES(mode, counts, type, ind,
+						    (GLsizei)n, bv);
 	}
 	return;
 bad:
@@ -1817,6 +1884,7 @@ void gb_srv_manual_dispatch(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	case GB_OPX_ElementMax: h_element_max(t, h, r); break;
 	case GB_OPX_BufferWrite: h_buffer_write(t, h, r); break;
 	case GB_OPX_GetPointer: h_get_pointer(t, h, r); break;
+	case GB_OPX_MultiDrawElements: h_multidraw_elements(t, h, r); break;
 	case GB_OPX_EglDevice: h_egl_device(t, h, r); break;
 	case GB_OPX_Ping: h_ping(t, h, r); break;
 	case GB_OPX_BlobFuncs: h_blob_funcs(t, h, r); break;

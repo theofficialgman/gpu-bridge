@@ -418,6 +418,56 @@ static void test_map_rules(void)
 	glDeleteBuffers(1, &b);
 }
 
+/* compressed upload out of a larger cuboid: the driver reads past imageSize
+ * (CTS pixelstoragemodes.compressedteximage2d) */
+static void test_compressed_block_unpack(void)
+{
+	enum { BS = 8 };               /* DXT1: 4x4 texels in 8 bytes */
+	unsigned char src[16 * BS];    /* 16x16 texels = 4x4 blocks */
+	unsigned char back[4 * BS];    /* 8x8 texels = 2x2 blocks */
+	GLuint tex;
+	GLint w = 0;
+	int bad = 0;
+
+	if (!have_ext("GL_EXT_texture_compression_s3tc") ||
+	    (!have_ext("GL_ARB_compressed_texture_pixel_storage") &&
+	     atof((const char *)glGetString(GL_VERSION)) < 4.2)) {
+		printf("  (compressed block unpack: not supported, skipped)\n");
+		return;
+	}
+	for (int i = 0; i < 16 * BS; i++)
+		src[i] = (unsigned char)(i + 1);
+	glGenTextures(1, &tex);
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glPixelStorei(GL_UNPACK_COMPRESSED_BLOCK_WIDTH, 4);
+	glPixelStorei(GL_UNPACK_COMPRESSED_BLOCK_HEIGHT, 4);
+	glPixelStorei(GL_UNPACK_COMPRESSED_BLOCK_SIZE, BS);
+	glPixelStorei(GL_UNPACK_ROW_LENGTH, 16);
+	glPixelStorei(GL_UNPACK_SKIP_PIXELS, 4);
+	glPixelStorei(GL_UNPACK_SKIP_ROWS, 4);
+	/* the 8x8 sub-cuboid starts at block (1,1) of a 4x4-block image */
+	glCompressedTexImage2D(GL_TEXTURE_2D, 0, GL_COMPRESSED_RGB_S3TC_DXT1_EXT,
+			       8, 8, 0, 4 * BS, src);
+	glPixelStorei(GL_UNPACK_COMPRESSED_BLOCK_WIDTH, 0);
+	glPixelStorei(GL_UNPACK_COMPRESSED_BLOCK_HEIGHT, 0);
+	glPixelStorei(GL_UNPACK_COMPRESSED_BLOCK_SIZE, 0);
+	glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+	glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+	glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+	EXPECT_ERR(GL_NO_ERROR, "compressed upload with block state");
+	glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &w);
+	CHECK(w == 8, "width %d", w);
+	memset(back, 0, sizeof back);
+	glGetCompressedTexImage(GL_TEXTURE_2D, 0, back);
+	for (int by = 0; by < 2; by++)
+		for (int bx = 0; bx < 2; bx++)
+			if (memcmp(back + (by * 2 + bx) * BS,
+				   src + ((by + 1) * 4 + bx + 1) * BS, BS))
+				bad++;
+	CHECK(!bad, "%d of 4 blocks differ from the source sub-cuboid", bad);
+	glDeleteTextures(1, &tex);
+}
+
 static void test_persistent_map(void)
 {
 	GLuint b[2];
@@ -814,6 +864,7 @@ int main(void)
 	test_storage_map_matrix();
 	test_persistent_rebind();
 	test_map_rules();
+	test_compressed_block_unpack();
 	test_persistent_map();
 	test_debug_groups();
 	test_attrib_errors();

@@ -169,9 +169,22 @@ int64_t gb_sv_sz_uniformblock(struct gb_sth *t, int wsz, uint32_t program,
 			      uint32_t block, uint32_t pname);
 int64_t gb_sv_sz_progstring(struct gb_sth *t, uint32_t target,
 			    uint32_t pname);
+int64_t gb_sv_sz_subr_uniform(struct gb_sth *t, int wsz, uint32_t program,
+			      uint32_t shadertype, uint32_t index,
+			      uint32_t pname);
+int64_t gb_sv_sz_atomic_buf(struct gb_sth *t, int wsz, uint32_t program,
+			    uint32_t buffer, uint32_t pname);
 
 #define GB_COUNT_PNAME(op, cls, pname) \
 	gb_pname_count_class((cls), (uint32_t)(pname), gb_sv_geti, NULL)
+int64_t gb_sv_compressed_bytes(int64_t size, int64_t w, int64_t h, int64_t d);
+#define GB_BYTES_cbytes1(m, sz, w) \
+	gb_sv_compressed_bytes((int64_t)(sz), (int64_t)(w), 1, 1)
+#define GB_BYTES_cbytes2(m, sz, w, h) \
+	gb_sv_compressed_bytes((int64_t)(sz), (int64_t)(w), (int64_t)(h), 1)
+#define GB_BYTES_cbytes3(m, sz, w, h, d) \
+	gb_sv_compressed_bytes((int64_t)(sz), (int64_t)(w), (int64_t)(h), \
+			       (int64_t)(d))
 #define GB_BYTES_pixels1(m, f, t, w) \
 	gb_sv_pixel_bytes((m), (uint32_t)(f), (uint32_t)(t), (int64_t)(w), 1, GB_DEPTH_2D)
 #define GB_BYTES_pixels1t(m, tg, f, t, w) \
@@ -218,6 +231,10 @@ int64_t gb_sv_sz_progstring(struct gb_sth *t, uint32_t target,
 	gb_sv_sz_uniformblock((t), (wsz), (p), (b), (pn))
 #define GB_SZS_progstring(t, op, wsz, tg, pn) \
 	gb_sv_sz_progstring((t), (tg), (pn))
+#define GB_SZS_subr_uniform(t, op, wsz, p, st, i, pn) \
+	gb_sv_sz_subr_uniform((t), (wsz), (p), (st), (i), (pn))
+#define GB_SZS_atomic_buf(t, op, wsz, p, b, pn) \
+	gb_sv_sz_atomic_buf((t), (wsz), (p), (b), (pn))
 
 static inline int64_t gb_capcount(int64_t n)
 {

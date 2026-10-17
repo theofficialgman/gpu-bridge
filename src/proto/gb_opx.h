@@ -50,6 +50,7 @@ enum gb_opx {
 	GB_OPX_ElementMax,        /* itype, count, byte off -> max index (i64, -1 = out of range) */
 	GB_OPX_BufferWrite,       /* mode, target|buffer, off64, len64, bytes (async) */
 	GB_OPX_GetPointer,        /* kind, a, b, c -> pointer-sized value (driver's) */
+	GB_OPX_MultiDrawElements, /* mode, type, n, flags, counts[], basevertex[], offsets[] (async) */
 	GB_OPX_END
 };
 

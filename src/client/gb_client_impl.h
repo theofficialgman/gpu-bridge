@@ -306,6 +306,15 @@ int64_t gb_cl_bitmap_bytes(int mode, int64_t w, int64_t h);
 #define GB_BYTES_pixels1t(m, tg, f, t, w) \
 	gb_cl_pixel_bytes((m), (uint32_t)(f), (uint32_t)(t), (int64_t)(w), 1, \
 			  GB_DEPTH_2D)
+/* compressed uploads: imageSize, or the span of the larger source cuboid */
+int64_t gb_cl_compressed_bytes(int64_t size, int64_t w, int64_t h, int64_t d);
+#define GB_BYTES_cbytes1(m, sz, w) \
+	gb_cl_compressed_bytes((int64_t)(sz), (int64_t)(w), 1, 1)
+#define GB_BYTES_cbytes2(m, sz, w, h) \
+	gb_cl_compressed_bytes((int64_t)(sz), (int64_t)(w), (int64_t)(h), 1)
+#define GB_BYTES_cbytes3(m, sz, w, h, d) \
+	gb_cl_compressed_bytes((int64_t)(sz), (int64_t)(w), (int64_t)(h), \
+			       (int64_t)(d))
 #define GB_BYTES_pixels2(m, f, t, w, h) \
 	gb_cl_pixel_bytes((m), (uint32_t)(f), (uint32_t)(t), (int64_t)(w), \
 			  (int64_t)(h), GB_DEPTH_2D)

@@ -305,6 +305,13 @@ int64_t gb_cl_pixel_bytes(int mode, uint32_t format, uint32_t type, int64_t w,
 	return gb_pixel_bytes3(format, type, w, h, d, ps);
 }
 
+int64_t gb_cl_compressed_bytes(int64_t size, int64_t w, int64_t h, int64_t d)
+{
+	struct gb_ctxstate *st = gb_cur_state();
+
+	return st ? gb_compressed_bytes(size, w, h, d, &st->unpack) : size;
+}
+
 int64_t gb_cl_bitmap_bytes(int mode, int64_t w, int64_t h)
 {
 	static const struct gb_pixstore def = { 4, 0, 0, 0, 0, 0 };
@@ -857,15 +864,36 @@ attrs:;
 #define GL_PIXEL_UNPACK_BUFFER_ 0x88EC
 #define GL_NUM_EXTENSIONS_ 0x821D
 
-GB_API GLenum glGetError(void)
+static GLenum get_error_raw(void)
 {
 	struct gb_cl *cx = gb_cl_get();
 	if (cx && cx->gl_error) {
-		GLenum e = cx->gl_error;
+		GLenum e = cx->gl_error, d;
+
 		cx->gl_error = 0;
+		/* The driver may have raised the same error for the same call
+		 * (we forward calls whose error we also detect locally). A GL
+		 * keeps one flag per code: report it once. A different code
+		 * the driver holds is reported by the next call. */
+		for (int i = 0; i < 8; i++) {
+			d = gbx_glGetError();
+			if (d != e)
+				break;
+		}
+		if (d && d != e)
+			cx->gl_error = d;
 		return e;
 	}
 	return gbx_glGetError();
+}
+
+GB_API GLenum glGetError(void)
+{
+	GLenum e = get_error_raw();
+
+	if (getenv("GB_TRACE_OPS"))
+		fprintf(stderr, "c: glGetError -> %#x\n", e);
+	return e;
 }
 
 /*
@@ -1134,6 +1162,12 @@ GB_API void glPixelStorei(GLenum pname, GLint param)
 		int ok_align = param == 1 || param == 2 || param == 4 || param == 8;
 		int ok = param >= 0;
 		switch (pname) {
+#ifdef GB_LIB_GL
+		case 0x9127: if (ok) st->unpack.cb_width = param; break;
+		case 0x9128: if (ok) st->unpack.cb_height = param; break;
+		case 0x9129: if (ok) st->unpack.cb_depth = param; break;
+		case 0x912A: if (ok) st->unpack.cb_size = param; break;
+#endif
 		case 0x0CF5: if (ok_align) st->unpack.alignment = param; break;
 		case 0x0D05: if (ok_align) st->pack.alignment = param; break;
 		case 0x0CF2: if (ok) st->unpack.row_length = param; break;
@@ -1305,6 +1339,23 @@ GB_API void glDrawRangeElements(GLenum mode, GLuint start, GLuint end,
 }
 
 /* OES_vertex_array_object spells these differently. */
+#ifdef GB_LIB_GL
+/* DSA: the element buffer of a vertex array object that need not be bound.
+ * The shadow must know it, or indices would be taken for client memory. */
+GB_API void glVertexArrayElementBuffer(GLuint vaobj, GLuint buffer)
+{
+	struct gb_ctxstate *st = gb_cur_state();
+
+	if (st && vaobj) {
+		struct gb_vao *v = vao_get(st, vaobj, 1);
+
+		if (v)
+			v->element_buffer = buffer;
+	}
+	gbx_glVertexArrayElementBuffer(vaobj, buffer);
+}
+#endif
+
 GB_API void glBindVertexArrayOES(GLuint array)
 {
 	struct gb_ctxstate *st = gb_cur_state();
@@ -1957,7 +2008,8 @@ GB_API void glDrawArraysIndirect(GLenum mode, const void *indirect)
 			gbx_glDrawArraysIndirect(mode, indirect);
 		return;
 	}
-	if (gb_cl_es3_context(st)) { /* ES has no client-memory command structures */
+	/* ES and core profiles have no client-memory command structures */
+	if (gb_cl_es3_context(st) || ctx_is_core(st)) {
 		gb_cl_gl_error(0x0502);
 		return;
 	}
@@ -1978,7 +2030,7 @@ GB_API void glDrawElementsIndirect(GLenum mode, GLenum type,
 			gbx_glDrawElementsIndirect(mode, type, indirect);
 		return;
 	}
-	if (gb_cl_es3_context(st)) {
+	if (gb_cl_es3_context(st) || ctx_is_core(st)) {
 		gb_cl_gl_error(0x0502);
 		return;
 	}
@@ -1999,7 +2051,7 @@ GB_API void glMultiDrawArraysIndirect(GLenum mode, const void *indirect,
 						      stride);
 		return;
 	}
-	if (gb_cl_es3_context(st)) {
+	if (gb_cl_es3_context(st) || ctx_is_core(st)) {
 		gb_cl_gl_error(0x0502);
 		return;
 	}
@@ -2022,7 +2074,7 @@ GB_API void glMultiDrawElementsIndirect(GLenum mode, GLenum type,
 							drawcount, stride);
 		return;
 	}
-	if (gb_cl_es3_context(st)) {
+	if (gb_cl_es3_context(st) || ctx_is_core(st)) {
 		gb_cl_gl_error(0x0502);
 		return;
 	}
@@ -2125,12 +2177,72 @@ GB_API void glMultiDrawArrays(GLenum mode, const GLint *first,
 	gbx_glMultiDrawArrays(mode, first, count, drawcount);
 }
 
+/*
+ * Indices in a bound element buffer and no client-memory attributes: send one
+ * real multi-draw, so gl_DrawID counts the draws as the application expects.
+ * Wire (GB_OPX_MultiDrawElements): u32 mode, type, n, flags (1: basevertex
+ * array follows), i32 counts[n], [i32 basevertex[n]], u64 offsets[n].
+ * Returns 0 if the draws need the expansion path (client memory involved).
+ */
+static int multidraw_elements_wire(struct gb_ctxstate *st, GLenum mode,
+				   const GLsizei *count, GLenum type,
+				   const void *const *indices, GLsizei drawcount,
+				   const GLint *basevertex)
+{
+	struct gb_cl *cx = gb_cl_get();
+	struct gb_out o;
+	struct gb_w w;
+
+	if (!st || !cx || st->in_begin || drawcount <= 0 || drawcount > 65536 ||
+	    !count || !indices || !st->vao->element_buffer)
+		return 0;
+	for (int i = 0; i < CA_COUNT; i++)
+		if (is_client_array(&st->vao->a[i]))
+			return 0;
+	uint32_t n = (uint32_t)drawcount;
+	uint32_t sz = GB_ALIGN_UP(32u + 4u * n + (basevertex ? 4u * n : 0), 8u) +
+		      8u * n;
+
+	if (gb_cl_msg_begin(cx, &o, &w, GB_OPX_MultiDrawElements, sz, 0))
+		return 1;
+	gb_w_u32(&w, mode);
+	gb_w_u32(&w, type);
+	gb_w_u32(&w, n);
+	gb_w_u32(&w, basevertex ? 1u : 0u);
+	for (uint32_t i = 0; i < n; i++)
+		gb_w_u32(&w, (uint32_t)count[i]);
+	if (basevertex)
+		for (uint32_t i = 0; i < n; i++)
+			gb_w_u32(&w, (uint32_t)basevertex[i]);
+	for (uint32_t i = 0; i < n; i++)
+		gb_w_u64(&w, (uint64_t)(uintptr_t)indices[i]);
+	gb_cl_end(cx, &o);
+	return 1;
+}
+
+/* Errors the driver raises before it reads any argument array. */
+static int multidraw_elements_enums_ok(GLenum mode, GLenum type)
+{
+	if (mode > 0xE || (type != 0x1401 && type != 0x1403 && type != 0x1405)) {
+		gb_cl_gl_error(0x0500);
+		return 0;
+	}
+	return 1;
+}
+
 GB_API void glMultiDrawElements(GLenum mode, const GLsizei *count, GLenum type,
 				const void *const *indices, GLsizei drawcount)
 {
+	struct gb_ctxstate *st = gb_cur_state_raw();
+
+	if (!multidraw_elements_enums_ok(mode, type))
+		return;
 	if (!multidraw_counts_ok(drawcount, count))
 		return;
 	if (!count || !indices)
+		return;
+	if (multidraw_elements_wire(st, mode, count, type, indices, drawcount,
+				    NULL))
 		return;
 	for (GLsizei i = 0; i < drawcount; i++)
 		glDrawElements(mode, count[i], type, indices[i]);
@@ -2149,9 +2261,16 @@ GB_API void glMultiDrawElementsBaseVertex(GLenum mode, const GLsizei *count,
 					  GLsizei drawcount,
 					  const GLint *basevertex)
 {
+	struct gb_ctxstate *st = gb_cur_state_raw();
+
+	if (!multidraw_elements_enums_ok(mode, type))
+		return;
 	if (!multidraw_counts_ok(drawcount, count))
 		return;
 	if (!count || !indices || !basevertex)
+		return;
+	if (multidraw_elements_wire(st, mode, count, type, indices, drawcount,
+				    basevertex))
 		return;
 	for (GLsizei i = 0; i < drawcount; i++)
 		glDrawElementsBaseVertex(mode, count[i], type, indices[i],

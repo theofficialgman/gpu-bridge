@@ -17,6 +17,7 @@
  * rather than silently going stale.
  */
 #define _GNU_SOURCE
+#include <pthread.h>
 #include <stdio.h>
 
 #include "gb_client_impl.h"
@@ -281,8 +282,10 @@ static void *do_map(uint32_t target, uint32_t named, int64_t offset,
 		offset = 0;
 		length = size;
 	}
-	if (!whole && length == 0 && offset >= 0 && gb_cl_es3_context(st)) {
-		/* ES: a zero length is an operation error, GL: a value error */
+	if (!whole && length == 0 && offset >= 0 &&
+	    (gb_cl_es3_context(st) || ctx_has_buffer_storage())) {
+		/* ES and GL 4.4+: a zero length is an operation error (older
+		 * GL: a value error) */
 		gb_cl_gl_error(0x0502);
 		return NULL;
 	}
@@ -399,6 +402,27 @@ static void *do_map(uint32_t target, uint32_t named, int64_t offset,
 	return shadow;
 }
 
+/* Applications read a mapping after glUnmapBuffer (undefined, but drivers
+ * leave the memory readable, and conformance tests rely on it). Keep the
+ * last few unmapped shadows around instead of freeing them at once. */
+#define GB_RETIRED 8
+static void *g_retired[GB_RETIRED];
+static unsigned g_retired_next;
+static pthread_mutex_t g_retired_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static void retire_shadow(void *alloc)
+{
+	void *old;
+
+	if (!alloc)
+		return;
+	pthread_mutex_lock(&g_retired_mu);
+	old = g_retired[g_retired_next % GB_RETIRED];
+	g_retired[g_retired_next++ % GB_RETIRED] = alloc;
+	pthread_mutex_unlock(&g_retired_mu);
+	free(old);
+}
+
 static GLboolean do_unmap(uint32_t target, uint32_t named)
 {
 	struct gb_ctxstate *st = gb_cur_state_raw();
@@ -429,7 +453,7 @@ static GLboolean do_unmap(uint32_t target, uint32_t named)
 	} else if ((m->flags & MAP_WRITE) && !(m->flags & MAP_FLUSH_EXPLICIT)) {
 		buffer_write(m, 0, m->shadow, m->length);
 	}
-	free(m->alloc);
+	retire_shadow(m->alloc);
 	memset(m, 0, sizeof(*m));
 	return GL_TRUE;
 }

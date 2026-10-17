@@ -188,6 +188,8 @@ _ARRAY_STATE = {
     "glEnableVertexAttribArray", "glDisableVertexAttribArray",
     "glEnableVertexAttribArrayARB", "glDisableVertexAttribArrayARB",
     "glBindVertexArray", "glBindVertexArrayOES", "glDeleteVertexArrays",
+    # DSA: the element buffer lives in the shadow VAO too
+    "glVertexArrayElementBuffer",
     "glDeleteVertexArraysOES", "glVertexAttribDivisor",
     "glVertexAttribDivisorARB",
     "glPixelStorei", "glGetError", "glGetIntegerv",
@@ -441,6 +443,18 @@ COMPSIZE = {
     ("target", "ustride", "uorder", "vstride", "vorder"): "map2",
 }
 
+# Compressed uploads read their data out of a larger cuboid when the unpack
+# compressed-block state is set: the length is the span, not imageSize.
+for _pre in ("Tex", "Texture", "MultiTex"):
+    for _sub in ("", "Sub"):
+        for _n in (1, 2, 3):
+            _dims = ("width", "height", "depth")[:_n]
+            COMPSIZE[("imageSize",) + _dims] = "cbytes%d" % _n
+            for _suf in ("", "ARB", "EXT"):
+                LEN_OVERRIDES[("glCompressed%s%sImage%dD%s" %
+                               (_pre, _sub, _n, _suf), "data")] = \
+                    "COMPSIZE(imageSize,%s)" % ",".join(_dims)
+
 # Arrays whose element count only the *server* can know (it holds the GL
 # state): the reply carries the byte length and the client copies exactly
 # that. (regex, key, candidate argument-name lists)
@@ -474,6 +488,10 @@ SERVER_SIZED = [
     (r"^glGet(n)?Map(d|f|i)v(ARB)?$", "map", [["target", "query"]]),
     (r"^glGetActiveUniformBlockiv$", "uniformblock",
      [["program", "uniformBlockIndex", "pname"]]),
+    (r"^glGetActiveSubroutineUniformiv$", "subr_uniform",
+     [["program", "shadertype", "index", "pname"]]),
+    (r"^glGetActiveAtomicCounterBufferiv$", "atomic_buf",
+     [["program", "bufferIndex", "pname"]]),
     (r"^glGetProgramStringARB$", "progstring", [["target", "pname"]]),
 ]
 

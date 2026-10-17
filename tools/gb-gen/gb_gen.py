@@ -1089,6 +1089,13 @@ def emit_server(cmd, opname):
     if cmd.api == "egl":
         # an EGL call we could not size: EGL_BAD_PARAMETER, not a GL error
         L.append("\tif (__skip) gb_sv_raise_egl_param();")
+    elif (not enum_err and not op_err and
+          any(p["k"][0] == "arr_in" and p["k"][5] == "unpack" for p in P) and
+          {"format", "type"} <= set(names)):
+        # a pixel upload we could not size: an unknown format or type is an
+        # enum error, anything else (dimensions) a value error
+        L.append("\tif (__skip) { if (!gb_pixel_enums_ok(a_format, a_type)) "
+                 "gb_sv_raise_enum(); else gb_sv_raise_invalid(); }")
     else:
         L.append("\tif (__skip) gb_sv_raise_%s();" %
                  ("enum" if enum_err else "operation" if op_err

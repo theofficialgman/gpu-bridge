@@ -278,10 +278,23 @@ struct gb_pixstore {
 	int skip_rows;
 	int image_height;  /* 0 = use height (3D) */
 	int skip_images;
+	/* ARB_compressed_texture_pixel_storage (unpack side; all 0 = off) */
+	int cb_width, cb_height, cb_depth, cb_size;
 };
 
 static inline int64_t gb_bitmap_bytes(int64_t w, int64_t h,
 				      const struct gb_pixstore *ps);
+
+/* Are format and type known pixel-transfer enums? An unknown one is the
+ * driver's INVALID_ENUM, not a size problem. */
+static inline int gb_pixel_enums_ok(uint32_t format, uint32_t type)
+{
+	if (type == 0x1A00) /* GL_BITMAP */
+		return format == 0x1900 || format == 0x1901;
+	if (gb_packed_type_bytes(type))
+		return gb_format_components(format) >= 0;
+	return gb_type_bytes(type) >= 0 && gb_format_components(format) >= 0;
+}
 
 /* Bytes the driver will touch for a w*h rectangle, or -1 if unknown. */
 static inline int64_t gb_pixel_bytes(uint32_t format, uint32_t type, int64_t w,
@@ -402,6 +415,38 @@ static inline void gb_pixel_scatter(void *dst, const void *src, size_t len,
 	return;
 whole:
 	memcpy(dst, src, len);
+}
+
+/*
+ * Source span of a compressed upload. With the unpack block state set, the
+ * driver reads the sub-cuboid out of a larger one: rows of ceil(row_length /
+ * bw) blocks, `image_height` rows per image, skips counted in blocks. Without
+ * it the data is one contiguous imageSize bytes. Never less than imageSize.
+ */
+static inline int64_t gb_compressed_bytes(int64_t size, int64_t w, int64_t h,
+					  int64_t d, const struct gb_pixstore *ps)
+{
+	int64_t bw = ps->cb_width, bh = ps->cb_height, bd = ps->cb_depth ?
+		ps->cb_depth : 1, bs = ps->cb_size;
+
+	if (size < 0 || bw <= 0 || bh <= 0 || bs <= 0 || w <= 0 || h <= 0)
+		return size;
+	if (d <= 0)
+		d = 1;
+	if (w > (1 << 16) || h > (1 << 16) || d > (1 << 16))
+		return size;
+	int64_t rl = ps->row_length > 0 ? ps->row_length : w;
+	int64_t ih = ps->image_height > 0 ? ps->image_height : h;
+	int64_t row = ((rl + bw - 1) / bw) * bs;
+	int64_t image = ((ih + bh - 1) / bh) * row;
+	int64_t off = (int64_t)ps->skip_pixels / bw * bs +
+		      (int64_t)ps->skip_rows / bh * row +
+		      (int64_t)ps->skip_images / bd * image;
+	int64_t nx = (w + bw - 1) / bw, ny = (h + bh - 1) / bh,
+		nz = (d + bd - 1) / bd;
+	int64_t span = off + (nz - 1) * image + (ny - 1) * row + nx * bs;
+
+	return span > size ? span : size;
 }
 
 /* glBitmap / glPolygonStipple: 1 bit per pixel, rows padded to alignment. */
