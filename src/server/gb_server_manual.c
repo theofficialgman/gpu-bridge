@@ -537,7 +537,6 @@ static void h_buffer_read(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	    off > (1ull << 40) || mode > 1)
 		goto bad;
 
-	GB_NATIVE(eglGetCurrentContext, EGLContext, (void));
 	GB_NATIVE(glGetBufferSubData, void, (GLenum, GLintptr, GLsizeiptr, void *));
 	GB_NATIVE(glGetNamedBufferSubData, void,
 		  (GLuint, GLintptr, GLsizeiptr, void *));
@@ -547,9 +546,8 @@ static void h_buffer_read(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	void *buf = gb_tmp_zero(t, (size_t)len + 8);
 	if (!buf)
 		goto bad;
-	int es = (fn_eglGetCurrentContext &&
-		  fn_eglGetCurrentContext() != EGL_NO_CONTEXT) ||
-		 gb_sv_ctx_is_es();
+	/* by the version string: an EGL context may be desktop GL */
+	int es = gb_sv_ctx_is_es();
 
 	if (!es && mode == 0 && fn_glGetBufferSubData) {
 		fn_glGetBufferSubData(id, (GLintptr)off, (GLsizeiptr)len, buf);
@@ -1362,7 +1360,6 @@ static void h_element_max(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	GB_NATIVE(glMapBufferRange, void *,
 		  (GLenum, GLintptr, GLsizeiptr, GLbitfield));
 	GB_NATIVE(glUnmapBuffer, GLboolean, (GLenum));
-	GB_NATIVE(eglGetCurrentContext, EGLContext, (void));
 	uint64_t len = (uint64_t)count * (uint64_t)ib;
 	GLint size = 0;
 
@@ -1370,9 +1367,7 @@ static void h_element_max(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		fn_glGetBufferParameteriv(GL_ELEMENT_ARRAY_BUFFER,
 					  0x8764 /* BUFFER_SIZE */, &size);
 	if (size > 0 && off + len <= (uint64_t)size) {
-		int es = (fn_eglGetCurrentContext &&
-			  fn_eglGetCurrentContext() != EGL_NO_CONTEXT) ||
-			 gb_sv_ctx_is_es();
+		int es = gb_sv_ctx_is_es(); /* an EGL context may be desktop GL */
 		uint8_t *buf = gb_tmp(t, (size_t)len + 8);
 		const uint8_t *src = NULL;
 

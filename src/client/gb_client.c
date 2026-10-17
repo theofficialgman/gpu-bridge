@@ -673,12 +673,12 @@ void gb_cl_unsupported(const char *what)
 
 /* ---- locally generated errors / unsupported entry points -------------------- */
 
-void gb_cl_gl_error(uint32_t e)
+void gb_cl_gl_error_at(uint32_t e, const char *file, int line)
 {
 	struct gb_cl *cx = gb_cl_get();
 	if (getenv("GB_TRACE_OPS"))
-		fprintf(stderr, "c: local GL error %#x (pending %#x)\n", e,
-			cx ? cx->gl_error : 0);
+		fprintf(stderr, "c: local GL error %#x (pending %#x) at %s:%d\n",
+			e, cx ? cx->gl_error : 0, file, line);
 	if (cx && !cx->gl_error)
 		cx->gl_error = e;
 }

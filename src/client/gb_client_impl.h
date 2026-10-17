@@ -199,7 +199,9 @@ void gb_cl_unsupported_gl(const char *what);
 void gb_cl_unsupported_glx(const char *what);
 
 /* locally generated API errors (merged into glGetError / eglGetError) */
-void gb_cl_gl_error(uint32_t e);
+/* GB_TRACE_OPS=1 names the source line that raised a client-side error */
+void gb_cl_gl_error_at(uint32_t e, const char *file, int line);
+#define gb_cl_gl_error(e) gb_cl_gl_error_at((e), __FILE__, __LINE__)
 void gb_cl_egl_error(int32_t e);
 
 /* hand-written message helper: header written, cursor at the first field */

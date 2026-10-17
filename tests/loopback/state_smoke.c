@@ -287,6 +287,65 @@ static void test_pack_teximage(void)
 	glDeleteTextures(1, &tex);
 }
 
+/* every storage-flag / access combination of KHR-GL46.buffer_storage
+ * get_buffer_parameter: map, query the access flags, unmap */
+static void test_storage_map_matrix(void)
+{
+	static const GLbitfield mapbits[] = { 0, GL_MAP_PERSISTENT_BIT,
+		GL_MAP_COHERENT_BIT | GL_MAP_PERSISTENT_BIT };
+	unsigned char data[32] = { 0 };
+	int combos = 0, bad = 0;
+
+	if (!have_ext("GL_ARB_buffer_storage"))
+		return;
+	for (int dyn = 0; dyn < 2; dyn++)
+	for (int cl = 0; cl < 2; cl++)
+	for (int fi = 0; fi < 3; fi++)
+	for (int ai = 0; ai <= fi; ai++) {
+		GLbitfield base = (dyn ? GL_DYNAMIC_STORAGE_BIT : 0) |
+				  (cl ? GL_CLIENT_STORAGE_BIT : 0) | mapbits[fi];
+		GLbitfield fl[5] = { base | GL_MAP_READ_BIT,
+				     base | GL_MAP_WRITE_BIT,
+				     base | GL_MAP_READ_BIT | GL_MAP_WRITE_BIT,
+				     base | GL_MAP_READ_BIT | GL_MAP_WRITE_BIT,
+				     base | GL_MAP_READ_BIT | GL_MAP_WRITE_BIT };
+		GLbitfield ac[5] = { mapbits[ai] | GL_MAP_READ_BIT,
+				     mapbits[ai] | GL_MAP_WRITE_BIT,
+				     mapbits[ai] | GL_MAP_READ_BIT,
+				     mapbits[ai] | GL_MAP_WRITE_BIT,
+				     mapbits[ai] | GL_MAP_READ_BIT | GL_MAP_WRITE_BIT };
+		for (int k = 0; k < 5; k++) {
+			GLuint b;
+			void *p;
+			GLint q = -1, qf = -1;
+
+			glGenBuffers(1, &b);
+			glBindBuffer(GL_ARRAY_BUFFER, b);
+			glBufferStorage(GL_ARRAY_BUFFER, 32, data, fl[k]);
+			glGetBufferParameteriv(GL_ARRAY_BUFFER,
+					       GL_BUFFER_STORAGE_FLAGS, &qf);
+			p = glMapBufferRange(GL_ARRAY_BUFFER, 0, 32, ac[k]);
+			GLenum e = err();
+			combos++;
+			if (!p || e != GL_NO_ERROR || qf != (GLint)fl[k]) {
+				bad++;
+				if (bad < 6)
+					printf("  storage 0x%x (q 0x%x) access 0x%x -> %p err 0x%x\n",
+					       fl[k], qf, ac[k], p, e);
+			} else {
+				glGetBufferParameteriv(GL_ARRAY_BUFFER,
+						       GL_BUFFER_ACCESS_FLAGS, &q);
+				CHECK(q == (GLint)ac[k], "access flags 0x%x, wanted 0x%x",
+				      q, ac[k]);
+				glUnmapBuffer(GL_ARRAY_BUFFER);
+			}
+			glBindBuffer(GL_ARRAY_BUFFER, 0);
+			glDeleteBuffers(1, &b);
+		}
+	}
+	CHECK(!bad, "%d of %d map combinations failed", bad, combos);
+}
+
 static void test_persistent_map(void)
 {
 	GLuint b[2];
@@ -680,6 +739,7 @@ int main(void)
 	test_get_texture_sub_image();
 	test_pack_gaps();
 	test_pack_teximage();
+	test_storage_map_matrix();
 	test_persistent_map();
 	test_debug_groups();
 	test_attrib_errors();
