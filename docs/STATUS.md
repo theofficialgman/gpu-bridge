@@ -537,8 +537,10 @@ Setup lessons:
 Native baseline: ES 3.2 (EGL) 423,752 results, 1,625 Fail; GL 4.6 (EGL)
 950,784 results, 14,562 Fail.
 
-Bridged ES 3.2 vs native: 108 distinct cases differ out of ~188k results, and
-none is native-failing/bridged-passing. Remaining native-ok / bridged-not:
+### Bridged ES 3.2 vs native
+
+108 distinct cases differ out of ~188k results, and none is native-failing /
+bridged-passing. The native-ok / bridged-not ones:
 
 - 62 Pass -> QualityWarning (timing/precision-class), 35 Pass -> NotSupported
   (GLES1 not compiled into the armhf `x11_egl_glx` build, not a bridge issue).
@@ -549,8 +551,46 @@ none is native-failing/bridged-passing. Remaining native-ok / bridged-not:
 - 1 SSBO atomic case, 1 `draw_elements_base_vertex` overflow edge,
   1 `primitive_restart` ResourceError.
 
-Bridged GL 4.6 and the GLX passes (`x11_egl_glx`, `--deqp-gl-context-type=glx`)
-are in progress.
+### Bridged GL 4.6 vs native
+
+280,494 bridged results (configs 1, 2, 3, 28, 55 of the EGL run) compared
+case by case with the native run: 244,669 Pass/Pass, 22,204 NotSupported/
+NotSupported, 5,620 Fail/Fail (the driver's own failures), 7,819
+Pass->Fail, 72 Pass->InternalError, 62 Pass->QualityWarning, nothing the
+other way. 726 distinct cases differed (614 of them one test family). Each was
+re-run alone against the native driver; the real bugs found, all fixed
+(regression checks are in `tests/loopback/state_smoke.c`):
+
+- `glGetTexImage` and the DSA/multitexture variants returned the whole strided
+  region, zeroing the bytes `GL_PACK_ROW_LENGTH` leaves alone (614 cases of
+  `packed_pixels.varied_rectangle`). The reply now carries the transfer's
+  w/h/d and the client copies only the pixel rows (`gb_pixel_scatter`).
+- Buffer contents for client-side mappings were read as if every EGL context
+  were ES: a READ mapping (an error for write-only storage) and nothing at all
+  for named buffers. Detection is by version string now.
+- Mapped buffers: every map is checked against the immutable storage flags
+  (GL 4.4+, sparse buffers included); sub-data calls fail on a non-persistent
+  mapping only where their range crosses it; persistent mappings refresh and
+  upload by buffer name (the application may rebind the target); a zero-length
+  map is INVALID_OPERATION on GL 4.4+; unmapped shadows stay readable for a
+  while (CTS reads a mapping after `glUnmapBuffer`).
+- `glMultiDrawElements[BaseVertex]` over an element buffer was expanded into
+  single draws (wrong `gl_DrawID`); it is one real multi-draw now
+  (`OPX_MultiDrawElements`) and checks mode/type before anything else.
+- A GL keeps one error flag per code. The bridge reported
+  `VertexAttribPointer`-in-core plus a failing draw as two errors (client
+  and stash duplicates); duplicates are folded in the server stash and in
+  `glGetError`.
+- Core profiles reject client-memory indirect command structures; the shadow
+  VAO follows `glVertexArrayElementBuffer`.
+- Server-sized outputs added for `glGetActiveSubroutineUniformiv`
+  (COMPATIBLE_SUBROUTINES) and `glGetActiveAtomicCounterBufferiv`
+  (..._INDICES); an unknown pixel format/type on an upload is INVALID_ENUM.
+- Compressed uploads honor `GL_UNPACK_COMPRESSED_BLOCK_*` (the driver reads a
+  sub-cuboid out of a larger one, past `imageSize`).
+
+Still open: the 6 `GLES31.functional.debug` async-callback cases (limitation),
+the Pass->QualityWarning set (timing), and the EGL multithread crashes.
 
 ## Real applications
 

@@ -681,6 +681,20 @@ void gb_cl_gl_error_at(uint32_t e, const char *file, int line)
 			e, cx ? cx->gl_error : 0, file, line);
 	if (cx && !cx->gl_error)
 		cx->gl_error = e;
+	/* The driver never saw the call: have it raise the same error, so its
+	 * debug output (GL_KHR_debug) reports it as it would natively. Its
+	 * duplicate flag is folded into ours by glGetError. */
+	if (cx && (e == 0x0500 || e == 0x0501 || e == 0x0502) && !cx->in_raise) {
+		struct gb_out o;
+		struct gb_w w;
+
+		cx->in_raise = 1;
+		if (!gb_cl_msg_begin(cx, &o, &w, GB_OPX_RaiseError, 24, 0)) {
+			gb_w_u32(&w, e);
+			gb_cl_end(cx, &o);
+		}
+		cx->in_raise = 0;
+	}
 }
 
 void gb_cl_egl_error(int32_t e)

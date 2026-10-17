@@ -694,6 +694,29 @@ bad:
 	gb_sv_proto_error(t, h);
 }
 
+/*
+ * RaiseError: the client detected a GL error itself and the driver never saw
+ * the call. Raise the same error in the driver so its flag and debug output
+ * (GL_KHR_debug) match a native run. u32 error code (async).
+ */
+static void h_raise_error(struct gb_sth *t, const struct gb_cmd_hdr *h,
+			  struct gb_r *r)
+{
+	uint32_t e = gb_r_u32(r);
+
+	if (r->err)
+		goto bad;
+	switch (e) {
+	case 0x0500: gb_sv_raise_enum(); break;
+	case 0x0501: gb_sv_raise_invalid(); break;
+	case 0x0502: gb_sv_raise_operation(); break;
+	default: break;
+	}
+	return;
+bad:
+	gb_sv_proto_error(t, h);
+}
+
 /* ---- debug output upcalls (GL_KHR_debug / ARB_debug_output) ------------------------- */
 
 /* Native callback: may run on a driver thread. Queue; the worker delivers. */
@@ -1885,6 +1908,7 @@ void gb_srv_manual_dispatch(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	case GB_OPX_BufferWrite: h_buffer_write(t, h, r); break;
 	case GB_OPX_GetPointer: h_get_pointer(t, h, r); break;
 	case GB_OPX_MultiDrawElements: h_multidraw_elements(t, h, r); break;
+	case GB_OPX_RaiseError: h_raise_error(t, h, r); break;
 	case GB_OPX_EglDevice: h_egl_device(t, h, r); break;
 	case GB_OPX_Ping: h_ping(t, h, r); break;
 	case GB_OPX_BlobFuncs: h_blob_funcs(t, h, r); break;

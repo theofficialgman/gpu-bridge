@@ -165,6 +165,7 @@ struct gb_cl {
 	Display *cur_xdpy;          /* Display the current GLX context uses */
 	uint8_t in_upcall;          /* dispatching an upcall (no re-entrant poll) */
 	uint8_t sync_dbg;           /* make async calls synchronous (debug sync) */
+	uint8_t in_raise;           /* sending a GB_OPX_RaiseError */
 };
 
 struct gb_proc {

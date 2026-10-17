@@ -303,11 +303,16 @@ void gb_sv_raise_egl_param(void)
 
 void gb_sv_raise_operation(void)
 {
+	GB_NATIVE(glUnmapBuffer, GLboolean, (GLenum));
 	GB_NATIVE(glEndTransformFeedback, void, (void));
 	GB_NATIVE(glEndList, void, (void));
 
-	/* both are INVALID_OPERATION without an open feedback / list */
-	if (fn_glEndTransformFeedback)
+	/* Unmapping a buffer that is not mapped is INVALID_OPERATION and has no
+	 * effect (the server never leaves a buffer mapped). Ending a feedback
+	 * or list is the same error only when none is open. */
+	if (fn_glUnmapBuffer)
+		fn_glUnmapBuffer(0x8892 /* ARRAY_BUFFER */);
+	else if (fn_glEndTransformFeedback)
 		fn_glEndTransformFeedback();
 	else if (fn_glEndList)
 		fn_glEndList();
