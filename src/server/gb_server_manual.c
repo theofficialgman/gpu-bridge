@@ -472,6 +472,31 @@ bad:
  * Desktop GL: glGetBufferSubData / glGetNamedBufferSubData. ES has neither,
  * so a GL ES context reads through a transient READ mapping.
  */
+/* A buffer addressed by name on a context without the named-buffer entry
+ * points (ES, GL < 4.5): bind it to COPY_READ_BUFFER for the operation and put
+ * the application's binding back. */
+#define GB_COPY_READ_BUFFER 0x8F36
+static GLint scratch_bind(GLuint name)
+{
+	GB_NATIVE(glGetIntegerv, void, (GLenum, GLint *));
+	GB_NATIVE(glBindBuffer, void, (GLenum, GLuint));
+	GLint prev = 0;
+
+	if (fn_glGetIntegerv)
+		fn_glGetIntegerv(GB_COPY_READ_BUFFER, &prev);
+	if (fn_glBindBuffer)
+		fn_glBindBuffer(GB_COPY_READ_BUFFER, name);
+	return prev;
+}
+
+static void scratch_restore(GLint prev)
+{
+	GB_NATIVE(glBindBuffer, void, (GLenum, GLuint));
+
+	if (fn_glBindBuffer)
+		fn_glBindBuffer(GB_COPY_READ_BUFFER, (GLuint)prev);
+}
+
 /* Upload bytes into a buffer by mapping it: glBufferSubData is an error for
  * immutable storage created without GL_DYNAMIC_STORAGE_BIT, mapping is not. */
 static void h_buffer_write(struct gb_sth *t, const struct gb_cmd_hdr *h,
@@ -500,20 +525,10 @@ static void h_buffer_write(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		  (GLuint, GLintptr, GLsizeiptr, const void *));
 	void *p = NULL;
 
-	if (mode == 0 && fn_glMapBufferRange && fn_glUnmapBuffer) {
-		p = fn_glMapBufferRange(id, (GLintptr)off, (GLsizeiptr)len,
-					0x0002 /* MAP_WRITE_BIT */);
-		if (p) {
-			memcpy(p, data, (size_t)len);
-			fn_glUnmapBuffer(id);
-		} else if (fn_glBufferSubData) {
-			fn_glBufferSubData(id, (GLintptr)off, (GLsizeiptr)len,
-					   data);
-		}
-	} else if (mode == 1 && fn_glMapNamedBufferRange &&
-		   fn_glUnmapNamedBuffer) {
+	if (mode == 1 && fn_glMapNamedBufferRange && fn_glUnmapNamedBuffer &&
+	    !gb_sv_ctx_is_es()) {
 		p = fn_glMapNamedBufferRange(id, (GLintptr)off, (GLsizeiptr)len,
-					     0x0002);
+					     0x0002 /* MAP_WRITE_BIT */);
 		if (p) {
 			memcpy(p, data, (size_t)len);
 			fn_glUnmapNamedBuffer(id);
@@ -521,6 +536,25 @@ static void h_buffer_write(struct gb_sth *t, const struct gb_cmd_hdr *h,
 			fn_glNamedBufferSubData(id, (GLintptr)off,
 						(GLsizeiptr)len, data);
 		}
+	} else if (fn_glMapBufferRange && fn_glUnmapBuffer) {
+		GLenum tg = id;
+		GLint prev = 0;
+
+		if (mode == 1) {
+			prev = scratch_bind(id);
+			tg = GB_COPY_READ_BUFFER;
+		}
+		p = fn_glMapBufferRange(tg, (GLintptr)off, (GLsizeiptr)len,
+					0x0002 /* MAP_WRITE_BIT */);
+		if (p) {
+			memcpy(p, data, (size_t)len);
+			fn_glUnmapBuffer(tg);
+		} else if (fn_glBufferSubData) {
+			fn_glBufferSubData(tg, (GLintptr)off, (GLsizeiptr)len,
+					   data);
+		}
+		if (mode == 1)
+			scratch_restore(prev);
 	}
 	return;
 bad:
@@ -549,19 +583,31 @@ static void h_buffer_read(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	/* by the version string: an EGL context may be desktop GL */
 	int es = gb_sv_ctx_is_es();
 
-	if (!es && mode == 0 && fn_glGetBufferSubData) {
-		fn_glGetBufferSubData(id, (GLintptr)off, (GLsizeiptr)len, buf);
-	} else if (!es && mode == 1 && fn_glGetNamedBufferSubData) {
+	if (!es && mode == 1 && fn_glGetNamedBufferSubData) {
 		fn_glGetNamedBufferSubData(id, (GLintptr)off, (GLsizeiptr)len,
 					   buf);
-	} else if (mode == 0 && fn_glMapBufferRange && fn_glUnmapBuffer) {
-		const void *p = fn_glMapBufferRange(id, (GLintptr)off,
-						    (GLsizeiptr)len,
-						    0x0001 /* MAP_READ_BIT */);
-		if (p) {
-			memcpy(buf, p, (size_t)len);
-			fn_glUnmapBuffer(id);
+	} else {
+		GLenum tg = id;
+		GLint prev = 0;
+
+		if (mode == 1) {
+			prev = scratch_bind(id);
+			tg = GB_COPY_READ_BUFFER;
 		}
+		if (!es && fn_glGetBufferSubData) {
+			fn_glGetBufferSubData(tg, (GLintptr)off, (GLsizeiptr)len,
+					      buf);
+		} else if (fn_glMapBufferRange && fn_glUnmapBuffer) {
+			const void *p = fn_glMapBufferRange(tg, (GLintptr)off,
+							    (GLsizeiptr)len,
+							    0x0001 /* READ */);
+			if (p) {
+				memcpy(buf, p, (size_t)len);
+				fn_glUnmapBuffer(tg);
+			}
+		}
+		if (mode == 1)
+			scratch_restore(prev);
 	}
 
 	if (h->flags & GB_CMD_F_WANT_REPLY) {

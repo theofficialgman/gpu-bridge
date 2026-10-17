@@ -90,8 +90,10 @@ static void buffer_write(const struct gb_map *m, int64_t rel_off,
 	if (gb_cl_msg_begin(cx, &o, &w, GB_OPX_BufferWrite,
 			    GB_ALIGN_UP(40u, 8u) + (uint32_t)n, 0))
 		return;
-	gb_w_u32(&w, m->target ? 0u : 1u);
-	gb_w_u32(&w, m->target ? m->target : m->buffer);
+	/* by name: the application may rebind the target while the mapping
+	 * lives */
+	gb_w_u32(&w, 1u);
+	gb_w_u32(&w, m->buffer);
 	gb_w_u64(&w, (uint64_t)off);
 	gb_w_u64(&w, (uint64_t)n);
 	memcpy(gb_w_blob(&w, (uint32_t)n), p, (size_t)n);
@@ -174,8 +176,7 @@ static void persist_down_one(struct gb_map *m)
 	fresh = malloc((size_t)n);
 	if (!fresh)
 		return;
-	if (buffer_read(m->target == 0, m->target ? m->target : m->buffer,
-			m->offset, n, fresh)) {
+	if (buffer_read(1, m->buffer, m->offset, n, fresh)) {
 		free(fresh);
 		return;
 	}
@@ -227,6 +228,22 @@ static int target_valid(uint32_t t)
 	default:
 		return 0;
 	}
+}
+
+/* Does this (desktop) context know immutable buffer storage (GL 4.4+)? The
+ * storage queries are errors elsewhere. */
+static int ctx_has_buffer_storage(void)
+{
+	const char *v = (const char *)glGetString(GL_VERSION);
+	int major, minor;
+
+	if (!v || !strncmp(v, "OpenGL ES", 9))
+		return 0;
+	major = atoi(v);
+	while (*v && *v != '.')
+		v++;
+	minor = *v == '.' ? atoi(v + 1) : 0;
+	return major > 4 || (major == 4 && minor >= 4);
 }
 
 /* target != 0: through a binding; else `named` is the buffer name.
@@ -290,20 +307,29 @@ static void *do_map(uint32_t target, uint32_t named, int64_t offset,
 		gb_cl_gl_error(0x0502);
 		return NULL;
 	}
-	if (flags & MAP_PERSISTENT) {
-		/* the buffer must have been created with persistent storage */
-		GLint sf = 0;
+	/* Immutable storage (GL 4.4+) limits what may be mapped: the access
+	 * bits must be covered by the storage flags. Persistent mappings also
+	 * need the storage to be persistent on drivers where the query is
+	 * only known through the extension. */
+	if ((flags & MAP_PERSISTENT) || ctx_has_buffer_storage()) {
+		GLint sf = 0, imm = 0;
 
-		if (target)
+		if (target) {
 			glGetBufferParameteriv(target, 0x8220 /* STORAGE_FLAGS */,
 					       &sf);
+			glGetBufferParameteriv(target, 0x821F /* IMMUTABLE */,
+					       &imm);
+		}
 #ifdef GB_LIB_GL
-		else
+		else {
 			glGetNamedBufferParameteriv(named, 0x8220, &sf);
+			glGetNamedBufferParameteriv(named, 0x821F, &imm);
+		}
 #endif
-		if (!(sf & MAP_PERSISTENT) ||
-		    ((flags & MAP_READ) && !(sf & MAP_READ)) ||
-		    ((flags & MAP_WRITE) && !(sf & MAP_WRITE))) {
+		if (((flags & MAP_PERSISTENT) && !(sf & MAP_PERSISTENT)) ||
+		    (imm && (((flags & MAP_READ) && !(sf & MAP_READ)) ||
+			     ((flags & MAP_WRITE) && !(sf & MAP_WRITE)) ||
+			     ((flags & MAP_COHERENT) && !(sf & MAP_COHERENT))))) {
 			gb_cl_gl_error(0x0502);
 			return NULL;
 		}
@@ -644,7 +670,10 @@ GB_API void glGetNamedBufferPointervEXT(GLuint buffer, GLenum pname,
  * The server's buffer is never really mapped, so the driver cannot raise
  * these; the client knows which buffers it has mapped. */
 
-static int mapped_busy(uint32_t target, uint32_t named)
+/* size < 0: the whole buffer. A mapping only blocks the commands whose range
+ * crosses it. */
+static int mapped_busy(uint32_t target, uint32_t named, int64_t off,
+		       int64_t size)
 {
 	struct gb_ctxstate *st = gb_cur_state();
 	uint32_t buf = named;
@@ -655,7 +684,9 @@ static int mapped_busy(uint32_t target, uint32_t named)
 	if (target)
 		buf = gb_state_bound(st, target);
 	m = buf ? gb_state_map(st, buf) : NULL;
-	if (m && !(m->flags & MAP_PERSISTENT)) {
+	if (m && !(m->flags & MAP_PERSISTENT) &&
+	    (size < 0 || (size > 0 && off < m->offset + m->length &&
+			  off + size > m->offset))) {
 		gb_cl_gl_error(0x0502);
 		return 1;
 	}
@@ -665,14 +696,14 @@ static int mapped_busy(uint32_t target, uint32_t named)
 GB_API void glBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size,
 			    const void *data)
 {
-	if (!mapped_busy(target, 0))
+	if (!mapped_busy(target, 0, offset, size))
 		gbx_glBufferSubData(target, offset, size, data);
 }
 
 GB_API void glGetBufferSubData(GLenum target, GLintptr offset,
 			       GLsizeiptr size, void *data)
 {
-	if (!mapped_busy(target, 0))
+	if (!mapped_busy(target, 0, offset, size))
 		gbx_glGetBufferSubData(target, offset, size, data);
 }
 
@@ -680,7 +711,8 @@ GB_API void glCopyBufferSubData(GLenum readTarget, GLenum writeTarget,
 				GLintptr readOffset, GLintptr writeOffset,
 				GLsizeiptr size)
 {
-	if (!mapped_busy(readTarget, 0) && !mapped_busy(writeTarget, 0))
+	if (!mapped_busy(readTarget, 0, readOffset, size) &&
+	    !mapped_busy(writeTarget, 0, writeOffset, size))
 		gbx_glCopyBufferSubData(readTarget, writeTarget, readOffset,
 					writeOffset, size);
 }
@@ -689,7 +721,7 @@ GB_API void glCopyBufferSubData(GLenum readTarget, GLenum writeTarget,
 GB_API void glClearBufferData(GLenum target, GLenum internalformat,
 			      GLenum format, GLenum type, const void *data)
 {
-	if (!mapped_busy(target, 0))
+	if (!mapped_busy(target, 0, 0, -1))
 		gbx_glClearBufferData(target, internalformat, format, type,
 				      data);
 }
@@ -698,7 +730,7 @@ GB_API void glClearBufferSubData(GLenum target, GLenum internalformat,
 				 GLintptr offset, GLsizeiptr size,
 				 GLenum format, GLenum type, const void *data)
 {
-	if (!mapped_busy(target, 0))
+	if (!mapped_busy(target, 0, offset, size))
 		gbx_glClearBufferSubData(target, internalformat, offset, size,
 					 format, type, data);
 }
@@ -706,14 +738,14 @@ GB_API void glClearBufferSubData(GLenum target, GLenum internalformat,
 GB_API void glNamedBufferSubData(GLuint buffer, GLintptr offset,
 				 GLsizeiptr size, const void *data)
 {
-	if (!mapped_busy(0, buffer))
+	if (!mapped_busy(0, buffer, offset, size))
 		gbx_glNamedBufferSubData(buffer, offset, size, data);
 }
 
 GB_API void glGetNamedBufferSubData(GLuint buffer, GLintptr offset,
 				    GLsizeiptr size, void *data)
 {
-	if (!mapped_busy(0, buffer))
+	if (!mapped_busy(0, buffer, offset, size))
 		gbx_glGetNamedBufferSubData(buffer, offset, size, data);
 }
 
@@ -721,7 +753,8 @@ GB_API void glCopyNamedBufferSubData(GLuint readBuffer, GLuint writeBuffer,
 				     GLintptr readOffset, GLintptr writeOffset,
 				     GLsizeiptr size)
 {
-	if (!mapped_busy(0, readBuffer) && !mapped_busy(0, writeBuffer))
+	if (!mapped_busy(0, readBuffer, readOffset, size) &&
+	    !mapped_busy(0, writeBuffer, writeOffset, size))
 		gbx_glCopyNamedBufferSubData(readBuffer, writeBuffer,
 					     readOffset, writeOffset, size);
 }
@@ -730,7 +763,7 @@ GB_API void glClearNamedBufferData(GLuint buffer, GLenum internalformat,
 				   GLenum format, GLenum type,
 				   const void *data)
 {
-	if (!mapped_busy(0, buffer))
+	if (!mapped_busy(0, buffer, 0, -1))
 		gbx_glClearNamedBufferData(buffer, internalformat, format, type,
 					   data);
 }
@@ -740,7 +773,7 @@ GB_API void glClearNamedBufferSubData(GLuint buffer, GLenum internalformat,
 				      GLenum format, GLenum type,
 				      const void *data)
 {
-	if (!mapped_busy(0, buffer))
+	if (!mapped_busy(0, buffer, offset, size))
 		gbx_glClearNamedBufferSubData(buffer, internalformat, offset,
 					      size, format, type, data);
 }

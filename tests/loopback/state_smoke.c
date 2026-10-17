@@ -346,6 +346,78 @@ static void test_storage_map_matrix(void)
 	CHECK(!bad, "%d of %d map combinations failed", bad, combos);
 }
 
+/* a persistent mapping keeps working after the application rebinds the
+ * target it was mapped through (CTS buffer_storage map_persistent_*) */
+static void test_persistent_rebind(void)
+{
+	GLuint b[2];
+	unsigned char *p, out[32], pat[32];
+
+	if (!have_ext("GL_ARB_buffer_storage"))
+		return;
+	for (int i = 0; i < 32; i++)
+		pat[i] = (unsigned char)(i * 5 + 1);
+	glGenBuffers(2, b);
+	glBindBuffer(GL_ARRAY_BUFFER, b[0]);
+	glBufferStorage(GL_ARRAY_BUFFER, 32, NULL,
+			GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT |
+			GL_MAP_WRITE_BIT);
+	p = glMapBufferRange(GL_ARRAY_BUFFER, 0, 32,
+			     GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT |
+			     GL_MAP_WRITE_BIT);
+	CHECK(p != NULL, "persistent map");
+	glBindBuffer(GL_ARRAY_BUFFER, 0); /* the target no longer names it */
+	glBindBuffer(GL_COPY_WRITE_BUFFER, b[1]);
+	glBufferData(GL_COPY_WRITE_BUFFER, 32, NULL, GL_STATIC_DRAW);
+	if (p)
+		memcpy(p, pat, 32);
+	glBindBuffer(GL_COPY_READ_BUFFER, b[0]);
+	glCopyBufferSubData(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER, 0, 0, 32);
+	memset(out, 0, sizeof out);
+	glGetBufferSubData(GL_COPY_WRITE_BUFFER, 0, 32, out);
+	CHECK(!memcmp(out, pat, 32), "write through the mapping reached the buffer");
+	glBindBuffer(GL_COPY_READ_BUFFER, 0);
+	glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+	glBindBuffer(GL_ARRAY_BUFFER, b[0]);
+	glUnmapBuffer(GL_ARRAY_BUFFER);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glDeleteBuffers(2, b);
+	EXPECT_ERR(GL_NO_ERROR, "persistent rebind");
+}
+
+/* mapping bits must be covered by immutable storage flags; a non-persistent
+ * mapping blocks only the sub-data calls that cross it */
+static void test_map_rules(void)
+{
+	GLuint b;
+	unsigned char d[64] = { 0 };
+
+	if (!have_ext("GL_ARB_buffer_storage"))
+		return;
+	glGenBuffers(1, &b);
+	glBindBuffer(GL_ARRAY_BUFFER, b);
+	glBufferStorage(GL_ARRAY_BUFFER, 64, d, GL_DYNAMIC_STORAGE_BIT);
+	CHECK(glMapBufferRange(GL_ARRAY_BUFFER, 0, 16, GL_MAP_READ_BIT) == NULL,
+	      "map READ of storage without MAP_READ");
+	EXPECT_ERR(GL_INVALID_OPERATION, "map beyond storage flags");
+	glDeleteBuffers(1, &b);
+
+	glGenBuffers(1, &b);
+	glBindBuffer(GL_ARRAY_BUFFER, b);
+	glBufferData(GL_ARRAY_BUFFER, 64, d, GL_STATIC_DRAW);
+	CHECK(glMapBufferRange(GL_ARRAY_BUFFER, 16, 16, GL_MAP_WRITE_BIT) != NULL,
+	      "plain map");
+	glBufferSubData(GL_ARRAY_BUFFER, 0, 16, d);
+	EXPECT_ERR(GL_NO_ERROR, "sub-data before the mapped range");
+	glBufferSubData(GL_ARRAY_BUFFER, 32, 16, d);
+	EXPECT_ERR(GL_NO_ERROR, "sub-data after the mapped range");
+	glBufferSubData(GL_ARRAY_BUFFER, 8, 16, d);
+	EXPECT_ERR(GL_INVALID_OPERATION, "sub-data crossing the mapped range");
+	glUnmapBuffer(GL_ARRAY_BUFFER);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glDeleteBuffers(1, &b);
+}
+
 static void test_persistent_map(void)
 {
 	GLuint b[2];
@@ -740,6 +812,8 @@ int main(void)
 	test_pack_gaps();
 	test_pack_teximage();
 	test_storage_map_matrix();
+	test_persistent_rebind();
+	test_map_rules();
 	test_persistent_map();
 	test_debug_groups();
 	test_attrib_errors();
