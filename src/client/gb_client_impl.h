@@ -14,6 +14,7 @@
 #include <sys/uio.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -166,6 +167,13 @@ struct gb_cl {
 	uint8_t in_upcall;          /* dispatching an upcall (no re-entrant poll) */
 	uint8_t sync_dbg;           /* make async calls synchronous (debug sync) */
 	uint8_t in_raise;           /* sending a GB_OPX_RaiseError */
+	/* async upcall delivery while the application is not in the library */
+	uint8_t helper_on, helper_stop;
+	int owner_tid;
+	volatile uint32_t call_seq;  /* bumped by every call: the helper acts only
+				      * once the application has been idle */
+	pthread_t helper;
+	pthread_mutex_t rsp_mu;     /* recursive; held while consuming responses */
 };
 
 struct gb_proc {
@@ -188,6 +196,9 @@ int gb_cl_begin(struct gb_cl *cx, struct gb_out *o, uint32_t op,
 void gb_cl_end(struct gb_cl *cx, struct gb_out *o);
 int gb_cl_wait_reply(struct gb_cl *cx, struct gb_in *in, uint32_t op);
 void gb_cl_poll_upcalls(struct gb_cl *cx);
+/* Deliver non-blocking upcalls (debug messages) from a helper thread while
+ * the application is outside the library (GL_DEBUG_OUTPUT async mode). */
+void gb_cl_upcall_helper_start(struct gb_cl *cx);
 void gb_state_free(uint32_t ctx_id);
 uint32_t gb_cl_fd_put(int fd);   /* client fd -> token the server can use */
 int gb_cl_fd_get(uint32_t token); /* fd the server returned under token */

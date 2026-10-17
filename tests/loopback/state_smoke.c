@@ -560,6 +560,28 @@ static void test_debug_groups(void)
 	err();
 }
 
+/* asynchronous debug output reaches the callback although the application
+ * makes no further GL call (CTS debug.async) */
+static void test_debug_async(void)
+{
+	if (!have_ext("GL_KHR_debug"))
+		return;
+	g_dbg_n = g_dbg_pop = 0;
+	glEnable(GL_DEBUG_OUTPUT);
+	glDisable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+	glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, NULL,
+			      GL_TRUE);
+	glDebugMessageCallback(count_cb, NULL);
+	glDebugMessageInsert(GL_DEBUG_SOURCE_APPLICATION, GL_DEBUG_TYPE_OTHER, 9,
+			     GL_DEBUG_SEVERITY_LOW, -1, "async");
+	for (int i = 0; i < 100 && g_dbg_n == 0; i++)
+		usleep(10000); /* no GL calls while waiting */
+	CHECK(g_dbg_n == 1, "async message delivered %d times", g_dbg_n);
+	glDebugMessageCallback(NULL, NULL);
+	glDisable(GL_DEBUG_OUTPUT);
+	err();
+}
+
 static void test_string_getters(void)
 {
 	const char *vs =
@@ -867,6 +889,7 @@ int main(void)
 	test_compressed_block_unpack();
 	test_persistent_map();
 	test_debug_groups();
+	test_debug_async();
 	test_attrib_errors();
 	test_string_getters();
 	test_uniform_queries();

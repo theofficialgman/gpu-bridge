@@ -44,6 +44,8 @@ static void set_callback(gb_dbgproc cb, const void *user)
 	st->debug_user = user;
 	gb_cl_debug_update_sync(cx);
 	send_enable(cx, cb != NULL);
+	if (cb)
+		gb_cl_upcall_helper_start(cx);
 }
 
 GB_API void glDebugMessageCallback(GLDEBUGPROC callback, const void *userParam)

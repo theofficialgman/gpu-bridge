@@ -21,6 +21,8 @@
 #include <spawn.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -65,6 +67,10 @@ static void thread_exit_cleanup(void *p)
 
 	if (!c)
 		return;
+	if (c->helper_on && c->gen == G.gen) {
+		c->helper_stop = 1;
+		pthread_join(c->helper, NULL);
+	}
 	if (c->gen == G.gen) {
 		gb_chan_close(&c->chan); /* lets the server worker exit */
 		gb_chan_destroy(&c->chan);
@@ -471,9 +477,14 @@ int gb_cl_begin(struct gb_cl *cx, struct gb_out *o, uint32_t op,
 	}
 	int rc;
 
-	if (__builtin_expect(gb_ring_peek(&cx->chan.rsp, &(uint32_t){0}) != NULL, 0) &&
-	    !cx->in_upcall)
+	if (__builtin_expect(cx->helper_on, 0)) {
+		cx->call_seq++;
+		if (!cx->in_upcall)
+			gb_cl_poll_upcalls(cx); /* locks against the helper */
+	} else if (__builtin_expect(gb_ring_peek(&cx->chan.rsp, &(uint32_t){0}) != NULL, 0) &&
+		   !cx->in_upcall) {
 		gb_cl_poll_upcalls(cx);
+	}
 	rc = gb_out_begin(o, &cx->chan.req, total);
 
 	if (rc) {
@@ -586,15 +597,17 @@ static void dispatch_upcall(struct gb_cl *cx, const struct gb_in *in)
  * of every call (cheap: one ring peek) and while waiting for a reply. */
 void gb_cl_poll_upcalls(struct gb_cl *cx)
 {
+	if (cx->helper_on)
+		pthread_mutex_lock(&cx->rsp_mu);
 	for (;;) {
 		struct gb_in in;
 		uint32_t sz;
 		const void *rec = gb_ring_peek(&cx->chan.rsp, &sz);
 
 		if (!rec)
-			return;
+			break;
 		if (gb_in_recv(&in, &cx->chan.rsp, 0))
-			return;
+			break;
 		struct gb_cmd_hdr h;
 		memcpy(&h, in.p, sizeof(h));
 		if (h.flags & GB_CMD_F_UPCALL)
@@ -602,6 +615,108 @@ void gb_cl_poll_upcalls(struct gb_cl *cx)
 		/* anything else cannot be pending: no request is outstanding */
 		gb_in_release(&in);
 	}
+	if (cx->helper_on)
+		pthread_mutex_unlock(&cx->rsp_mu);
+}
+
+/*
+ * Async debug output: the driver may call the application's callback from any
+ * thread at any time, but our upcalls are only taken when the application
+ * calls into the library. Once a debug callback is registered, a helper
+ * thread delivers the non-blocking ones while the application is elsewhere.
+ * It only ever takes records that are upcalls, and only when the owner thread
+ * is not itself consuming responses (it holds rsp_mu then).
+ */
+/* Is the owner thread asleep in a system call (not merely descheduled)? */
+static int owner_sleeping(struct gb_cl *cx)
+{
+	char path[64], buf[256];
+	FILE *f;
+	char st = 0;
+
+	snprintf(path, sizeof path, "/proc/self/task/%d/stat", cx->owner_tid);
+	f = fopen(path, "r");
+	if (!f)
+		return 0;
+	if (fgets(buf, sizeof buf, f)) {
+		char *p = strrchr(buf, ')'); /* "pid (comm) S ..." */
+
+		if (p && p[1] == ' ')
+			st = p[2];
+	}
+	fclose(f);
+	return st == 'S' || st == 'D';
+}
+
+static void *upcall_helper(void *arg)
+{
+	struct gb_cl *cx = arg;
+
+	uint32_t seen = 0;
+	int idle = 0;
+
+	while (!cx->helper_stop) {
+		struct timespec ts = { 0, 4 * 1000 * 1000 };
+
+		nanosleep(&ts, NULL);
+		if (cx->lost || cx->sync_dbg || cx->helper_stop)
+			continue;
+		/* The owner takes its upcalls itself whenever it calls into the
+		 * library, on its own thread (what applications and test
+		 * harnesses expect). Only a messages left waiting while the
+		 * application is away (~12 ms without a call) is delivered here. */
+		if (cx->call_seq != seen) {
+			seen = cx->call_seq;
+			idle = 0;
+			continue;
+		}
+		if (++idle < 3)
+			continue;
+		if (!owner_sleeping(cx))
+			continue;
+		if (pthread_mutex_trylock(&cx->rsp_mu))
+			continue;
+		for (;;) {
+			struct gb_in in;
+			uint32_t sz;
+			const void *rec = gb_ring_peek(&cx->chan.rsp, &sz);
+			struct gb_cmd_hdr h;
+
+			if (!rec || sz < sizeof(h))
+				break;
+			memcpy(&h, rec, sizeof(h));
+			/* replies, and upcalls that want an answer, are the
+			 * owner thread's */
+			if (!(h.flags & GB_CMD_F_UPCALL) ||
+			    (h.flags & GB_CMD_F_WANT_REPLY))
+				break;
+			if (gb_in_recv(&in, &cx->chan.rsp, 0))
+				break;
+			dispatch_upcall(cx, &in);
+			gb_in_release(&in);
+		}
+		pthread_mutex_unlock(&cx->rsp_mu);
+	}
+	return NULL;
+}
+
+void gb_cl_upcall_helper_start(struct gb_cl *cx)
+{
+	pthread_mutexattr_t a;
+
+	if (!cx || cx->helper_on || getenv("GB_NO_UPCALL_THREAD"))
+		return;
+	pthread_mutexattr_init(&a);
+	pthread_mutexattr_settype(&a, PTHREAD_MUTEX_RECURSIVE);
+	pthread_mutex_init(&cx->rsp_mu, &a);
+	pthread_mutexattr_destroy(&a);
+	cx->helper_stop = 0;
+	cx->owner_tid = (int)syscall(SYS_gettid);
+	if (pthread_create(&cx->helper, NULL, upcall_helper, cx)) {
+		pthread_mutex_destroy(&cx->rsp_mu);
+		return;
+	}
+	cx->helper_on = 1; /* the owner takes rsp_mu from now on */
 }
 
 void gb_cl_end(struct gb_cl *cx, struct gb_out *o)
@@ -628,7 +743,7 @@ void gb_cl_end(struct gb_cl *cx, struct gb_out *o)
 	}
 }
 
-int gb_cl_wait_reply(struct gb_cl *cx, struct gb_in *in, uint32_t op)
+static int wait_reply_locked(struct gb_cl *cx, struct gb_in *in, uint32_t op)
 {
 	uint64_t t0 = g_stats_on == 1 ? mono_ns() : 0;
 	int rc;
@@ -662,6 +777,18 @@ int gb_cl_wait_reply(struct gb_cl *cx, struct gb_in *in, uint32_t op)
 		return -EPROTO;
 	}
 	return 0;
+}
+
+int gb_cl_wait_reply(struct gb_cl *cx, struct gb_in *in, uint32_t op)
+{
+	int rc;
+
+	if (!cx->helper_on)
+		return wait_reply_locked(cx, in, op);
+	pthread_mutex_lock(&cx->rsp_mu);
+	rc = wait_reply_locked(cx, in, op);
+	pthread_mutex_unlock(&cx->rsp_mu);
+	return rc;
 }
 
 void gb_cl_set_error(struct gb_cl *cx, uint32_t op)
