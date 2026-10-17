@@ -57,6 +57,8 @@ struct gb_sth {
 	uint32_t up_seq;            /* sequence of the last blocking upcall */
 	int cur_req_sync;           /* the request being handled wants a reply */
 	struct gb_deferred *defer_head, *defer_tail;
+	int32_t px_dim[3];          /* w, h, d of the last server-sized pixel
+				     * getter (the client scatters rows by it) */
 	int taken_fds[8];           /* client fds adopted for the current request */
 	int ntaken;
 	/* GB_STATS accounting (written by the worker, read at exit) */

@@ -269,6 +269,19 @@ int gb_cl_pack_sparse(struct gb_cl *cx, int64_t w, int64_t h, int64_t d,
 	return span != tight;
 }
 
+void gb_cl_pack_store(struct gb_cl *cx, void *dst, const void *src,
+		      uint32_t len, uint32_t format, uint32_t type, int32_t w,
+		      int32_t h, int32_t d)
+{
+	struct gb_ctxstate *st = cx ? cx->cur : NULL;
+
+	if (!st || w <= 0) {
+		memcpy(dst, src, len);
+		return;
+	}
+	gb_pixel_scatter(dst, src, len, format, type, w, h, d, &st->pack);
+}
+
 /* ---- size-rule inputs ----------------------------------------------------------- */
 
 int gb_cl_geti(void *ctx, uint32_t pname)

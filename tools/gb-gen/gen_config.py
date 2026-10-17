@@ -477,6 +477,11 @@ SERVER_SIZED = [
     (r"^glGetProgramStringARB$", "progstring", [["target", "pname"]]),
 ]
 
+# Server-sized pixel getters whose result may leave gaps in the application's
+# buffer (GL_PACK_ROW_LENGTH, skips): the reply also carries the transfer's
+# width / height / depth and the client copies only the pixel rows.
+PIXEL_SCATTER = {"pixels_tex", "pixels_dsa", "pixels_multi"}
+
 # glGet*/gl*v pname -> element count is command specific. Regex -> class
 # (see gb_pname_count_class in gb_gl_sizes.h).
 PNAME_CLASSES = [

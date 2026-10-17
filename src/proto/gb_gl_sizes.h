@@ -11,6 +11,7 @@
 #define GB_GL_SIZES_H
 
 #include <stdint.h>
+#include <string.h>
 
 #include "gb_carr.h"
 #include "gb_pname_classes.h"
@@ -348,6 +349,59 @@ static inline int64_t gb_pixel_bytes3(uint32_t format, uint32_t type,
 		      (int64_t)ps->skip_rows * stride +
 		      (int64_t)ps->skip_pixels * bpp;
 	return off + image * (d - 1) + stride * (h - 1) + w * bpp;
+}
+
+/*
+ * Copy a pixel-pack result into the application's buffer without touching
+ * the bytes the transfer does not cover (the gaps between rows and images
+ * that GL_PACK_ROW_LENGTH / GL_PACK_IMAGE_HEIGHT leave, and the skipped
+ * leading rows / pixels). `src` is the full transfer as the driver laid it
+ * out (`len` bytes); w x h x d is the transfer size. Anything this cannot
+ * work out is copied whole.
+ */
+static inline void gb_pixel_scatter(void *dst, const void *src, size_t len,
+				    uint32_t format, uint32_t type, int64_t w,
+				    int64_t h, int64_t d,
+				    const struct gb_pixstore *ps)
+{
+	const uint8_t *s = (const uint8_t *)src;
+	uint8_t *o = (uint8_t *)dst;
+	int bpp = gb_packed_type_bytes(type);
+	int a = ps->alignment;
+
+	if (type == 0x1A00 || w <= 0 || h <= 0 || d == 0)
+		goto whole;
+	if (bpp == 0) {
+		int c = gb_format_components(format), tb = gb_type_bytes(type);
+		if (c < 0 || tb < 0)
+			goto whole;
+		bpp = c * tb;
+	}
+	if ((a != 1 && a != 2 && a != 4 && a != 8) || w > (1 << 16) ||
+	    h > (1 << 16) || d > (1 << 16))
+		goto whole;
+	int flat = d == GB_DEPTH_2D || (d == 1 && ps->skip_images == 0);
+	int64_t rl = ps->row_length > 0 ? ps->row_length : w;
+	int64_t ih = !flat && ps->image_height > 0 ? ps->image_height : h;
+	int64_t stride = ((rl * bpp + a - 1) / a) * a;
+	int64_t image = stride * ih;
+	int64_t depth = flat ? 1 : d;
+	int64_t off = (flat ? 0 : (int64_t)ps->skip_images * image) +
+		      (int64_t)ps->skip_rows * stride +
+		      (int64_t)ps->skip_pixels * bpp;
+
+	if (rl < w || ih < h || off < 0 ||
+	    off + image * (depth - 1) + stride * (h - 1) + w * bpp > (int64_t)len)
+		goto whole;
+	for (int64_t z = 0; z < depth; z++)
+		for (int64_t y = 0; y < h; y++) {
+			int64_t at = off + z * image + y * stride;
+
+			memcpy(o + at, s + at, (size_t)(w * bpp));
+		}
+	return;
+whole:
+	memcpy(dst, src, len);
 }
 
 /* glBitmap / glPolygonStipple: 1 bit per pixel, rows padded to alignment. */

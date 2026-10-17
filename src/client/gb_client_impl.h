@@ -250,6 +250,11 @@ static inline int gb_cl_persist_pending(struct gb_cl *cx)
  * application's buffer unwritten? dims < 0: unknown. */
 int gb_cl_pack_sparse(struct gb_cl *cx, int64_t w, int64_t h, int64_t d,
 		      uint32_t format, uint32_t type);
+/* Store a server-sized pixel-pack result without touching the gaps the
+ * pack state leaves between rows / images (w, h, d come from the server). */
+void gb_cl_pack_store(struct gb_cl *cx, void *dst, const void *src,
+		      uint32_t len, uint32_t format, uint32_t type, int32_t w,
+		      int32_t h, int32_t d);
 /* Copy application memory into a message. The driver validates arguments
  * before it reads a data pointer, so an application may legally pass a
  * pointer that is never dereferenced (tests of error paths do); a fault

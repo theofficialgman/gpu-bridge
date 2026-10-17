@@ -249,6 +249,44 @@ static void test_pack_gaps(void)
 
 /* ARB_buffer_storage persistent mappings: written data reaches the GPU at the
  * next command that uses it, GPU-written data shows up after a fence */
+/* glGetTexImage honours GL_PACK_ROW_LENGTH: every pixel lands at its strided
+ * place and the bytes between rows are untouched (CTS packed_pixels) */
+static void test_pack_teximage(void)
+{
+	enum { W = 7, H = 3 };
+	static const int rls[] = { 0, 10, 15, 7 };
+	unsigned char src[W * H * 4], buf[16 * H * 4 + 16];
+	GLuint tex;
+
+	for (int i = 0; i < W * H * 4; i++)
+		src[i] = (unsigned char)(i * 7 + 3);
+	glGenTextures(1, &tex);
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, W, H, 0, GL_RGBA,
+		     GL_UNSIGNED_BYTE, src);
+	for (unsigned k = 0; k < sizeof rls / sizeof rls[0]; k++) {
+		int rl = rls[k], stride = (rl ? rl : W) * 4, bad = 0, gap = 0;
+
+		memset(buf, 0xEE, sizeof buf);
+		glPixelStorei(GL_PACK_ROW_LENGTH, rl);
+		glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+		glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+		for (int y = 0; y < H; y++)
+			for (int x = 0; x < W * 4; x++)
+				if (buf[y * stride + x] != src[y * W * 4 + x])
+					bad++;
+		for (int y = 0; y < H - 1; y++)
+			for (int x = W * 4; x < stride; x++)
+				if (buf[y * stride + x] != 0xEE)
+					gap++;
+		CHECK(!bad && !gap, "row length %d: %d wrong bytes, %d gap bytes touched",
+		      rl, bad, gap);
+	}
+	EXPECT_ERR(GL_NO_ERROR, "GetTexImage pack");
+	glDeleteTextures(1, &tex);
+}
+
 static void test_persistent_map(void)
 {
 	GLuint b[2];
@@ -641,6 +679,7 @@ int main(void)
 	test_getter_counts();
 	test_get_texture_sub_image();
 	test_pack_gaps();
+	test_pack_teximage();
 	test_persistent_map();
 	test_debug_groups();
 	test_attrib_errors();

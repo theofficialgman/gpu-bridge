@@ -788,6 +788,16 @@ def emit_client(cmd, public, opname):
                          f"if ((uint64_t)__c * {k[3]} < __cp) "
                          f"__cp = (size_t)(__c * {k[3]}); }} "
                          f"memcpy({n}, __s, __cp); }}")
+            elif mode == "raw" and k[4][0] == "server" and \
+                    k[4][1] in cfg.PIXEL_SCATTER:
+                # the reply carries w, h, d: copy only the pixel rows so the
+                # gaps the pack state leaves keep the application's bytes
+                L.append(f"\t      {{ int32_t __w0 = (int32_t)gb_r_u32(&__r), "
+                         f"__h0 = (int32_t)gb_r_u32(&__r), "
+                         f"__d0 = (int32_t)gb_r_u32(&__r); "
+                         f"if (__r.err) __w0 = 0; "
+                         f"gb_cl_pack_store(__cx, {n}, __s, __rl, format, "
+                         f"type, __w0, __h0, __d0); }}")
             elif mode == "raw":
                 L.append(f"\t      memcpy({n}, __s, __rl);")
             elif mode == "widen":
@@ -1156,6 +1166,9 @@ def emit_server(cmd, opname):
             L.append(f"\tif (lr_{n} != GB_NULL_LEN && lr_{n} != GB_PBO_LEN "
                      f"&& lr_{n} != GB_SRV_LEN) "
                      f"rs = GB_ALIGN_UP(rs, 8u) + lr_{n};")
+            if p["k"][4][0] == "server" and p["k"][4][1] in cfg.PIXEL_SCATTER:
+                L.append(f"\tif (lr_{n} != GB_NULL_LEN && lr_{n} != "
+                         f"GB_PBO_LEN && lr_{n} != GB_SRV_LEN) rs += 12;")
         L.append("\trs = GB_ALIGN_UP(rs, 8u);")
         L.append("\tstruct gb_out o; struct gb_w w;")
         L.append("\tif (gb_sv_reply_begin(__t, __h, &o, rs)) goto done;")
@@ -1187,6 +1200,10 @@ def emit_server(cmd, opname):
             L.append(f"\t\tvoid *d = gb_w_blob(&w, lr_{n});")
             if mode == "raw":
                 L.append(f"\t\tmemcpy(d, o_{n}, lr_{n});")
+                if k[4][0] == "server" and k[4][1] in cfg.PIXEL_SCATTER:
+                    L.append("\t\tgb_w_u32(&w, (uint32_t)__t->px_dim[0]);")
+                    L.append("\t\tgb_w_u32(&w, (uint32_t)__t->px_dim[1]);")
+                    L.append("\t\tgb_w_u32(&w, (uint32_t)__t->px_dim[2]);")
             elif mode == "widen":
                 L.append(f"\t\tfor (int64_t i = 0; i < n_{n}; i++) "
                          f"((int64_t *)d)[i] = (int64_t)((intptr_t *)"

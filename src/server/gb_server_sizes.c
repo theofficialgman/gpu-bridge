@@ -181,6 +181,9 @@ int64_t gb_sv_sz_pixels_tex(struct gb_sth *t, uint32_t target, int32_t level,
 	/* skip-images / image-height apply to 3D-like targets only */
 	int vol = target == 0x806F || target == 0x8C1A || target == 0x9009;
 
+	t->px_dim[0] = w;
+	t->px_dim[1] = h;
+	t->px_dim[2] = vol ? d : GB_DEPTH_2D;
 	return gb_sv_pixel_bytes(GB_PM_PACK, format, type, w, h,
 				 vol ? d : GB_DEPTH_2D);
 }
@@ -216,6 +219,9 @@ int64_t gb_sv_sz_pixels_dsa(struct gb_sth *t, int multi, uint32_t tex_or_unit,
 	}
 	int vol = target == 0x806F || target == 0x8C1A || target == 0x9009;
 
+	t->px_dim[0] = w;
+	t->px_dim[1] = h;
+	t->px_dim[2] = vol ? d : GB_DEPTH_2D;
 	return gb_sv_pixel_bytes(GB_PM_PACK, format, type, w, h,
 				 vol ? d : GB_DEPTH_2D);
 }
