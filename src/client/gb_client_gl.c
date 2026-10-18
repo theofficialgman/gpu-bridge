@@ -869,9 +869,10 @@ GB_API EGLBoolean eglMakeCurrent(EGLDisplay dpy, EGLSurface draw,
 	EGLBoolean r = gbx_eglMakeCurrent(dpy, draw, read, ctx);
 	struct gb_cl *cx = gb_cl_get();
 
-	if (r && cx)
+	if (r && cx) {
 		cx->cur = ctx ? gb_state_for((uint32_t)(uintptr_t)ctx) : NULL;
 		gb_cl_debug_update_sync(cx);
+	}
 	return r;
 }
 

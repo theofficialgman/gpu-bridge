@@ -81,7 +81,7 @@ struct gb_sth *gb_sv_thread(int i);
 
 void gb_sv_scratch_drop(void *ctx)
 {
-	for (int i = 0; i < 64; i++) {
+	for (int i = 0; i < GB_MAX_SERVER_THREADS; i++) {
 		struct gb_sth *t = gb_sv_thread(i);
 
 		if (!t)

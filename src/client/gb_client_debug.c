@@ -28,7 +28,11 @@ static void send_enable(struct gb_cl *cx, int on)
 
 void gb_cl_debug_update_sync(struct gb_cl *cx)
 {
-	struct gb_ctxstate *st = cx->cur;
+	struct gb_ctxstate *st;
+
+	if (!cx)
+		return;
+	st = cx->cur;
 
 	cx->sync_dbg = st && st->debug_cb && st->debug_sync;
 }

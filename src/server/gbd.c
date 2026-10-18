@@ -819,10 +819,13 @@ static void *worker_main(void *arg)
 		}
 	}
 	gb_srv_scratch_free(t);
+	/* the client's channel is over: give back its descriptor and mapping
+	 * (a long-lived server serves thousands of short-lived client threads) */
+	gb_chan_destroy(&t->chan);
 	return NULL;
 }
 
-static struct gb_sth *g_threads[64];
+static struct gb_sth *g_threads[GB_MAX_SERVER_THREADS];
 static int g_nthreads;
 
 struct gb_sth *gb_sv_thread(int i)
@@ -944,7 +947,7 @@ static int serve(int sock)
 				} else {
 					t->id = next_id++;
 					pthread_mutex_init(&t->up_lock, NULL);
-					if (g_nthreads < 64)
+					if (g_nthreads < GB_MAX_SERVER_THREADS)
 						g_threads[g_nthreads++] = t;
 					reply.a[0] = t->id;
 					pthread_create(&t->thread, NULL,

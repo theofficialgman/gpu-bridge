@@ -40,6 +40,9 @@ struct gb_upmsg;
 struct gb_deferred;
 
 /* Per client thread: one channel and one worker. */
+/* client channels (threads) a server registers over its lifetime */
+#define GB_MAX_SERVER_THREADS 8192
+
 struct gb_sth {
 	struct gb_chan chan;
 	pthread_t thread;
