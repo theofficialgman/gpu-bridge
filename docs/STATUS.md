@@ -628,6 +628,19 @@ pending ones, only while the owner thread sleeps in a syscall and has made no
 call for ~12 ms (`GB_NO_UPCALL_THREAD=1` disables it). The three
 `debug.async` cases pass.
 
+Bridged GL 4.6 re-run after the first round of fixes: 280,494 results vs
+native, 10 distinct differences (726 before): 4 async-debug cases (since fixed
+by the helper thread) and 5 `transform_feedback` "vertex" tests that threw in
+long sessions. Cause of the latter: the application deleted buffer names it
+did not create (a cleanup loop), one of them the server's own scratch element
+buffer; the server kept using the dead name (driver crash) or, once the
+application was handed the same name back for its own buffer, overwrote it.
+The server now forgets its scratch buffers the moment their names are
+deleted (and re-checks with `glIsBuffer` before each use). The full 19,640-case
+session now runs without internal errors. `KHR-GL46.vertex_attrib_binding.
+advanced-bindingUpdate` crashes the armhf client with SIGBUS natively too (it
+makes 2-byte-aligned float stores through a mapped pointer).
+
 Open: `GLES31.functional.debug.error_groups.case_13` fails (one
 INVALID_VALUE message fewer than expected) when run after the 33
 `error_filters` cases in the same process, bridged only, deterministic; it
