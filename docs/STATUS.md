@@ -641,11 +641,21 @@ session now runs without internal errors. `KHR-GL46.vertex_attrib_binding.
 advanced-bindingUpdate` crashes the armhf client with SIGBUS natively too (it
 makes 2-byte-aligned float stores through a mapped pointer).
 
-Open: `GLES31.functional.debug.error_groups.case_13` fails (one
-INVALID_VALUE message fewer than expected) when run after the 33
-`error_filters` cases in the same process, bridged only, deterministic; it
-passes alone and the server/client callback counts are identical, so it is
-probably a severity/state difference, not lost messages.
+Fixed afterwards (found while chasing the open items):
+
+- `debug.error_groups` failing at random: the server's upcall writer asked
+  `gb_ring_free` whether the response ring had room, and that function used a
+  consumer position refreshed only on failed reservations; after ~1 MB of
+  cumulative upcalls in a process it reported "full" and silently dropped
+  debug messages. It now reads the real position. The whole
+  `GLES31.functional.debug.*` group (1,619 cases) matches native.
+- EGL `render.multi_thread` / sharing crashes in the long main session: the
+  server never released the descriptor and mapping of a finished client
+  thread's channel, so a process that created ~1000 threads could not open new
+  channels, and `eglMakeCurrent` then dereferenced a NULL client state
+  (missing braces around the debug-sync update). The whole `egl-main` list
+  (3,789 cases) now runs in one process with no differences from native except
+  the 35 GLES1 cases (not in that build).
 
 ## Real applications
 
