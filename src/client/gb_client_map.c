@@ -343,6 +343,8 @@ static void *do_map(uint32_t target, uint32_t named, int64_t offset,
 		if (!st->maps[i].buffer)
 			m = &st->maps[i];
 	if (!m) {
+		if (getenv("GB_TRACE_OPS") || getenv("GB_TRACE_MAPS"))
+			fprintf(stderr, "c: mapping table full (%d)\n", GB_MAX_MAPS);
 		gb_cl_gl_error(0x0505);
 		return NULL;
 	}

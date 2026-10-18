@@ -604,6 +604,15 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 	for (int i = 0; i < CA_COUNT; i++)
 		if (is_client_array(&v->a[i]))
 			nclient++;
+	if (nclient && getenv("GB_TRACE_DRAWS")) {
+		fprintf(stderr, "c: client-array draw mode %#x vao %u (element buf %u):",
+			mode, v->name, v->element_buffer);
+		for (int i = 0; i < CA_COUNT; i++)
+			if (is_client_array(&v->a[i]))
+				fprintf(stderr, " [slot %d type %#x size %d ptr %p]", i,
+					v->a[i].type, v->a[i].size, v->a[i].ptr);
+		fprintf(stderr, "\n");
+	}
 	if (st->list_mode) {
 		/*
 		 * Inside glNewList: array data is read when the list is

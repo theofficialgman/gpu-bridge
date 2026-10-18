@@ -1813,6 +1813,26 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	if (!s)
 		return; /* no current context: native would error anyway */
 
+	/* The scratch buffers are ordinary GL names: an application that
+	 * deletes buffers it did not create (cleanup loops over name ranges)
+	 * takes them away, and a draw through a name the driver no longer
+	 * knows reads indices from a garbage address. Check before use. */
+	GB_NATIVE(glIsBuffer, GLboolean, (GLuint));
+	if (fn_glIsBuffer) {
+		if (s->vbo && !fn_glIsBuffer(s->vbo)) {
+			if (getenv("GB_TRACE_DRAWS"))
+				fprintf(stderr, "s: scratch vbo %u was deleted\n", s->vbo);
+			s->vbo = 0;
+			s->vbo_cap = s->vbo_off = 0;
+		}
+		if (s->ebo && !fn_glIsBuffer(s->ebo)) {
+			if (getenv("GB_TRACE_DRAWS"))
+				fprintf(stderr, "s: scratch ebo %u was deleted\n", s->ebo);
+			s->ebo = 0;
+			s->ebo_cap = s->ebo_off = 0;
+		}
+	}
+
 	/* ---- vertex data: one buffer, running offset, orphan on wrap ---- */
 	size_t vtotal = 0;
 	for (uint32_t i = 0; i < nattr; i++)
