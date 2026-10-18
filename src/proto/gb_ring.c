@@ -162,6 +162,10 @@ int gb_ring_attach(struct gb_ring *r, void *region, size_t region_size)
 
 uint32_t gb_ring_free(struct gb_ring *r)
 {
+	/* known_head is only refreshed when a reservation fails; a caller
+	 * deciding whether to write at all needs the consumer's real position,
+	 * or it sees a ring that filled up long ago */
+	r->known_head = atomic_load_explicit(&r->ctrl->head, memory_order_acquire);
 	return r->size - (r->wtail - r->known_head);
 }
 

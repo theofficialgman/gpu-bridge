@@ -762,8 +762,8 @@ static void gb_dbg_cb(GLenum source, GLenum type, GLuint id, GLenum severity,
 {
 	struct gb_sth *t = (struct gb_sth *)(uintptr_t)user;
 	if (getenv("GB_TRACE_OPS"))
-		fprintf(stderr, "s: debug callback src=%#x id=%u len=%d\n",
-			source, id, length);
+		fprintf(stderr, "s: debug callback src=%#x type=%#x id=%u sev=%#x len=%d\n",
+			source, type, id, severity, length);
 	uint32_t n = length >= 0 ? (uint32_t)length
 				 : (message ? (uint32_t)strlen(message) : 0);
 	uint8_t buf[32 + 1024];

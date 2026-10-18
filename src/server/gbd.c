@@ -653,7 +653,10 @@ void gb_sv_upcall_flush(struct gb_sth *t)
 	while (m) {
 		struct gb_upmsg *n = m->next;
 
-		upcall_write(t, m->id, m->data, m->len, 0, 0);
+		if (upcall_write(t, m->id, m->data, m->len, 0, 0) &&
+		    getenv("GB_TRACE_OPS"))
+			fprintf(stderr, "s: upcall %#x DROPPED (ring full, %u bytes)\n",
+				m->id, m->len);
 		free(m);
 		m = n;
 	}
