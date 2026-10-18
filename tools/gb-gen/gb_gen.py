@@ -1114,6 +1114,8 @@ def emit_server(cmd, opname):
         L.append("\tif (__chk) gb_sv_err_pop(&__e0);")
     if cmd.name in ("eglDestroyContext", "glXDestroyContext"):
         L.append("\tgb_sv_scratch_drop((void *)a_ctx);")
+    if cmd.name in cfg.SERVER_PRE:
+        L.append("\tif (!__skip) { " + cfg.SERVER_PRE[cmd.name] + " }")
     L.append("\tuint64_t __t0 = gb_stat_now();")
     if cmd.name == "glGetError":
         # errors the server took out of the driver and could not put back

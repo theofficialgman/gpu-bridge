@@ -660,6 +660,14 @@ ALIASES = {
     "glScissorArrayvNV": "glScissorArrayv",
 }
 
+# C statements the server runs before the native call (argument variables are
+# a_<name>). A deleted buffer name may be one of the server's own scratch
+# buffers, and the name can be handed straight back to the application.
+SERVER_PRE = {
+    "glDeleteBuffers": "gb_sv_scratch_buffers_deleted(a_n, a_buffers);",
+    "glDeleteBuffersARB": "gb_sv_scratch_buffers_deleted(a_n, a_buffers);",
+}
+
 # Calls after which the server's cached "current native context" is stale.
 CTX_CHANGERS = {"eglMakeCurrent", "eglReleaseThread", "glXMakeCurrent",
                 "glXMakeContextCurrent", "glXMakeCurrentReadSGI",

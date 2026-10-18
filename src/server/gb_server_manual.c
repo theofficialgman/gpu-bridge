@@ -487,6 +487,28 @@ bad:
  * Desktop GL: glGetBufferSubData / glGetNamedBufferSubData. ES has neither,
  * so a GL ES context reads through a transient READ mapping.
  */
+/* The application deletes buffers by name; one may be a scratch buffer of
+ * this server (an application that cleans up name ranges). Forget it before
+ * the name can be given back to the application as one of its own. */
+void gb_sv_scratch_buffers_deleted(int32_t n, const uint32_t *names)
+{
+	struct gb_sth *t = gb_sv_this_thread();
+
+	if (!t || !names || n <= 0)
+		return;
+	for (struct gb_scratch *s = t->scratch; s; s = s->next)
+		for (int32_t i = 0; i < n; i++) {
+			if (names[i] && names[i] == s->vbo) {
+				s->vbo = 0;
+				s->vbo_cap = s->vbo_off = 0;
+			}
+			if (names[i] && names[i] == s->ebo) {
+				s->ebo = 0;
+				s->ebo_cap = s->ebo_off = 0;
+			}
+		}
+}
+
 /* A buffer addressed by name on a context without the named-buffer entry
  * points (ES, GL < 4.5): bind it to COPY_READ_BUFFER for the operation and put
  * the application's binding back. */
