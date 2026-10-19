@@ -195,6 +195,33 @@ before the X server has exposed it is undefined by the pixel-ownership rule
 and NVIDIA discards the fragments. Tests now wait for MapNotify + Expose
 (0 failures in 130 runs afterwards).
 
+### More real applications (2026-10-19)
+
+Unmodified Ubuntu 24.04 armhf games and players, unpacked (not installed)
+under `~/gb/apps2/root` with `tools/realapps/getapp.sh`; each is compared with
+the same program built for arm64 running natively on the NVIDIA driver (mpv: the
+system arm64 mpv), and where useful with the armhf build on llvmpipe (no
+bridge). Scripts: `tools/realapps/`.
+
+| Application | What it exercises | Result (bridge vs native arm64) |
+|---|---|---|
+| **OpenArena** (ioquake3 `renderer_opengl2`, GL 3.2 core, GLSL shaders, FBOs) | demo timedemo, 383 frames | 268 fps vs 290 fps = **92%**; llvmpipe armhf: 4.4 fps. Screenshots at two frames match native except a spinning item (0.3% of pixels) |
+| **OpenArena** (`renderer_opengl1`: fixed function, client-memory vertex arrays) | same demo | 231 fps vs 477 fps = **48%** (see below); screenshots match as above |
+| **SuperTuxKart 1.4** (GLES 3.2 through EGL, hardware skinning, UBOs, instancing) | 20 s AI race, 4 karts, `--profile-time` | 105.6 fps vs 107.3 fps = **98%**; races render identically (window capture) |
+| **mpv 0.41** (`--vo=gpu --gpu-context=x11egl`, libplacebo OpenGL, lavfi test video) | 900 frames; `--profile=high-quality` first frame | wall time 16.0 s vs 16.0-17.2 s (decode-bound); the high-quality (EWA scaling, debanding, dither) frame is **bit-identical** to native |
+
+The fixed-function path is the one place the bridge is clearly slower: the
+legacy ioquake3 renderer makes about 1,100 GL calls per frame (431,884 requests
+for the demo) and keeps its vertex data in client memory, so every draw uploads
+the used part of each array. The server is idle half the time (client side:
+marshalling plus the application). Ideas if this matters: honor
+`GL_EXT_compiled_vertex_array` (`glLockArraysEXT`) to upload an array range
+once for several draws, and coalesce neighbouring client-array uploads.
+
+Not tested: neverball and extremetuxracer (their data directory is a
+compile-time absolute path, so they need `/usr/share` overlaid, which needs
+root and a private mount that was not approved), GTK4 (GL renderer).
+
 ### CPU cost of the bridge, per process (glmark2, whole run)
 
 Same 33 scenes, native arm64 vs bridged armhf, on the live display. A sampler
