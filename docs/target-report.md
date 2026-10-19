@@ -208,6 +208,8 @@ bridge). Scripts: `tools/realapps/`.
 | **OpenArena** (ioquake3 `renderer_opengl2`, GL 3.2 core, GLSL shaders, FBOs) | demo timedemo, 383 frames | 268 fps vs 290 fps = **92%**; llvmpipe armhf: 4.4 fps. Screenshots at two frames match native except a spinning item (0.3% of pixels) |
 | **OpenArena** (`renderer_opengl1`: fixed function, client-memory vertex arrays) | same demo | 231 fps vs 477 fps = **48%** (see below); screenshots match as above |
 | **SuperTuxKart 1.4** (GLES 3.2 through EGL, hardware skinning, UBOs, instancing) | 20 s AI race, 4 karts, `--profile-time` | 105.6 fps vs 107.3 fps = **98%**; races render identically (window capture) |
+| **neverball 1.6** (fixed-function GL, SDL2; apt `neverball:arm64` then `:armhf`, one at a time) | level intro screen | renders on the NVIDIA GPU, identical content to native (window capture) |
+| **Extreme Tux Racer 0.8.3** (fixed-function GL, textures, fog, display lists) | menus and a race (driven with xdotool) | renders identically to native; ran to the end of its 90 s test without a fault |
 | **mpv 0.41** (`--vo=gpu --gpu-context=x11egl`, libplacebo OpenGL, lavfi test video) | 900 frames; `--profile=high-quality` first frame | wall time 16.0 s vs 16.0-17.2 s (decode-bound); the high-quality (EWA scaling, debanding, dither) frame is **bit-identical** to native |
 
 The fixed-function path is the one place the bridge is clearly slower: the
@@ -218,9 +220,9 @@ marshalling plus the application). Ideas if this matters: honor
 `GL_EXT_compiled_vertex_array` (`glLockArraysEXT`) to upload an array range
 once for several draws, and coalesce neighbouring client-array uploads.
 
-Not tested: neverball and extremetuxracer (their data directory is a
-compile-time absolute path, so they need `/usr/share` overlaid, which needs
-root and a private mount that was not approved), GTK4 (GL renderer).
+neverball and extremetuxracer were installed with apt (arm64 first, then
+swapped for armhf so only one architecture was present) and removed again
+afterwards. Not tested: GTK4 (GL renderer).
 
 ### CPU cost of the bridge, per process (glmark2, whole run)
 
