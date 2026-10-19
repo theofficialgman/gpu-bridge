@@ -10,5 +10,5 @@ case $mode in
 esac
 export XDG_DATA_DIRS=$R/usr/share:/usr/share XDG_CONFIG_HOME=/tmp/mpv_cfg HOME=/tmp/mpv_home; mkdir -p /tmp/mpv_cfg /tmp/mpv_home
 s=$(date +%s.%N)
-timeout ${T:-120} $MPV --no-config --no-audio --untimed --msg-level=all=info "$@" 2>&1
+timeout ${T:-120} $MPV --no-config --no-audio ${UNTIMED---untimed} --msg-level=all=info "$@" 2>&1
 echo "rc=$? wall=$(echo "$(date +%s.%N) - $s" | bc)"

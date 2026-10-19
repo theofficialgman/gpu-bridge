@@ -224,6 +224,57 @@ neverball and extremetuxracer were installed with apt (arm64 first, then
 swapped for armhf so only one architecture was present) and removed again
 afterwards. Not tested: GTK4 (GL renderer).
 
+### Performance and CPU cost, unlocked and vsynced (2026-10-19)
+
+Method: `tools/realapps/bench.sh <scenario> <native|bridge|sw>`. Frame rate
+from the application's own counter or `fpscount.c` (an `LD_PRELOAD` swap
+counter), CPU from `cpuwin.py` (utime+stime of every process sampled twice a
+second; 100% = one of the four cores; the sampler itself shows up as about 7%
+`python3`). *Native* = the arm64 build on the NVIDIA driver, *bridge* = the
+armhf build through the bridge, *sw* = armhf on llvmpipe. Unlocked runs use
+`__GL_SYNC_TO_VBLANK=0`, vsynced runs leave the driver default and set each
+application's own swap interval to 1.
+
+Frame rate unlocked (CPU as % of one core: application / `gbd`):
+
+| Scenario | Native arm64 | Bridge armhf | Bridge vs native |
+|---|---|---|---|
+| OpenArena GL3.2 renderer (timedemo, 6,900 frames) | 358 fps; app 93% | 324 fps; app 43% + gbd 69% | 90% |
+| OpenArena fixed-function renderer | 669 fps; app 90% | 287 fps; app 48% + gbd 74% | 43% |
+| OpenArena GL3.2, armhf software (llvmpipe) | | 3.6 fps; app 266% | 1% |
+| SuperTuxKart (40 s race) | 112.9 fps; app 96% | 111.6 fps; app 70% + gbd 52% | 99% |
+| mpv `--profile=high-quality`, 1,500 frames | 181 fps; mpv 148% | 139 fps; mpv 97% + gbd 61% | 77% |
+| glxgears | 2,790 fps; app 90% | 2,783 fps; client 17% + gbd 94% | 100% |
+
+Presentation locked to the display (60 fps in every case; CPU as above):
+
+| Scenario | Native arm64 | Bridge armhf (app + gbd) | Extra |
+|---|---|---|---|
+| OpenArena GL3.2 renderer | 38.8% | 16.9% + 22.8% = 39.7% | +1 point |
+| OpenArena fixed-function | 24.3% | 21.6% + 34.7% = 56.3% | +32 points |
+| SuperTuxKart | 48.4% | 44.8% + 28.9% = 73.7% | +25 points |
+| mpv (60 fps video, high-quality) | 50.8% (kwin 15%) | 49.1% + 24.0% = 73.1% (kwin 14%) | +22 points |
+| glxgears | 8.1% | gbd 7.9% (client below the top 10) | whole machine 45.9% vs 48.6% |
+| es2gears (EGL/GLES2) | 8.4% | gbd 7.7% | whole machine 44.7% vs 47.0% |
+
+Is the bridge burning CPU waiting? No evidence of it. With almost no GL work
+(gears at 60 fps) the whole machine uses 2-3 points more than native, and `gbd`
+costs about what the native application did. With real workloads the extra is
+proportional to the call rate: SuperTuxKart sends about 82,000 requests per
+second (4.1 million in 50 s), and `GB_STATS` shows `gbd` busy 33 s of 52 s but
+using 18 s of CPU, the rest blocked inside the driver, and idle (waiting for the
+client) 19.5 s without using CPU (the wait spins a bounded number of
+iterations, then sleeps on a futex). The client side costs about as much as
+the native application, because marshalling takes what the driver call took;
+the driver work itself moves to `gbd`. In OpenArena's GL3.2 renderer, which
+batches its work, the total is the same as native; the legacy fixed-function
+renderer, which uploads client-memory vertex arrays on every draw, pays for it
+(see the earlier note about `glLockArraysEXT` and coalescing).
+
+Unlocked mpv is the other gap (77%): the video frames reach the GPU through
+mapped buffers, which the bridge emulates with a shadow copy that is read back
+and written up around each fence.
+
 ### CPU cost of the bridge, per process (glmark2, whole run)
 
 Same 33 scenes, native arm64 vs bridged armhf, on the live display. A sampler
