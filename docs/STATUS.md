@@ -641,6 +641,29 @@ session now runs without internal errors. `KHR-GL46.vertex_attrib_binding.
 advanced-bindingUpdate` crashes the armhf client with SIGBUS natively too (it
 makes 2-byte-aligned float stores through a mapped pointer).
 
+### Final regression with all fixes (2026-10-19)
+
+Bridged vs native, case by case, same lists and configurations as above:
+
+| Set | Compared | Pass/Pass | Other identical | Differences |
+|---|---|---|---|---|
+| GL 4.6 over EGL (configs 1,2,3,28,55) | 280,494 | 252,622 | NotSupported 22,204; Fail/Fail 5,620; warnings 48 | **0** |
+| GL 4.6 over GLX (config 1) | 83,364 | 71,251 | NotSupported 9,114; Fail/Fail 2,990; warnings 8 | 1 (native Fail, bridged Pass) |
+| ES 3.2 over GLX (config 1) | 21,045 | 13,353 | NotSupported 7,624; Fail/Fail 67; 1 warning | **0** |
+| ES 3.2 over EGL | 187,792 | 175,398 | NotSupported 11,772; Fail/Fail 503; 81 warnings | 38 |
+
+The 38 ES 3.2 EGL differences: 35 GLES1 cases (that build has no GLES1; all
+35 pass with the `x11_egl` build), `flush_finish.flush` and `.finish`
+(timing-correlation tests; "suspicious performance behavior" on a loaded
+machine, pass alone), and one `primitive_restart` ResourceError (passes alone).
+
+Failures present in both columns are the NVIDIA driver's own. Known
+non-bridge issues: the driver's GLSL compiler crashes on three
+`enhanced_layouts` shaders, and `vertex_attrib_binding.advanced-bindingUpdate`
+makes unaligned float stores that armhf hardware rejects (both crash natively
+too; the bridge aborts the client when the server dies,
+`GB_ABORT_ON_SERVER_LOSS=1`, so the harness sees the same crash).
+
 Fixed afterwards (found while chasing the open items):
 
 - `debug.error_groups` failing at random: the server's upcall writer asked
