@@ -67,6 +67,8 @@ static void thread_exit_cleanup(void *p)
 
 	if (!c)
 		return;
+	if (c->gen == G.gen)
+		gb_cl_flush(c);
 	if (c->helper_on && c->gen == G.gen) {
 		c->helper_stop = 1;
 		pthread_join(c->helper, NULL);
@@ -75,7 +77,17 @@ static void thread_exit_cleanup(void *p)
 		gb_chan_close(&c->chan); /* lets the server worker exit */
 		gb_chan_destroy(&c->chan);
 	}
+	free(c->stage);
 	free(c);
+}
+
+/* The main thread does not run key destructors when the process exits */
+__attribute__((destructor)) static void exit_flush(void)
+{
+	struct gb_cl *c = t_cl;
+
+	if (c && c->gen == G.gen)
+		gb_cl_flush(c);
 }
 
 static void atfork_child(void)
@@ -461,6 +473,48 @@ static void gb_cl_lost(struct gb_cl *cx)
 }
 
 
+/*
+ * Request batching. Asynchronous requests (no reply wanted) of up to
+ * STAGE_MAX_MSG bytes are copied into a staging area instead of the ring and
+ * leave as one GB_OPX_Batch record: when the area is full, before any other
+ * kind of request (so ordering is kept), on glFlush and when the thread ends.
+ * This replaces a ring reservation, a release store, a fence and a wakeup
+ * check per request by a memcpy, which is what an immediate-mode application
+ * (glVertex3f ...) pays for most of its calls.
+ */
+#define STAGE_BYTES (32u * 1024)
+#define STAGE_MAX_MSG 1024u
+static int g_batch = -1;
+
+void gb_cl_flush(struct gb_cl *cx)
+{
+	struct gb_out o;
+	uint32_t n = cx->stage_len;
+
+	if (!n)
+		return;
+	cx->stage_len = 0;
+	if (cx->lost)
+		return;
+	const struct gb_cmd_hdr *first = (const void *)cx->stage;
+	uint32_t total = first->size == n ? n : (uint32_t)sizeof(struct gb_cmd_hdr) + n;
+
+	if (gb_out_begin(&o, &cx->chan.req, total)) {
+		gb_cl_lost(cx);
+		return;
+	}
+	if (first->size == n) { /* a single request: send it as it is */
+		memcpy(o.p, cx->stage, n);
+	} else {
+		struct gb_cmd_hdr h = { GB_OPX_Batch, total, ++cx->chan.seq, 0 };
+
+		memcpy(o.p, &h, sizeof(h));
+		memcpy(o.p + sizeof(h), cx->stage, n);
+	}
+	if (gb_out_end(&o))
+		gb_cl_lost(cx);
+}
+
 int gb_cl_begin(struct gb_cl *cx, struct gb_out *o, uint32_t op,
 		uint32_t total, uint32_t flags)
 {
@@ -485,6 +539,30 @@ int gb_cl_begin(struct gb_cl *cx, struct gb_out *o, uint32_t op,
 		   !cx->in_upcall) {
 		gb_cl_poll_upcalls(cx);
 	}
+	if (__builtin_expect(g_batch < 0, 0))
+		g_batch = getenv("GB_NO_BATCH") == NULL;
+	if (g_batch && !(flags & GB_CMD_F_WANT_REPLY) && total <= STAGE_MAX_MSG &&
+	    !cx->sync_dbg && !cx->lost && !(cx->cur && cx->cur->debug_cb)) {
+		/* (with a debug callback requests go out at once: messages are
+		 * delivered to an idle application by the helper thread) */
+		if (__builtin_expect(!cx->stage, 0))
+			cx->stage = malloc(STAGE_BYTES);
+		if (cx->stage) {
+			if (cx->stage_len + total > STAGE_BYTES)
+				gb_cl_flush(cx);
+			struct gb_cmd_hdr h = { op, total, ++cx->chan.seq, flags };
+
+			o->p = cx->stage + cx->stage_len;
+			o->size = total;
+			o->ring = &cx->chan.req;
+			o->heap = 0;
+			o->staged = 1;
+			memcpy(o->p, &h, sizeof(h));
+			return 0;
+		}
+	}
+	gb_cl_flush(cx); /* keep the order: staged requests go first */
+	o->staged = 0;
 	rc = gb_out_begin(o, &cx->chan.req, total);
 
 	if (rc) {
@@ -505,6 +583,7 @@ static void upcall_reply(struct gb_cl *cx, uint32_t id, uint32_t seq,
 	struct gb_out o;
 	uint32_t size = GB_ALIGN_UP((uint32_t)sizeof(struct gb_cmd_hdr) + len, 8u);
 
+	gb_cl_flush(cx);
 	if (gb_out_begin(&o, &cx->chan.req, size)) {
 		gb_cl_lost(cx);
 		return;
@@ -721,10 +800,16 @@ void gb_cl_upcall_helper_start(struct gb_cl *cx)
 
 void gb_cl_end(struct gb_cl *cx, struct gb_out *o)
 {
-	uint32_t flags = ((const struct gb_cmd_hdr *)o->p)->flags;
+	const struct gb_cmd_hdr *oh = (const struct gb_cmd_hdr *)o->p;
+	uint32_t flags = oh->flags;
 
-	if (gb_out_end(o))
+	if (o->staged) {
+		cx->stage_len += o->size;
+		if (oh->opcode == GB_OP_glFlush)
+			gb_cl_flush(cx);
+	} else if (gb_out_end(o)) {
 		gb_cl_lost(cx);
+	}
 	/* GL_DEBUG_OUTPUT_SYNCHRONOUS: the application expects its callback
 	 * before the offending call returns; async calls are made to
 	 * synchronise (the reply is preceded by the call's debug messages). */

@@ -174,6 +174,9 @@ struct gb_cl {
 				      * once the application has been idle */
 	pthread_t helper;
 	pthread_mutex_t rsp_mu;     /* recursive; held while consuming responses */
+	/* small asynchronous requests wait here and go out as one GB_OPX_Batch */
+	uint8_t *stage;
+	uint32_t stage_len;
 };
 
 struct gb_proc {
@@ -194,6 +197,7 @@ struct gb_cl *gb_cl_get(void);
 int gb_cl_begin(struct gb_cl *cx, struct gb_out *o, uint32_t op,
 		uint32_t total, uint32_t flags);
 void gb_cl_end(struct gb_cl *cx, struct gb_out *o);
+void gb_cl_flush(struct gb_cl *cx); /* send the staged requests */
 int gb_cl_wait_reply(struct gb_cl *cx, struct gb_in *in, uint32_t op);
 void gb_cl_poll_upcalls(struct gb_cl *cx);
 /* Deliver non-blocking upcalls (debug messages) from a helper thread while

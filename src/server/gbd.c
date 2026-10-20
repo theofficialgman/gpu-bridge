@@ -715,6 +715,98 @@ int gb_sv_upcall_call(struct gb_sth *t, uint32_t id, const void *payload,
 	}
 }
 
+/*
+ * Execute one request that is already in memory. Used for requests that
+ * arrive as ring records and for the ones packed inside a GB_OPX_Batch.
+ */
+static void handle_msg(struct gb_sth *t, const uint8_t *p, uint32_t size,
+		       int stats, int trace_ops, int trace_errs, int in_batch);
+
+static void handle_batch(struct gb_sth *t, const uint8_t *p, uint32_t size,
+			 int stats, int trace_ops, int trace_errs)
+{
+	/* p/size: the records after the batch's own header, each a complete
+	 * asynchronous request of the usual layout */
+	uint32_t off = 0;
+
+	while (size - off >= sizeof(struct gb_cmd_hdr)) {
+		struct gb_cmd_hdr h;
+
+		memcpy(&h, p + off, sizeof(h));
+		if (h.size < sizeof(h) || h.size > size - off ||
+		    (h.size & 7) || h.opcode == GB_OPX_Batch)
+			break; /* malformed: stop, the rest is not trusted */
+		handle_msg(t, p + off, h.size, stats, trace_ops, trace_errs, 1);
+		if (stats)
+			t->st_msgs++;
+		off += h.size;
+	}
+	gb_sv_upcall_flush(t); /* messages from the whole batch, in order */
+}
+
+static void handle_msg(struct gb_sth *t, const uint8_t *p, uint32_t size,
+		       int stats, int trace_ops, int trace_errs, int in_batch)
+{
+	struct gb_cmd_hdr h;
+	struct gb_r r;
+
+	memcpy(&h, p, sizeof(h)); /* copy: ring memory is untrusted */
+	gb_r_init(&r, p, size);
+
+	t_recent_cur = h.opcode;
+	t_recent[t_recent_n++ % RECENT_OPS] = h.opcode;
+	t->cur_req_sync = !!(h.flags & GB_CMD_F_WANT_REPLY);
+	if (trace_ops) {
+		char tb[96];
+		int tn = snprintf(tb, sizeof(tb), "op %s\n",
+				  h.opcode && h.opcode < GB_OP_COUNT
+					  ? gb_op_names[h.opcode]
+					  : "opx");
+		(void)!write(2, tb, (size_t)tn);
+	}
+	if (h.size != size) {
+		gb_sv_proto_error(t, &h);
+	} else if (h.opcode > 0 && h.opcode < GB_OP_COUNT &&
+		   gb_srv_table[h.opcode]) {
+		gb_srv_table[h.opcode](t, &h, &r);
+	} else if (h.opcode == GB_OPX_Batch && !in_batch) {
+		handle_batch(t, p + sizeof(h), size - (uint32_t)sizeof(h), stats,
+			     trace_ops, trace_errs);
+	} else if (h.opcode > GB_OPX_BASE && h.opcode < GB_OPX_END) {
+		uint64_t tx = stats ? mono_ns() : 0;
+
+		gb_srv_manual_dispatch(t, &h, &r);
+		if (stats) {
+			unsigned ox = h.opcode - GB_OPX_BASE;
+
+			if (ox < 64) {
+				g_opx[ox].calls++;
+				g_opx[ox].ns += mono_ns() - tx;
+			}
+		}
+	} else {
+		gb_sv_proto_error(t, &h);
+	}
+	if (trace_errs && h.opcode < GB_OP_COUNT) {
+		struct gb_errs e;
+
+		gb_sv_err_pop(&e);
+		for (int i = 0; i < e.n; i++) {
+			char tb[128];
+			int tn = snprintf(tb, sizeof(tb), "ERR 0x%x after %s\n",
+					  e.e[i],
+					  h.opcode ? gb_op_names[h.opcode]
+						   : "opx");
+			(void)!write(2, tb, (size_t)tn);
+		}
+		gb_sv_err_raise(&e);
+	}
+	gb_tmp_reset(t);
+	gb_sv_fd_release(t);
+	if (!in_batch)
+		gb_sv_upcall_flush(t); /* messages from asynchronous requests */
+}
+
 static void *worker_main(void *arg)
 {
 	struct gb_sth *t = arg;
@@ -757,66 +849,14 @@ static void *worker_main(void *arg)
 		}
 		if (stats)
 			t->st_idle_ns += t1 - t0;
-		struct gb_cmd_hdr h;
-		if (in.size < sizeof(h)) {
+		if (in.size < sizeof(struct gb_cmd_hdr)) {
 			if (dcur)
 				free(dcur);
 			else
 				gb_in_release(&in);
 			break;
 		}
-		memcpy(&h, in.p, sizeof(h)); /* copy: ring memory is untrusted */
-		struct gb_r r;
-		gb_r_init(&r, in.p, in.size);
-
-		t_recent_cur = h.opcode;
-		t_recent[t_recent_n++ % RECENT_OPS] = h.opcode;
-		t->cur_req_sync = !!(h.flags & GB_CMD_F_WANT_REPLY);
-		if (trace_ops) {
-			char tb[96];
-			int tn = snprintf(tb, sizeof(tb), "op %s\n",
-					  h.opcode && h.opcode < GB_OP_COUNT
-						  ? gb_op_names[h.opcode]
-						  : "opx");
-			(void)!write(2, tb, (size_t)tn);
-		}
-		if (h.size != in.size) {
-			gb_sv_proto_error(t, &h);
-		} else if (h.opcode > 0 && h.opcode < GB_OP_COUNT &&
-			   gb_srv_table[h.opcode]) {
-			gb_srv_table[h.opcode](t, &h, &r);
-		} else if (h.opcode > GB_OPX_BASE && h.opcode < GB_OPX_END) {
-			uint64_t tx = stats ? mono_ns() : 0;
-
-			gb_srv_manual_dispatch(t, &h, &r);
-			if (stats) {
-				unsigned ox = h.opcode - GB_OPX_BASE;
-
-				if (ox < 64) {
-					g_opx[ox].calls++;
-					g_opx[ox].ns += mono_ns() - tx;
-				}
-			}
-		} else {
-			gb_sv_proto_error(t, &h);
-		}
-		if (trace_errs && h.opcode < GB_OP_COUNT) {
-			struct gb_errs e;
-
-			gb_sv_err_pop(&e);
-			for (int i = 0; i < e.n; i++) {
-				char tb[128];
-				int tn = snprintf(tb, sizeof(tb),
-						  "ERR 0x%x after %s\n", e.e[i],
-						  h.opcode ? gb_op_names[h.opcode]
-							   : "opx");
-				(void)!write(2, tb, (size_t)tn);
-			}
-			gb_sv_err_raise(&e);
-		}
-		gb_tmp_reset(t);
-		gb_sv_fd_release(t);
-		gb_sv_upcall_flush(t); /* messages from asynchronous requests */
+		handle_msg(t, in.p, in.size, stats, trace_ops, trace_errs, 0);
 		if (dcur)
 			free(dcur);
 		else

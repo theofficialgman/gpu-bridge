@@ -46,6 +46,7 @@ struct gb_out {
 	uint32_t size;
 	struct gb_ring *ring;
 	int heap;          /* p is malloc'd (message too big for one record) */
+	int staged;        /* p is in the client's batch staging area: nothing to commit */
 };
 
 /* Reserve a message of `size` bytes (multiple of 8, >= 16). The caller fills

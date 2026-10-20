@@ -52,6 +52,7 @@ enum gb_opx {
 	GB_OPX_GetPointer,        /* kind, a, b, c -> pointer-sized value (driver's) */
 	GB_OPX_MultiDrawElements, /* mode, type, n, flags, counts[], basevertex[], offsets[] (async) */
 	GB_OPX_RaiseError,        /* GL error code the client detected itself (async) */
+	GB_OPX_Batch,             /* consecutive complete async requests, packed (async) */
 	GB_OPX_END
 };
 
