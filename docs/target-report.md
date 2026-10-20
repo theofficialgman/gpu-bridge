@@ -257,7 +257,7 @@ Presentation locked to the display (60 fps in every case; CPU as above):
 | glxgears | 8.1% | gbd 7.9% (client below the top 10) | whole machine 45.9% vs 48.6% |
 | es2gears (EGL/GLES2) | 8.4% | gbd 7.7% | whole machine 44.7% vs 47.0% |
 | neverball (both presented at 60 fps) | 59.7 fps; app 47.6% | 60 fps; client 18.9% + gbd 55.6% = 74.5% (was 24.2% + 83.1%) | +27 points (was +60) |
-| Extreme Tux Racer (2560x1600 fullscreen) | display-bound; app 39.8% (frame counter could not hook SFML) | **54 fps**, client 59.9% + gbd 69.9% (was 25 fps, 65.7% + 83.1%); with `GB_LAZY_GETERROR=1` **59 fps**, client 46.0% + gbd 61.1% | |
+| Extreme Tux Racer (2560x1600 fullscreen) | display-bound; app 39.8% (frame counter could not hook SFML) | **60 fps**, client 52.8% + gbd 60.5% (was 25 fps, 65.7% + 83.1%); with `GB_LAZY_GETERROR=1` **60 fps**, client 38.6% + gbd 45.8% | |
 
 
 (The `__GL_SYNC_TO_VBLANK=0` override did not unlock neverball or Extreme Tux
@@ -475,10 +475,10 @@ and are not part of the application.
 
 | Application (API) | Native arm64 | Bridge armhf (app + gbd) |
 |---|---|---|
-| glmark2 2023.01, GLX (GL 2.0 scenes, 31 scenes) | score 2262; app 95% | **2174 (96%)**; 30% + 87% |
-| glmark2-es2, EGL (GLES 2.0) | score 2263; app 96% | **2135 (94%)**; 25% + 86% |
-| minetest 5.6.1 (Irrlicht, fixed-function with client arrays), unlocked | **179 fps**; 112% | **55 fps**; 86% + 91% |
-| minetest, vsynced | 60 fps; 56% | **30 fps**; 93% + 50% |
+| glmark2 2023.01, GLX (GL 2.0 scenes, 31 scenes) | score 2262; app 95% | **2240 (99%)** (was 2174); 30% + 87% |
+| glmark2-es2, EGL (GLES 2.0) | score 2263; app 96% | **2172 (96%)** (was 2135); 25% + 86% |
+| minetest 5.6.1 (Irrlicht, fixed-function with client arrays), unlocked | 179 fps; 112% | **166 fps** (was 55); 101% + 89% |
+| minetest, vsynced | 60 fps; 56% | **60 fps** (was 30); 91% + 55% |
 | SuperTux 0.6.3 (SDL2, GL 3.3 core), a level | 60 fps; 40% | 57 fps; 72% + 63% |
 | Chromium B.S.U. (fixed-function GL, textures, blending) | 49 fps; 6% | 47 fps; 10% + 7% |
 | X-Moto 0.6.2 (fixed-function GL), tutorial level | 50 fps; 28% | 50 fps; 23% + 8% |
@@ -495,16 +495,72 @@ All of them render on the NVIDIA GPU through the bridge with the same picture
   every frame) is at 53% (GL) and 38% (ES2), `buffer ... update-method=map
   interleave=true` (mapped-buffer writes) at 21% and 19%, and a few 2D scenes
   (`desktop`, `ideas`) at 58-79% of native.
-* **minetest is the worst real case.** `GB_STATS` shows 3.5 million indexed
-  client-array draws in 50 s, 8 GB of vertex data sent (160 MB/s), `gbd` busy
-  95% of the time at 9.8 us per draw: 2.4 us in the driver's draw, 0.8 us per
-  attribute copy into the scratch buffer, 0.6 us per `gl*Pointer`, the rest
-  index validation and buffer binds. The client side is as busy (86-93%),
-  copying the same arrays into the ring. Vsynced it needs two vblanks per
-  frame (30 fps). Next steps if wanted: keep client arrays that did not
-  change (static meshes drawn every frame) in the server's buffer instead of
-  sending them again, and fewer driver calls per draw (two `glIsBuffer` and
-  four `glBindBuffer` per draw can mostly go).
+* **minetest was the worst real case, and client arrays were the reason.**
+  `GB_STATS` showed 3.5 million indexed client-array draws in 50 s, 8 GB of
+  vertex data (160 MB/s), `gbd` busy 95% at 9.8 us per draw, the client blocked
+  on a full ring. Five changes (next section) took it to 166 fps unlocked
+  (native 179) and a steady 60 fps vsynced.
+* **Remaining glmark2 gaps are not client arrays.** `buffer ... update-method=map`
+  (mapped-buffer writes) is at 18-34% of native: a `glMapBuffer(WRITE_ONLY)`
+  keeps the untouched part of the buffer, so the client downloads the whole
+  buffer from the server on every map (a round trip plus the data) and uploads
+  it again at unmap. Fixing that needs either a trustworthy mirror of the
+  buffer's contents or dirty-range tracking; not done. `desktop` and `ideas`
+  on ES2 (72%, 58%) are dominated by the driver's own per-draw cost: a 60-byte
+  client-array draw takes 12 us inside the driver there, natively as well.
+
+## Client arrays (minetest, glmark2 `build`, ETR)
+
+Changes, in the order they paid off (`tests/loopback/array_bench.c` measures
+the per-draw cost; Tegra numbers, armhf client, 600 vertices x 36 bytes
+interleaved with 1800 indices / 30 vertices with 90 indices; native 21 us / 2.4 us):
+
+| | 600 vtx | 30 vtx |
+|---|---|---|
+| before this work | 92 us | 11.7 us |
+| attributes that share memory sent once (an interleaved array was sent once per attribute) | 46 us | 9.9 us |
+| `glFinish` every 50 draws removed from the benchmark (it was half of the small-draw time, native too) | 44 us | 5.5 us |
+| the driver reads the request's own memory (no scratch upload, no binds), min/max index scan in one pass under a single fault guard, inline messages up to half a ring | 33 us | 4.9 us |
+
+* **One copy of shared memory.** The client merges attribute ranges that
+  overlap into blobs; each attribute names its blob and offset. A four-attribute
+  interleaved mesh went from 4x the bytes to 1x (minetest: 8 GB to about 2 GB).
+* **No upload.** The server calls `gl*Pointer` with pointers into the request
+  (the data is there already, validated against the indices, and a GL consumes
+  client arrays during the draw call), with `GL_ARRAY_BUFFER` at 0 for the
+  calls (restored afterwards only if the application had one bound). That
+  removes the scratch-buffer copy, four `glBindBuffer` calls and the two
+  `glIsBuffer` checks per draw (the latter are now every 64th draw as a
+  safety net for scratch names the server cannot see deleted).
+  `GB_ARRAYS_VIA_VBO=1` goes back to the scratch buffer.
+* **Indices are not uploaded either**: client indices come with the request
+  and are passed on as a client pointer.
+* **Vertex range.** For indexed draws only the vertices from the smallest to
+  the largest index are sent. Folded into the attribute pointers on the server
+  (the Tegra driver mishandles a negative base vertex combined with client
+  pointers: it indexes at 2^32 and faults, which is what the first version of
+  this change hit in `glx_smoke`).
+* **Client index scan**: min/max over the indices in one pass under one
+  `sigsetjmp` guard (previously 256-byte chunks with a per-index branch).
+* **Messages up to half a ring are one record** the server reads in place
+  (they were chunked and reassembled above a quarter): glmark2's 492 KB mesh
+  per frame. A larger request ring was slower for medium messages (the 1 MB
+  ring stays in the L2 cache), so the ring stays 1 MB.
+
+Result: minetest 55 -> 166 fps (unlocked), 30 -> 60 (vsynced); glmark2 score
+2174 -> 2240 (GL), 2135 -> 2172 (ES2), `build use-vbo=false` 53% -> 85% (GL),
+38% -> 63% (ES2); Extreme Tux Racer holds 60 fps with exact `glGetError`
+(client 53% + gbd 61% instead of 60% + 70%).
+
+What is left per draw is one driver call per attribute plus the draw. The
+driver calls could only be skipped by keeping the data at the same address
+between draws and tracking the driver's pointer state, which was not
+attempted. Conformance: the GLES2/3/3.1 vertex-array, draw, draw-indirect,
+primitive-restart and vertex-attribute-binding groups plus `KHR-GL46.draw_indirect`
+give the same results natively and bridged over EGL and GLX (the only
+difference is the existing armhf SIGBUS in `vertex_attrib_binding.advanced-bindingUpdate`);
+`state_smoke` gained range and interleaved client-array tests.
+
 * **SuperTux is at 57-60 fps but costs 3.4 times the CPU** (135% against 40%).
   Not profiled yet; it uses the GL 3.3 core renderer, so it is not the
   client-array path above.
