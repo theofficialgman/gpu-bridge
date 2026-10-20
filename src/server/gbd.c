@@ -446,6 +446,9 @@ uint64_t gb_stat_mono_ns(void)
 static struct {
 	uint64_t calls, ns;
 } g_native[GB_OP_COUNT];
+/* time spent in the hand-written (opx) request handlers */
+static struct { uint64_t calls, ns; } g_opx[64];
+
 
 void gb_stat_native_add(uint32_t op, uint64_t ns)
 {
@@ -718,7 +721,7 @@ static void *worker_main(void *arg)
 	static int stats = -1;
 
 	if (stats < 0)
-		stats = getenv("GB_STATS") != NULL;
+		stats = (getenv("GB_STATS") ? getenv("GB_STATS") : getenv("GB_SERVER_STATS")) != NULL;
 	/* GB_TRACE_OPS: one line per request on stderr (debugging aid) */
 	int trace_ops = getenv("GB_TRACE_OPS") != NULL;
 	/* GB_TRACE_ERRORS: name the request after which a GL error appeared
@@ -783,7 +786,17 @@ static void *worker_main(void *arg)
 			   gb_srv_table[h.opcode]) {
 			gb_srv_table[h.opcode](t, &h, &r);
 		} else if (h.opcode > GB_OPX_BASE && h.opcode < GB_OPX_END) {
+			uint64_t tx = stats ? mono_ns() : 0;
+
 			gb_srv_manual_dispatch(t, &h, &r);
+			if (stats) {
+				unsigned ox = h.opcode - GB_OPX_BASE;
+
+				if (ox < 64) {
+					g_opx[ox].calls++;
+					g_opx[ox].ns += mono_ns() - tx;
+				}
+			}
 		} else {
 			gb_sv_proto_error(t, &h);
 		}
@@ -833,6 +846,13 @@ struct gb_sth *gb_sv_thread(int i)
 	return i >= 0 && i < g_nthreads ? g_threads[i] : NULL;
 }
 
+static void report_stats(void);
+static void usr1_report(int sig)
+{
+	(void)sig;
+	report_stats(); /* GB_STATS=1: kill -USR1 <gbd> prints the counters now */
+}
+
 static void report_native(void)
 {
 	uint64_t total = 0, calls = 0;
@@ -842,6 +862,11 @@ static void report_native(void)
 		total += g_native[i].ns;
 		calls += g_native[i].calls;
 	}
+	for (int i = 0; i < 64; i++)
+		if (g_opx[i].calls)
+			fprintf(stderr, "gbd opx %2d: %9llu calls %9.1f ms %8.2f us/call\n",
+				i, (unsigned long long)g_opx[i].calls,
+				g_opx[i].ns / 1e6, g_opx[i].ns / 1e3 / (double)g_opx[i].calls);
 	fprintf(stderr, "gbd native driver time: %.1f ms over %llu calls "
 		"(%.2f us/call)\n  top by time:\n", total / 1e6,
 		(unsigned long long)calls,
@@ -866,7 +891,7 @@ static void report_native(void)
 
 static void report_stats(void)
 {
-	if (!getenv("GB_STATS"))
+	if (!(getenv("GB_STATS") ? getenv("GB_STATS") : getenv("GB_SERVER_STATS")))
 		return;
 	report_native();
 	for (int i = 0; i < g_nthreads; i++) {
@@ -986,7 +1011,9 @@ int main(int argc, char **argv)
 	}
 	g_debug = getenv("GB_DEBUG") != NULL;
 	install_crash_handler();
-	gb_stats_on = getenv("GB_STATS") != NULL;
+	gb_stats_on = (getenv("GB_STATS") ? getenv("GB_STATS") : getenv("GB_SERVER_STATS")) != NULL;
+	if (gb_stats_on)
+		signal(SIGUSR1, usr1_report);
 
 	if (gb_native_init())
 		return 3;
