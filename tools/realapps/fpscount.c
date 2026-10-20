@@ -8,6 +8,7 @@
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
 static unsigned long frames, last_frames;
@@ -63,6 +64,23 @@ void glXSwapBuffers(void *dpy, unsigned long drawable)
 	if (!in_sdl)
 		tick();
 	real(dpy, drawable);
+}
+
+/* some toolkits (SFML) fetch glXSwapBuffers with glXGetProcAddress */
+void (*glXGetProcAddressARB(const unsigned char *name))(void)
+{
+	static void (*(*real)(const unsigned char *))(void);
+
+	if (!real)
+		real = dlsym(RTLD_NEXT, "glXGetProcAddressARB");
+	if (name && !strcmp((const char *)name, "glXSwapBuffers"))
+		return (void (*)(void))glXSwapBuffers;
+	return real ? real(name) : 0;
+}
+
+void (*glXGetProcAddress(const unsigned char *name))(void)
+{
+	return glXGetProcAddressARB(name);
 }
 
 /* SDL2 applications load libGL themselves, so wrap the SDL call as well */

@@ -257,6 +257,21 @@ Presentation locked to the display (60 fps in every case; CPU as above):
 | glxgears | 8.1% | gbd 7.9% (client below the top 10) | whole machine 45.9% vs 48.6% |
 | es2gears (EGL/GLES2) | 8.4% | gbd 7.7% | whole machine 44.7% vs 47.0% |
 
+| neverball (both presented at 60 fps) | 59.7 fps; app 47.6% | 60 fps; client 24.2% + gbd 83.1% = 107% | +60 points |
+| Extreme Tux Racer (2560x1600 fullscreen) | display-bound; app 39.8% (frame counter could not hook SFML) | **about 25 fps**; client 65.7% + gbd 83.1% | |
+
+(The `__GL_SYNC_TO_VBLANK=0` override did not unlock neverball or Extreme Tux
+Racer, so they have no separate unlocked row.)
+
+neverball and Extreme Tux Racer are the limit of the design: both use
+immediate-mode and matrix calls (neverball about 17,400 requests per frame,
+about 1 million per second; Extreme Tux Racer about 18,700 per frame, mostly
+`glVertex3f`/`glNormal3f` between `glBegin`/`glEnd`). `gbd` spends about 0.8 us
+per request in neverball and sustains it at 60 fps with 83% of a core; Extreme
+Tux Racer needs about 1.8 us per request (the armhf client alone is at 66%) and
+falls to about 25 fps. Packing `glBegin`..`glEnd` blocks (and runs of matrix
+calls) into one request would be the next optimisation.
+
 Is the bridge burning CPU waiting? No evidence of it. With almost no GL work
 (gears at 60 fps) the whole machine uses 2-3 points more than native, and `gbd`
 costs about what the native application did. With real workloads the extra is
