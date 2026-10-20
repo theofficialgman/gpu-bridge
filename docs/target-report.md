@@ -517,8 +517,8 @@ interleaved with 1800 indices / 30 vertices with 90 indices; native 21 us / 2.4 
 
 | | 600 vtx | 30 vtx |
 |---|---|---|
-| before this work | 92 us | 11.7 us |
-| attributes that share memory sent once (an interleaved array was sent once per attribute) | 46 us | 9.9 us |
+| before this work | 91 us | 11.7 us |
+| attributes that share memory sent once (an interleaved array was sent once per attribute) | 60 us | 9.4 us |
 | `glFinish` every 50 draws removed from the benchmark (it was half of the small-draw time, native too) | 44 us | 5.5 us |
 | the driver reads the request's own memory (no scratch upload, no binds), min/max index scan in one pass under a single fault guard, inline messages up to half a ring | 33 us | 4.9 us |
 
