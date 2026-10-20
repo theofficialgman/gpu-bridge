@@ -1992,9 +1992,26 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		if (nattr) {
 			if (old_abo)
 				BIND_(GL_ARRAY_BUFFER, 0);
-			for (uint32_t i = 0; i < nattr; i++)
-				DCT(2, set_pointer(&a[i],
-						   (size_t)(uintptr_t)(bdata[a[i].blob] + a[i].boff)));
+			/*
+			 * The arrays start at vertex vfirst and the application
+			 * may add a base vertex: fold both into the pointers
+			 * (per-vertex attributes only) instead of passing a base
+			 * vertex. The Tegra driver mishandles a negative base
+			 * vertex with client pointers (it reads at index 2^32).
+			 */
+			int64_t shift = kind == 1 ? (int64_t)basevertex - (int64_t)vfirst : 0;
+
+			for (uint32_t i = 0; i < nattr; i++) {
+				int64_t st = a[i].stride ? (int64_t)a[i].stride
+							 : gb_attrib_elem_bytes(a[i].type, (int)a[i].size);
+				uintptr_t pv = (uintptr_t)(bdata[a[i].blob] + a[i].boff);
+
+				if (a[i].divisor == 0)
+					pv += (uintptr_t)(shift * st);
+				DCT(2, set_pointer(&a[i], (size_t)pv));
+			}
+			if (kind == 1)
+				basevertex = (int32_t)vfirst; /* undone below: net 0 */
 		}
 	} else {
 	struct gb_scratch *s = scratch_for(t);
