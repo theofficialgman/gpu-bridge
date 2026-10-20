@@ -9,7 +9,14 @@ keys() { ( sleep $1; shift; for k in "$@"; do xdotool key $k; sleep 1.5; done ) 
 case $app in
  cbsu)  T=45; CMD="chromium-bsu -w -v 2 -na"; keys 12 Return space;;
  gltron) T=45; CMD="gltron"; keys 8 Return Return Return Return;;
- stux)  T=50; CMD="supertux2 /usr/share/games/supertux2/levels/world1/23rd_airborne.stl"; ( sleep 10; xdotool key Return; sleep 1.5; xdotool key space; sleep 1; xdotool keydown Right; sleep 30; xdotool keyup Right ) & ;;
+ stux)  T=50
+        if [ $mode = native ]; then ST=$HOME/gb/apps2/root64/usr/games/supertux2; else ST=$HOME/gb/apps2/root/usr/games/supertux2; fi
+        CMD="$ST --datadir /usr/share/games/supertux2 /usr/share/games/supertux2/levels/world1/23rd_airborne.stl"
+        mkdir -p $H/.local/share/supertux2
+        printf '(supertux-config\n  (video\n    (fullscreen #f)\n    (vsync %s)\n    (video "auto")))\n' "$([ -n "$VSYNC" ] && echo "#t" || echo "#f")" > $H/.local/share/supertux2/config
+        # the keys only count if the window has the focus (the game pauses without it);
+        # the level title card needs a key once loading is done
+        ( xdotool search --sync --name "SuperTux" >/dev/null 2>&1; sleep 7; W=$(xdotool search --name "SuperTux" | head -1); xdotool windowactivate --sync $W 2>/dev/null; xdotool windowfocus $W 2>/dev/null; sleep 1; xdotool key Return; sleep 2; xdotool key Return ) & ;;  # Tux then stands at the start of the level: a steady scene (running right kills him within seconds)
  xmoto) T=45; CMD="xmoto -l tut1"; keys 10 Return Return;;
  agt)   T=50; CMD="armagetronad"; keys 8 Return Return Return Return Return Return Return Return;;
  godot) T=45; CMD="godot3 --path /tmp/godot_proj"

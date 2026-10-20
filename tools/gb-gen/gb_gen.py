@@ -495,6 +495,8 @@ def emit_client(cmd, public, opname):
     else:
         L.append(f"\t{ret_t} __ret = ({ret_t})0;")
         L.append("\tif (!__cx) return __ret;")
+    if cmd.name in cfg.CLIENT_PRE:
+        L.append("\t" + cfg.CLIENT_PRE[cmd.name])
     retstmt = "return;" if cmd.rk[0] == "void" else "return __ret;"
     if cmd.api == "gl":
         what = []

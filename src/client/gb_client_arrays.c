@@ -994,6 +994,130 @@ static int lazy_geterror(void)
 	return v;
 }
 
+/*
+ * Uniform and attribute locations. A location is a function of the linked
+ * program and the name, so once the driver has returned one it is remembered
+ * (per context: names are per share group, and the same number may be a
+ * different program in another context). A link, a delete or a binary load
+ * of the program, and the destruction of a context, forget it. Only
+ * non-negative answers are kept: -1 may come with an error that has to be
+ * raised again. Applications that ask on every draw (SuperTux: about 350
+ * lookups a frame) otherwise wait for the server each time.
+ */
+#define LOC_SLOTS 2048
+#define LOC_NAME 52
+struct locent {
+	const void *ctx;
+	uint32_t prog;
+	int32_t loc;
+	uint8_t kind, len; /* len 0: empty */
+	char name[LOC_NAME];
+};
+static struct locent g_loc[LOC_SLOTS];
+static pthread_mutex_t g_loc_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static unsigned loc_slot(const void *ctx, uint32_t prog, int kind, const char *n,
+			 size_t len)
+{
+	uint32_t h = (uint32_t)(uintptr_t)ctx * 2654435761u ^ prog * 40503u ^
+		     (uint32_t)kind * 977u;
+
+	for (size_t i = 0; i < len; i++)
+		h = (h ^ (uint8_t)n[i]) * 16777619u;
+	return (h ^ (h >> 15)) % LOC_SLOTS;
+}
+
+void gb_cl_loc_invalidate(uint32_t program)
+{
+	pthread_mutex_lock(&g_loc_mu);
+	for (unsigned i = 0; i < LOC_SLOTS; i++)
+		if (g_loc[i].len && g_loc[i].prog == program)
+			g_loc[i].len = 0;
+	pthread_mutex_unlock(&g_loc_mu);
+}
+
+void gb_cl_loc_invalidate_all(void)
+{
+	pthread_mutex_lock(&g_loc_mu);
+	memset(g_loc, 0, sizeof g_loc);
+	pthread_mutex_unlock(&g_loc_mu);
+}
+
+static GLint cached_location(int kind, uint32_t prog, const GLchar *name,
+			     GLint (*real)(GLuint, const GLchar *))
+{
+	static int off = -1;
+
+	if (__builtin_expect(off < 0, 0))
+		off = getenv("GB_NO_LOC_CACHE") != NULL;
+	if (off)
+		return real(prog, name);
+	const void *ctx = gb_cur_state();
+	size_t len = name ? strnlen(name, LOC_NAME) : LOC_NAME;
+	unsigned slot = 0;
+	GLint r;
+
+	if (ctx && len < LOC_NAME) {
+		slot = loc_slot(ctx, prog, kind, name, len);
+		pthread_mutex_lock(&g_loc_mu);
+		const struct locent *e = &g_loc[slot];
+
+		if (e->len == len + 1 && e->ctx == ctx && e->prog == prog &&
+		    e->kind == kind && !memcmp(e->name, name, len)) {
+			r = e->loc;
+			pthread_mutex_unlock(&g_loc_mu);
+			return r;
+		}
+		pthread_mutex_unlock(&g_loc_mu);
+	}
+	r = real(prog, name);
+	if (ctx && len < LOC_NAME && r >= 0) {
+		pthread_mutex_lock(&g_loc_mu);
+		struct locent *e = &g_loc[slot];
+
+		e->ctx = ctx;
+		e->prog = prog;
+		e->kind = (uint8_t)kind;
+		e->loc = r;
+		e->len = (uint8_t)(len + 1);
+		memcpy(e->name, name, len);
+		pthread_mutex_unlock(&g_loc_mu);
+	}
+	return r;
+}
+
+GB_API GLint glGetUniformLocation(GLuint program, const GLchar *name)
+{
+	return cached_location(0, program, name, gbx_glGetUniformLocation);
+}
+
+GB_API GLint glGetAttribLocation(GLuint program, const GLchar *name)
+{
+	return cached_location(1, program, name, gbx_glGetAttribLocation);
+}
+
+#ifdef GB_LIB_GL
+static GLint arb_uniform_loc(GLuint p, const GLchar *n)
+{
+	return gbx_glGetUniformLocationARB((GLhandleARB)(uintptr_t)p, n);
+}
+
+static GLint arb_attrib_loc(GLuint p, const GLchar *n)
+{
+	return gbx_glGetAttribLocationARB((GLhandleARB)(uintptr_t)p, n);
+}
+
+GB_API GLint glGetUniformLocationARB(GLhandleARB program, const GLcharARB *name)
+{
+	return cached_location(0, (uint32_t)(uintptr_t)program, name, arb_uniform_loc);
+}
+
+GB_API GLint glGetAttribLocationARB(GLhandleARB program, const GLcharARB *name)
+{
+	return cached_location(1, (uint32_t)(uintptr_t)program, name, arb_attrib_loc);
+}
+#endif
+
 GB_API GLenum glGetError(void)
 {
 	GLenum e;

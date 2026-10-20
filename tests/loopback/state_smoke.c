@@ -996,6 +996,58 @@ static void test_client_array_interleaved(void)
 	glDisableClientState(GL_COLOR_ARRAY);
 }
 
+/*
+ * Locations are cached after the driver has answered; a relink, a delete or
+ * another program under the same number must not return the old answer.
+ */
+static void test_location_cache(void)
+{
+	static const char *vs_src =
+		"#version 120\nattribute vec4 a_pos; attribute vec4 a_other;\n"
+		"void main() { gl_Position = a_pos + a_other; }\n";
+	static const char *fs_src =
+		"#version 120\nuniform vec4 u_col; void main() { gl_FragColor = u_col; }\n";
+	GLuint vs = glCreateShader(GL_VERTEX_SHADER), fs = glCreateShader(GL_FRAGMENT_SHADER);
+	GLuint prog = glCreateProgram();
+	GLint ok = 0;
+
+	glShaderSource(vs, 1, &vs_src, NULL);
+	glShaderSource(fs, 1, &fs_src, NULL);
+	glCompileShader(vs);
+	glCompileShader(fs);
+	glAttachShader(prog, vs);
+	glAttachShader(prog, fs);
+	glBindAttribLocation(prog, 3, "a_pos");
+	glBindAttribLocation(prog, 4, "a_other");
+	glLinkProgram(prog);
+	glGetProgramiv(prog, GL_LINK_STATUS, &ok);
+	CHECK(ok, "location test program links");
+	err();
+	GLint a1 = glGetAttribLocation(prog, "a_pos"), a1b = glGetAttribLocation(prog, "a_pos");
+	GLint u1 = glGetUniformLocation(prog, "u_col"), u1b = glGetUniformLocation(prog, "u_col");
+
+	CHECK(a1 == 3 && a1b == 3, "attrib before relink %d %d", a1, a1b);
+	CHECK(u1 >= 0 && u1 == u1b, "uniform %d %d", u1, u1b);
+	/* move the attribute and relink: the old answer is stale */
+	glBindAttribLocation(prog, 6, "a_pos");
+	glLinkProgram(prog);
+	GLint a2 = glGetAttribLocation(prog, "a_pos");
+
+	CHECK(a2 == 6, "attrib after relink %d (cached %d)", a2, a1);
+	/* unknown name: -1, repeatable, no error */
+	CHECK(glGetUniformLocation(prog, "nope") == -1 && glGetUniformLocation(prog, "nope") == -1,
+	      "unknown uniform");
+	EXPECT_ERR(GL_NO_ERROR, "location queries");
+	/* a deleted program's number is invalid: no stale hit */
+	glDeleteProgram(prog);
+	GLint a3 = glGetAttribLocation(prog, "a_pos");
+
+	CHECK(a3 == -1, "deleted program still answered %d", a3);
+	err(); /* INVALID_VALUE or INVALID_OPERATION, either way consumed */
+	glDeleteShader(vs);
+	glDeleteShader(fs);
+}
+
 int main(void)
 {
 	Display *dpy = XOpenDisplay(NULL);
@@ -1055,6 +1107,7 @@ int main(void)
 	test_labels();
 	test_client_array_range();
 	test_client_array_interleaved();
+	test_location_cache();
 
 	glXMakeCurrent(dpy, None, NULL);
 	glXDestroyContext(dpy, ctx);

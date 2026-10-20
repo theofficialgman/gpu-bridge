@@ -253,6 +253,9 @@ void gb_cl_xsync(Display *dpy);
 
 /* ---- shadow state (gb_client_arrays.c) ------------------------------------------ */
 struct gb_ctxstate *gb_state_for(uint32_t ctx_id);
+/* uniform/attribute location cache (gb_client_arrays.c) */
+void gb_cl_loc_invalidate(uint32_t program);
+void gb_cl_loc_invalidate_all(void);
 struct gb_ctxstate *gb_cur_state(void);
 struct gb_ctxstate *gb_cur_state_raw(void); /* even between glBegin/glEnd */
 int gb_cl_buf_bound(struct gb_cl *cx, int which);

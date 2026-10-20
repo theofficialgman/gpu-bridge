@@ -201,6 +201,9 @@ _ARRAY_STATE = {
     "glBegin", "glEnd", "glNewList", "glEndList",
     # a destroyed context's shadow state must go (the id is reused)
     "eglDestroyContext", "glXDestroyContext",
+    # answered from a cache once the driver has said where a name is
+    "glGetUniformLocation", "glGetUniformLocationARB",
+    "glGetAttribLocation", "glGetAttribLocationARB",
     # shader names the client has seen created (glShaderSource must not
     # read its string array for a name the driver would reject first)
     "glCreateShader", "glCreateShaderObjectARB",
@@ -271,6 +274,17 @@ FORCE_SYNC = {"glFinish", "glXSwapBuffers", "glXWaitGL", "glXWaitX"}
 # builds the next frame while the server presents this one (the same one
 # frame of queueing a driver does). GLX swaps return nothing.
 LAG_SYNC = {"glXSwapBuffers"}
+
+# Statements run in the client stub before the request is built (names are the
+# command's own parameters): what makes cached answers stale.
+CLIENT_PRE = {
+    "glLinkProgram": "gb_cl_loc_invalidate((uint32_t)program);",
+    "glLinkProgramARB": "gb_cl_loc_invalidate((uint32_t)(uintptr_t)programObj);",
+    "glDeleteProgram": "gb_cl_loc_invalidate((uint32_t)program);",
+    "glDeleteObjectARB": "gb_cl_loc_invalidate((uint32_t)(uintptr_t)obj);",
+    "glProgramBinary": "gb_cl_loc_invalidate((uint32_t)program);",
+    "glProgramBinaryOES": "gb_cl_loc_invalidate((uint32_t)program);",
+}
 
 # Commands whose registry entry lacks a usable len=.
 LEN_OVERRIDES = {

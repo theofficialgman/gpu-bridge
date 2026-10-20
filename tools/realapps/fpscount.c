@@ -8,6 +8,7 @@
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -105,4 +106,24 @@ unsigned eglSwapBuffers(void *dpy, void *surf)
 	if (!in_sdl)
 		tick();
 	return real(dpy, surf);
+}
+
+/*
+ * FP_NODELAY=1: SDL_Delay returns at once. For games that keep their frame
+ * rate at 60 with sleeps even with vsync off (SuperTux): rendering then runs
+ * as fast as it can, the game logic keeps its fixed time step.
+ */
+void SDL_Delay(unsigned int ms)
+{
+	static int nodelay = -1;
+	static void (*real)(unsigned int);
+
+	if (nodelay < 0)
+		nodelay = getenv("FP_NODELAY") != NULL;
+	if (nodelay)
+		return;
+	if (!real)
+		real = dlsym(RTLD_NEXT, "SDL_Delay");
+	if (real)
+		real(ms);
 }

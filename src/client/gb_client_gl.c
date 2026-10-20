@@ -858,6 +858,7 @@ GB_API EGLBoolean eglDestroyContext(EGLDisplay dpy, EGLContext ctx)
 {
 	EGLBoolean r = gbx_eglDestroyContext(dpy, ctx);
 
+	gb_cl_loc_invalidate_all();
 	if (r)
 		gb_state_free((uint32_t)(uintptr_t)ctx);
 	return r;

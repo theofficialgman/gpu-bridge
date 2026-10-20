@@ -102,6 +102,20 @@ int main(int argc, char **argv)
 		    static const float m[4] = { 0.5f, 0.5f, 0.5f, 1 };
 		    glMaterialfv(GL_FRONT, GL_DIFFUSE, m);
 	    });
+	/* synchronous calls: a reply is awaited each time */
+	RUN("glGetError (nothing queued)", 1000,
+	    for (int i = 0; i < 1000; i++)
+		    (void)glGetError());
+	RUN("glEnable + glGetError", 2000,
+	    for (int i = 0; i < 1000; i++) {
+		    glEnable(GL_CULL_FACE);
+		    (void)glGetError();
+	    });
+	RUN("glBindTexture + glGetError", 2000,
+	    for (int i = 0; i < 1000; i++) {
+		    glBindTexture(GL_TEXTURE_2D, 0);
+		    (void)glGetError();
+	    });
 	glXMakeCurrent(dpy, None, NULL);
 	return 0;
 }

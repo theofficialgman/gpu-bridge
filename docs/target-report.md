@@ -479,7 +479,7 @@ and are not part of the application.
 | glmark2-es2, EGL (GLES 2.0) | score 2263; app 96% | **2172 (96%)** (was 2135); 25% + 86% |
 | minetest 5.6.1 (Irrlicht, fixed-function with client arrays), unlocked | 179 fps; 112% | **166 fps** (was 55); 101% + 89% |
 | minetest, vsynced | 60 fps; 56% | **60 fps** (was 30); 91% + 55% |
-| SuperTux 0.6.3 (SDL2, GL 3.3 core), a level | 60 fps; 40% | 57 fps; 72% + 63% |
+| SuperTux 0.6.3 (SDL2, GL 3.3 core), a level, vsynced | 59.3 fps; 41.5% | 58.7 fps; 72% + 63% (see the SuperTux section) |
 | Chromium B.S.U. (fixed-function GL, textures, blending) | 49 fps; 6% | 47 fps; 10% + 7% |
 | X-Moto 0.6.2 (fixed-function GL), tutorial level | 50 fps; 28% | 50 fps; 23% + 8% |
 | Armagetron Advanced 0.2.9 (fixed-function GL) | one core (96%), fps not captured | ~215 fps; 31% + 81% |
@@ -508,6 +508,66 @@ All of them render on the NVIDIA GPU through the bridge with the same picture
   buffer's contents or dirty-range tracking; not done. `desktop` and `ideas`
   on ES2 (72%, 58%) are dominated by the driver's own per-draw cost: a 60-byte
   client-array draw takes 12 us inside the driver there, natively as well.
+
+## SuperTux: native vs the layer
+
+SuperTux 0.6.3 (SDL2, GL 3.3 core renderer), level `23rd_airborne` with Tux
+standing at the start (a steady scene; running right kills him within seconds
+and the fades make the runs incomparable), 45 s, window 1280x800. 100% = one
+core. The game limits itself to about 64 logic steps per second whatever the
+swap interval, so "unlocked" means vsync off in its own config, where it
+renders about 66 fps; it cannot be pushed higher (an `SDL_Delay` that returns
+at once changed nothing). Measured with `tools/realapps/stux_run.sh`, which
+checks the screenshot of every run (the first measurements in this session
+were partly title-card runs: the game needs window focus for its key presses).
+
+| | native arm64 | bridge, exact errors (client + gbd) | bridge, `GB_LAZY_GETERROR=1` |
+|---|---|---|---|
+| vsync off (game-limited) | 66.0 fps; 41.5% | 65.5 fps; 78% + 69% = 147% | 65.8 fps; 40% + 38% = 78% |
+| vsync on | 59.3 fps; 41.5% | 58.7 fps; 72% + 63% = 135% | 59.2 fps; 34% + 33% = 68% |
+
+Repeat runs vary by about 5 points. Native SuperTux uses 41% of a core even
+vsynced (its own main loop), so the comparison is 41% against 135%/147%.
+
+**Why.** `GB_STATS` shows the game calls `glGetError` after every GL call,
+about 2,000 times per frame (2.97 million in 38 s), plus about 250
+`glGetAttribLocation` and 100 `glGetUniformLocation` per frame, all
+synchronous; the client waits on replies for 80% of its time. A sound
+`glGetError` costs the bridge 0.6-0.8 us when the server is idle (native
+25 ns), but here each one waits for the driver work queued before it
+(`glBufferData` 10 us, draws 5 us, binds 1 us). CPU profiles (`prof.c`, a
+SIGPROF preload, since perf does not work on this kernel) put 55% of the
+client's samples and 33% of gbd's in ring-wait spinning (`gb_ring_wait_data`,
+`sched_yield`); the rest of the client is the game itself (zlib/PNG/vorbis for
+loading and music, `floorl`, ...) and almost none of it is marshalling. So
+the excess is two cores taking turns: one works while the other spins.
+
+**What was tried.**
+
+* *Location caching (implemented).* `glGetUniformLocation` and
+  `glGetAttribLocation` (and the ARB forms) are answered from a per-context
+  cache once the driver has returned a non-negative location, and forgotten on
+  `glLinkProgram`, `glDeleteProgram`, `glProgramBinary` and context
+  destruction (any context sharing the program name is invalidated too).
+  -1 is never cached (it may carry an error). It removes the 350 round trips
+  a frame; A/B on this scene (`GB_NO_LOC_CACHE=1` turns it off): about
+  5-8 points less total CPU (147-152% against 154-157%), fps unchanged.
+  Tests: `state_smoke` relinks with moved attribute locations, deletes the
+  program and checks unknown names.
+* *Shorter spin* (`GB_SPIN_US`, measured on an earlier scene of the same
+  level): 2 us -> 43 fps, 5 us -> 58 fps, 15 us and 40 us -> 65 fps, with the
+  CPU the same in every case: a side that sleeps instead of spinning costs
+  about as much CPU in futex wake-ups, and the waits get longer. The default
+  spin stays.
+* *Not done: skipping `glGetError` round trips by proving the preceding
+  calls cannot have failed.* It is possible for a few calls
+  (`glActiveTexture`, `glBindTexture`, `glEnableVertexAttribArray`,
+  `glVertexAttribPointer` against tracked state) but not for the ones that
+  matter most here (`glBufferData` can run out of memory, draws and uniforms
+  depend on a lot of state), and each of those still has to be waited for, so
+  it would remove only part of the waiting for a lot of validation code that
+  has to stay exactly right. The opt-in lazy mode already shows the result of
+  not waiting at all: 78% and 68%, about 1.7 times native.
 
 ## Client arrays (minetest, glmark2 `build`, ETR)
 
@@ -561,9 +621,7 @@ give the same results natively and bridged over EGL and GLX (the only
 difference is the existing armhf SIGBUS in `vertex_attrib_binding.advanced-bindingUpdate`);
 `state_smoke` gained range and interleaved client-array tests.
 
-* **SuperTux is at 57-60 fps but costs 3.4 times the CPU** (135% against 40%).
-  Not profiled yet; it uses the GL 3.3 core renderer, so it is not the
-  client-array path above.
+* **SuperTux** matches native frame rates but costs about 3 times the CPU in exact-error mode; analysed in the SuperTux section below.
 * **Native arm64 GLtron hangs when it is asked to quit**: after SIGTERM it
   spins at 98% in `sprintf` with its window closed (16 minutes before I killed
   it). Not related to the bridge; the armhf build exits normally. The harness
