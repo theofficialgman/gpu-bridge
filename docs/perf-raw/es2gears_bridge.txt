@@ -1,0 +1,35 @@
+### es2gears bridge
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+FPSCOUNT 2.0 9145 4566.1
+FPSCOUNT 4.0 20059 5456.7
+FPSCOUNT 6.0 30990 5465.3
+FPSCOUNT 8.0 42057 5533.1
+FPSCOUNT 10.0 51737 4839.6
+FPSCOUNT 12.0 62960 5611.1
+FPSCOUNT 14.0 74545 5792.1
+FPSCOUNT 16.0 83432 4443.3
+FPSCOUNT 18.0 94599 5583.2
+FPSCOUNT 20.0 105815 5607.9
+FPSCOUNT 22.0 117293 5738.5
+FPSCOUNT 24.0 128084 5395.1
+FPSCOUNT 26.0 138758 5334.8
+FPSCOUNT 28.0 150098 5669.7
+--- run: bash -c env T=30 bash /tmp/gears.sh bridge es2gears_x11 (wall 30.0 s; 100% = one core) ---
+  kwin_x11                  27.7 cpu-s    92.3%
+  gbd                       26.8 cpu-s    89.1%
+  es2gears_x11.ar           12.7 cpu-s    42.1%
+  Xorg                       4.6 cpu-s    15.2%
+  irq/67-host_syn            3.5 cpu-s    11.8%
+  nvgpu_channel_p            3.0 cpu-s     9.9%
+  python3                    2.1 cpu-s     7.0%
+  htop                       1.8 cpu-s     5.9%
+  kworker/u8:1               0.8 cpu-s     2.5%
+  kworker/u8:0               0.7 cpu-s     2.4%
+  ALL PROCESSES             86.5 cpu-s   288.2%
+  exit status 0

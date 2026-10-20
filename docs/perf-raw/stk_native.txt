@@ -1,0 +1,203 @@
+### stk native
+[2;37m[verbose  ] main: Error messages and other text output will be logged to /tmp/stk_home/.config/supertuxkart/config-0.10/stdout.log.
+[0;;m[0m[info   ] [FileManager]: Data files will be fetched from: '/home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/'
+[0;;m[0m[info   ] [FileManager]: Data files will be fetched from: '/home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/'
+[0;;m[0m[info   ] [FileManager]: User directory is '/tmp/stk_home/.config/supertuxkart/config-0.10/'.
+[0;;m[0m[info   ] [FileManager]: Addons files will be stored in '/tmp/stk_home/.local/supertuxkart/addons/'.
+[0;;m[0m[info   ] [FileManager]: Screenshots will be stored in '/tmp/stk_home/.local/supertuxkart/screenshots/'.
+[0;;m[0m[info   ] [FileManager]: User-defined grand prix will be stored in '/tmp/stk_home/.local/supertuxkart/grandprix/'.
+[0;;m[0m[info   ] [FileManager]: Asset 0 will be loaded from '/home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/challenges/'.
+[0;;m[0m[info   ] [FileManager]: Asset 1 will be loaded from '/home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/gfx/'.
+[0;;m[0m[info   ] [FileManager]: Asset 2 will be loaded from '/home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/grandprix/'.
+[0;;m[0m[info   ] [FileManager]: Asset 3 will be loaded from '/home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/gui/icons/'.
+[0;;m[0m[info   ] [FileManager]: Asset 4 will be loaded from '/home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/gui/screens/'.
+[0;;m[0m[info   ] [FileManager]: Asset 5 will be loaded from '/home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/gui/dialogs/'.
+[0;;m[0m[info   ] [FileManager]: Asset 6 will be loaded from '/home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/replay/'.
+[0;;m[0m[info   ] [FileManager]: Asset 7 will be loaded from '/home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/'.
+[0;;m[0m[info   ] [FileManager]: Asset 8 will be loaded from '/home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/skins/'.
+[0;;m[0m[info   ] [FileManager]: Asset 9 will be loaded from '/home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/ttf/'.
+[0;;m[0m[info   ] [FileManager]: Asset 10 will be loaded from '/home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/po/'.
+[0;;m[0m[info   ] [FileManager]: Asset 11 will be loaded from '/home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/library/'.
+[0;;m[0m[info   ] [FileManager]: Asset 12 will be loaded from '/home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/models/'.
+[0;;m[0m[info   ] [FileManager]: Asset 13 will be loaded from '/home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/music/'.
+[0;;m[0m[info   ] [FileManager]: Asset 14 will be loaded from '/home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/sfx/'.
+[0;;m[0m[info   ] [FileManager]: Asset 15 will be loaded from '/home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/textures/'.
+[0;;m[0m[info   ] [FileManager]: Asset 16 will be loaded from '/home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/tracks/'.
+[0;;m[2;37m[verbose  ] translation: Env var LANGUAGE = 'C.UTF-8'.
+[0;;m[2;31m[warn   ] Translation: Unsupported language 'C.UTF-8'
+[0;;m[2;37m[verbose  ] main: You choose to use 1024x576.
+[0;;m..:: Antarctica Rendering Engine 2.0 ::..
+[0m[info   ] [IrrDriver Logger]: ..:: Antarctica Rendering Engine 2.0 ::..
+[0;;m[0m[info   ] [IrrDriver Logger]: SDL Version 2.30.0
+[0;;m[0m[info   ] [IrrDriver Logger]: Using renderer: OpenGL ES 3.2 NVIDIA 32.3.1
+[0;;m[0m[info   ] [IrrDriver Logger]: NVIDIA Corporation
+[0;;m[0m[info   ] [IrrDriver Logger]: GL_EXT_base_instance GL_EXT_blend_func_extended GL_EXT_blend_minmax GL_EXT_buffer_storage GL_EXT_clear_texture GL_EXT_clip_control GL_EXT_clip_cull_distance GL_EXT_color_buffer_float GL_EXT_color_buffer_half_float GL_EXT_conservative_depth GL_EXT_copy_image GL_EXT_debug_label GL_EXT_discard_framebuffer GL_EXT_disjoint_timer_query GL_EXT_draw_buffers_indexed GL_EXT_draw_elements_base_vertex GL_EXT_EGL_image_external_wrap_modes GL_EXT_float_blend GL_EXT_frag_depth GL_EXT_geometry_point_size GL_EXT_geometry_shader GL_EXT_gpu_shader5 GL_EXT_map_buffer_range GL_EXT_multi_draw_indirect GL_EXT_multisample_compatibility GL_EXT_multisampled_render_to_texture GL_EXT_multisampled_render_to_texture2 GL_EXT_occlusion_query_boolean GL_EXT_polygon_offset_clamp GL_EXT_post_depth_coverage GL_EXT_primitive_bounding_box GL_EXT_raster_multisample GL_EXT_render_snorm GL_EXT_robustness GL_EXT_separate_shader_objects GL_EXT_shader_group_vote GL_EXT_shader_implicit_conversions GL_EXT_shader_integer_mix GL_EXT_shader_io_blocks GL_EXT_shader_non_constant_global_initializers GL_EXT_shader_texture_lod GL_EXT_shadow_samplers GL_EXT_sparse_texture GL_EXT_sparse_texture2 GL_EXT_sRGB GL_EXT_sRGB_write_control GL_EXT_tessellation_point_size GL_EXT_tessellation_shader GL_EXT_texture_border_clamp GL_EXT_texture_buffer GL_EXT_texture_compression_bptc GL_EXT_texture_compression_dxt1 GL_EXT_texture_compression_rgtc GL_EXT_texture_compression_s3tc GL_EXT_texture_cube_map_array GL_EXT_texture_filter_anisotropic GL_EXT_texture_filter_minmax GL_EXT_texture_format_BGRA8888 GL_EXT_texture_mirror_clamp_to_edge GL_EXT_texture_norm16 GL_EXT_texture_rg GL_EXT_texture_sRGB_R8 GL_EXT_texture_sRGB_decode GL_EXT_texture_storage GL_EXT_texture_view GL_EXT_draw_transform_feedback GL_EXT_unpack_subimage GL_EXT_window_rectangles GL_KHR_context_flush_control GL_KHR_debug GL_EXT_memory_object GL_EXT_memory_object_fd GL_KHR_parallel_shader_compile GL_KHR_no_error GL_KHR_robust_buffer_access_behavior GL_KHR_robustness GL_EXT_semaphore GL_EXT_semaphore_fd GL_KHR_texture_compression_astc_ldr GL_KHR_texture_compression_astc_sliced_3d GL_NV_bgr GL_NV_bindless_texture GL_NV_blend_equation_advanced GL_NV_blend_equation_advanced_coherent GL_NV_blend_minmax_factor GL_NV_conditional_render GL_NV_conservative_raster GL_NV_copy_buffer GL_NV_copy_image GL_NV_draw_buffers GL_NV_draw_instanced GL_NV_draw_texture GL_NV_draw_vulkan_image GL_NV_explicit_attrib_location GL_NV_fbo_color_attachments GL_NV_fill_rectangle GL_NV_fragment_coverage_to_color GL_NV_fragment_shader_interlock GL_NV_framebuffer_blit GL_NV_framebuffer_mixed_samples GL_NV_framebuffer_multisample GL_NV_generate_mipmap_sRGB GL_NV_geometry_shader_passthrough GL_NV_instanced_arrays GL_NV_internalformat_sample_query GL_NV_gpu_shader5 GL_NV_image_formats GL_NV_occlusion_query_samples GL_NV_non_square_matrices GL_NV_pack_subimage GL_NV_packed_float GL_NV_packed_float_linear GL_NV_path_rendering GL_NV_path_rendering_shared_edge GL_NV_pixel_buffer_object GL_NV_polygon_mode GL_NV_read_buffer GL_NV_read_depth GL_NV_read_depth_stencil GL_NV_read_stencil GL_NV_sample_locations GL_NV_sample_mask_override_coverage GL_NV_shader_atomic_fp16_vector GL_NV_shader_noperspective_interpolation GL_NV_shadow_samplers_array GL_NV_shadow_samplers_cube GL_NV_sRGB_formats GL_NV_texture_array GL_NV_texture_barrier GL_NV_texture_border_clamp GL_NV_texture_compression_latc GL_NV_texture_compression_s3tc GL_NV_texture_compression_s3tc_update GL_NV_timer_query GL_NV_viewport_array GL_NV_viewport_array2 GL_NV_viewport_swizzle GL_KHR_blend_equation_advanced GL_KHR_blend_equation_advanced_coherent GL_OES_compressed_ETC1_RGB8_texture GL_EXT_compressed_ETC1_RGB8_sub_texture GL_OES_depth24 GL_OES_depth32 GL_OES_depth_texture GL_OES_depth_texture_cube_map GL_OES_copy_image GL_OES_draw_buffers_indexed GL_OES_draw_elements_base_vertex GL_OES_texture_border_clamp GL_OES_tessellation_point_size GL_OES_tessellation_shader GL_OES_texture_buffer GL_OES_geometry_point_size GL_OES_geometry_shader GL_OES_gpu_shader5 GL_OES_shader_io_blocks GL_OES_
+[0;;m[0m[info   ] IrrDriver: OpenGL version: 3.2
+[0;;m[0m[info   ] IrrDriver: OpenGL vendor: NVIDIA Corporation
+[0;;m[0m[info   ] IrrDriver: OpenGL renderer: NVIDIA Tegra X1 (nvgpu)/integrated
+[0;;m[0m[info   ] IrrDriver: OpenGL version string: OpenGL ES 3.2 NVIDIA 32.3.1
+[0;;m[0m[info   ] GLDriver: Explicit Attrib Location Present
+[0;;m[0m[info   ] GLDriver: ARB Uniform Buffer Object Present
+[0;;m[0m[info   ] GLDriver: EXT texture format BGRA8888 Present
+[0;;m[0m[info   ] GLDriver: EXT Color Buffer Float Present
+[0;;m[0m[info   ] GLDriver: EXT Texture Compression S3TC Present
+[0;;m[0m[info   ] GLDriver: EXT Texture Compression S3TC sRGB Present
+[0;;m[0m[info   ] SharedGPUObjects: Hardware Skinning enabled, method: 1024 (max bones) * 16 RGBA float texture
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/screenquad.vert
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/motion_blur.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/lightning.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/primitive2dlist.vert
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/transparent.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/texturedquad.vert
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/uniformcolortexturedquad.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/texturedquad.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/coloredquad.vert
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/coloredquad.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/colortexturedquad.vert
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/colortexturedquad.frag
+[0;;m[0m[info   ] irr_driver: GLSL supported.
+[0;;m[0m[info   ] GUI: Loading skin data from file: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/skins/peach/stkskin.xml
+[0;;m[1;31m[error  ] FontManager: Bad /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/ttf/NotoColorEmoji.ttf color emoji, ignored.
+[0;;m[0m[info   ] SDLController: Nintendo Switch Combined Joy-Cons plugged in: buttons: 18, axes: 4, hats: 0.
+[0;;m[0m[info   ] SDLController: Nintendo Switch Combined Joy-Cons uses game controller mapping Nintendo Switch Joy-Con (L/R).
+[0;;m[0m[info   ] SDLController: Nintendo Switch Combined Joy-Cons plugged in: buttons: 18, axes: 4, hats: 0.
+[0;;m[0m[info   ] SDLController: Nintendo Switch Combined Joy-Cons uses game controller mapping Nintendo Switch Joy-Con (L/R).
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sp_pass.vert
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sp_solid.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sp_shadow.vert
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/white.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sp_skinning.vert
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sp_skinning_shadow.vert
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sp_normal_map.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sp_alpha_test.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gmanFPSCOUNT 2.0 3 1.5
+/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sp_shadow_alpha_test.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sp_decal.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sp_grass_pass.vert
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sp_grass.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sp_grass_shadow.vert
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sp_unlit.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sp_transparent.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sp_ghost.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sp_dynamic_night_bloom.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sp_tilling_mitigation.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sp_vertical_mapping.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sp_road_blending.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sp_displace.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/colorize.frag
+[0;;m[0m[info   ] GrandPrixManager: Loading Grand Prix files from /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/grandprix/
+[0;;m[0m[info   ] GrandPrixManager: Loading Grand Prix files from /tmp/stk_home/.local/supertuxkart/grandprix/
+[0;;m[2;31m[warn   ] SPMeshBuffer: kartDirt shader is missing, fallback to solid
+[0;;m[2;31m[warn   ] SPMeshBuffer: kartDirt shader is missing, fallback to solid
+[0;;m[2;31m[warn   ] SPMeshBuffer: kartDirt shader is missing, fallback to solid
+[0;;m[2;31m[warn   ] SPMeshBuffer: kartDirt shader is missing, fallback to solid
+[0;;m[2;31m[warn   ] SPMeshBuffer: kartDirt shader is missing, fallback to solid
+[0;;m[2;37m[verbose  ] main: You chose to use kart 'tux'.
+[0;;m[2;37m[verbose  ] main: You chose to start in track 'lighthouse'.
+[0;;m[2;37m[verbose  ] main: 4 karts will be used.
+[0;;m[2;37m[verbose  ] main: Profiling: 40 seconds.
+[0;;m[2;37m[verbose  ] RaceManager: Nb of karts=4, ghost karts:0 ai:3 players:1
+
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/simple_particle.vert
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/simple_particle.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/alphatest_particle.vert
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/alphatest_particle.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/degraded_ibl.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sunlight.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/pointlight.vert
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/pointlight.fFPSCOUNT 6.3 42 9.2
+FPSCOUNT 8.3 276 116.8
+FPSCOUNT 10.3 533 128.4
+FPSCOUNT 12.3 773 119.8
+FPSCOUNT 14.3 1023 124.8
+FPSCOUNT 16.3 1277 126.7
+FPSCOUNT 18.3 1540 131.3
+FPSCOUNT 20.3 1792 125.7
+FPSCOUNT 22.3 2045 126.5
+FPSCOUNT 24.3 2295 124.9
+FPSCOUNT 26.3 2569 136.9
+FPSCOUNT 28.3 2846 138.1
+FPSCOUNT 30.3 3112 132.8
+FPSCOUNT 32.3 3369 128.2
+FPSCOUNT 34.3 3638 134.0
+FPSCOUNT 36.3 3886 123.6
+FPSCOUNT 38.3 4139 126.4
+FPSCOUNT 40.3 4412 136.3
+FPSCOUNT 42.3 4684 135.5
+FPSCOUNT 44.3 4944 129.7
+FPSCOUNT 46.3 5186 120.5
+FPSCOUNT 48.3 5430 121.9
+FPSCOUNT 50.3 5678 123.7
+rag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/combine_diffuse_color.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/tonemap.frag
+[0;;m[0m[info   ] Track: Overall scene complexity estimated at 156
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/pointlightscatter.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/gaussian6v.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/gaussian6h.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sky.vert
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/sky.frag
+[0;;m[0m[info   ] ShaderFilesManager: Compiling shader: /home/gman/gb/apps2/root/usr/share/games/supertuxkart/data/shaders/passthrough.frag
+[0;;m[2;37m[verbose  ] profile: Number of frames: 5405 time 47.865002, Average FPS: 112.921753
+[0;;m[2;37m[verbose  ] profile: Average # drawn nodes           0.000000 k
+[0;;m[2;37m[verbose  ] profile: Average # culled nodes:         0.000000 k
+[0;;m[2;37m[verbose  ] profile: Average # solid nodes:          0.000000 k
+[0;;m[2;37m[verbose  ] profile: Average # transparent nodes:    0.000000
+[0;;m[2;37m[verbose  ] profile: Average # transp. effect nodes: 0.000000
+[0;;m[2;37m[verbose  ] profile: name start_position end_position time average_speed top_speed skid_time rescue_time rescue_count brake_count explosion_time explosion_count bonus_count banana_count small_nitro_count large_nitro_count bubblegum_count
+[0;;m[2;37m[verbose  ] profile: kiki Skidding 1 1 54.9048 16.0251 18.75 0 0 0 0 0 0 4 0 1 0 0 0 
+[0;;m[2;37m[verbose  ] profile: wilber Skidding 2 2 58.9774 14.9185 17.3681 0 0 0 0 0 0 1 0 0 0 0 44 
+[0;;m[2;37m[verbose  ] profile: emule Skidding 3 3 59.5531 14.7743 16.9135 0 0 0 3 0 0 0 0 0 0 1 0 
+[0;;m[2;37m[verbose  ] profile: tux Skidding 4 4 60.1206 14.6349 16.4487 0 0 0 0 0 0 2 0 0 0 0 0 
+[0;;m[2;37m[verbose  ] profile: min 54.904755  max 60.120575  av 58.388954
+
+[0;;m[2;37m[verbose  ] profile: 
+[0;;m[2;37m[verbose  ] profile: name     Strt End  Time    AvSp  Top   Skid  Resc Rsc Brake Expl Exp Itm Ban SNitLNit Bub Off Energy
+[0;;m[2;37m[verbose  ] profile: Skidding    1   1  54.90 16.03 18.75   0.00 0.00   0     0 0.00   0   4   0   1   0   0     0 0.00
+[0;;m[2;37m[verbose  ] profile: Skidding    2   2  58.98 14.92 17.37   0.00 0.00   0     0 0.00   0   1   0   0   0   0    44 0.00
+[0;;m[2;37m[verbose  ] profile: Skidding    3   3  59.55 14.77 16.91   0.00 0.00   0     3 0.00   0   0   0   0   0   1     0 0.00
+[0;;m[2;37m[verbose  ] profile: Skidding    4   4  60.12 14.63 16.45   0.00 0.00   0     0 0.00   0   2   0   0   0   0     0 0.00
+[0;;m[2;37m[verbose  ] profile: ---------------------------------------------------------------------------------------------------
+[0;;m[2;37m[verbose  ] profile: Skidding   +0       58.389             0.00 0.00   0     3 0.00   0   7   0   1   0   1    44 0.00
+[0;;m[2;37m[verbose  ] profile: 
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] SDLController: Nintendo Switch Combined Joy-Cons unplugged.
+[0;;m[0m[info   ] SDLController: Nintendo Switch Combined Joy-Cons unplugged.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;m[0m[info   ] Singleton: Destroyed singleton.
+[0;;mrc=0
+--- run: bash -c env T=120 bash /tmp/stk.sh native --profile-time=40 --track=lighthouse - (wall 52.3 s; 100% = one core) ---
+  supertuxkart              50.0 cpu-s    95.6%
+  python3                    3.6 cpu-s     6.9%
+  htop                       3.1 cpu-s     6.0%
+  Xorg                       1.1 cpu-s     2.0%
+  nvgpu_channel_p            0.9 cpu-s     1.7%
+  plasmashell                0.7 cpu-s     1.3%
+  pipewire                   0.6 cpu-s     1.1%
+  avahi-daemon               0.4 cpu-s     0.7%
+  irq/67-host_syn            0.4 cpu-s     0.7%
+  sugov:0                    0.3 cpu-s     0.6%
+  ALL PROCESSES             63.5 cpu-s   121.3%
+  exit status 0

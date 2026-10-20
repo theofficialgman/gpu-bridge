@@ -272,6 +272,9 @@ Tux Racer needs about 1.8 us per request (the armhf client alone is at 66%) and
 falls to about 25 fps. Packing `glBegin`..`glEnd` blocks (and runs of matrix
 calls) into one request would be the next optimisation.
 
+The full top-10 process list of every run is in `docs/perf-top10.md` (raw
+output in `docs/perf-raw/`).
+
 Is the bridge burning CPU waiting? No evidence of it. With almost no GL work
 (gears at 60 fps) the whole machine uses 2-3 points more than native, and `gbd`
 costs about what the native application did. With real workloads the extra is

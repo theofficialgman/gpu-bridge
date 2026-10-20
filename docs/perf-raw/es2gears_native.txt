@@ -1,0 +1,28 @@
+### es2gears native
+FPSCOUNT 2.0 11432 5715.7
+FPSCOUNT 4.0 26198 7382.9
+FPSCOUNT 6.0 41528 7664.8
+FPSCOUNT 8.0 56894 7682.7
+FPSCOUNT 10.0 70597 6849.4
+FPSCOUNT 12.0 82624 6013.3
+FPSCOUNT 14.0 95372 6373.7
+FPSCOUNT 16.0 110962 7794.6
+FPSCOUNT 18.0 126126 7581.7
+FPSCOUNT 20.0 139121 6497.5
+FPSCOUNT 22.0 154416 7647.1
+FPSCOUNT 24.0 167904 6744.0
+FPSCOUNT 26.0 183321 7708.1
+FPSCOUNT 28.0 197346 7012.4
+--- run: bash -c env T=30 bash /tmp/gears.sh native es2gears_x11 (wall 30.0 s; 100% = one core) ---
+  es2gears_x11              27.2 cpu-s    90.7%
+  Xorg                       4.9 cpu-s    16.2%
+  irq/67-host_syn            4.7 cpu-s    15.7%
+  nvgpu_channel_p            4.2 cpu-s    14.1%
+  kwin_x11                   3.5 cpu-s    11.8%
+  python3                    2.0 cpu-s     6.5%
+  htop                       1.8 cpu-s     6.0%
+  kworker/u8:2               0.9 cpu-s     2.9%
+  kworker/u8:1               0.8 cpu-s     2.7%
+  kworker/u8:4               0.6 cpu-s     2.0%
+  ALL PROCESSES             53.8 cpu-s   179.3%
+  exit status 0

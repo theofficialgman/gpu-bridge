@@ -1,0 +1,40 @@
+### gears bridge
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+FPSCOUNT 2.0 121 60.5
+FPSCOUNT 4.0 241 60.0
+301 frames in 5.0 seconds = 60.198 FPS
+FPSCOUNT 6.0 362 60.0
+FPSCOUNT 8.0 483 60.0
+301 frames in 5.0 seconds = 60.001 FPS
+FPSCOUNT 10.0 603 60.0
+FPSCOUNT 12.0 724 60.0
+FPSCOUNT 14.1 845 60.0
+301 frames in 5.0 seconds = 60.001 FPS
+FPSCOUNT 16.1 966 60.0
+FPSCOUNT 18.1 1086 60.0
+301 frames in 5.0 seconds = 60.003 FPS
+FPSCOUNT 20.1 1207 60.0
+FPSCOUNT 22.1 1327 60.0
+FPSCOUNT 24.1 1448 60.0
+301 frames in 5.0 seconds = 60.001 FPS
+FPSCOUNT 26.1 1569 60.0
+FPSCOUNT 28.1 1690 60.0
+--- run: bash -c env T=30 bash /tmp/gears.sh bridge glxgears (wall 30.0 s; 100% = one core) ---
+  kwin_x11                   3.9 cpu-s    13.1%
+  gbd                        2.4 cpu-s     7.9%
+  python3                    1.9 cpu-s     6.4%
+  htop                       1.7 cpu-s     5.6%
+  Xorg                       1.1 cpu-s     3.8%
+  irq/75-gk20a_st            0.5 cpu-s     1.8%
+  tegradc.1/a                0.4 cpu-s     1.2%
+  nvgpu_channel_p            0.3 cpu-s     1.1%
+  irq/67-host_syn            0.3 cpu-s     0.9%
+  avahi-daemon               0.2 cpu-s     0.8%
+  ALL PROCESSES             14.6 cpu-s    48.6%
+  exit status 0

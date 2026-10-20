@@ -1,0 +1,23 @@
+### mpv native
+● Video  --vid=1  (wrapped_avframe 1280x720 60 fps)
+VO: [gpu] 1280x720 yuv420p
+FPSCOUNT 2.0 352 175.9
+FPSCOUNT 4.0 722 184.7
+FPSCOUNT 6.0 1093 185.1
+FPSCOUNT 8.0 1465 185.7
+Exiting... (End of file)
+FPSCOUNT total 8.28 1501 181.2
+rc=0 wall=9.449729156
+--- run: bash -c env T=170 bash /tmp/mpv.sh native --vo=gpu --gpu-context=x11egl --profil (wall 9.5 s; 100% = one core) ---
+  mpv                       14.0 cpu-s   147.7%
+  kwin_x11                   7.8 cpu-s    82.5%
+  python3                    0.9 cpu-s     9.5%
+  Xorg                       0.7 cpu-s     7.0%
+  htop                       0.6 cpu-s     6.1%
+  nvgpu_channel_p            0.2 cpu-s     2.6%
+  irq/67-host_syn            0.2 cpu-s     1.7%
+  tegradc.1/a                0.1 cpu-s     1.2%
+  plasmashell                0.1 cpu-s     1.2%
+  avahi-daemon               0.1 cpu-s     0.8%
+  ALL PROCESSES             25.3 cpu-s   267.0%
+  exit status 0

@@ -1,0 +1,40 @@
+### gears bridge
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+FPSCOUNT 2.0 4737 2368.2
+FPSCOUNT 4.0 10294 2778.2
+13084 frames in 5.0 seconds = 2616.678 FPS
+FPSCOUNT 6.0 15838 2771.6
+FPSCOUNT 8.0 21461 2811.2
+13945 frames in 5.0 seconds = 2788.886 FPS
+FPSCOUNT 10.0 27031 2784.8
+FPSCOUNT 12.0 32596 2782.1
+FPSCOUNT 14.0 38174 2788.7
+13935 frames in 5.0 seconds = 2786.901 FPS
+FPSCOUNT 16.0 43386 2605.9
+FPSCOUNT 18.0 48416 2515.0
+12974 frames in 5.0 seconds = 2594.642 FPS
+FPSCOUNT 20.0 53941 2762.1
+FPSCOUNT 22.0 59523 2790.8
+FPSCOUNT 24.0 65088 2782.4
+13918 frames in 5.0 seconds = 2783.447 FPS
+FPSCOUNT 26.0 70670 2790.9
+FPSCOUNT 28.0 76235 2781.9
+--- run: bash -c env T=30 bash /tmp/gears.sh bridge glxgears (wall 30.0 s; 100% = one core) ---
+  gbd                       28.1 cpu-s    93.5%
+  glxgears.arm-li            5.2 cpu-s    17.3%
+  Xorg                       2.6 cpu-s     8.6%
+  kwin_x11                   2.1 cpu-s     7.1%
+  python3                    2.0 cpu-s     6.5%
+  irq/67-host_syn            1.7 cpu-s     5.8%
+  htop                       1.7 cpu-s     5.7%
+  nvgpu_channel_p            1.6 cpu-s     5.3%
+  kworker/u8:1               0.5 cpu-s     1.7%
+  kworker/u8:0               0.5 cpu-s     1.6%
+  ALL PROCESSES             48.6 cpu-s   161.8%
+  exit status 0

@@ -1,0 +1,33 @@
+### gears native
+FPSCOUNT 2.0 5056 2527.6
+FPSCOUNT 4.0 10642 2792.9
+13383 frames in 5.0 seconds = 2676.459 FPS
+FPSCOUNT 6.0 16170 2763.9
+FPSCOUNT 8.0 22257 3043.2
+14519 frames in 5.0 seconds = 2903.715 FPS
+FPSCOUNT 10.0 27919 2830.9
+FPSCOUNT 12.0 33428 2754.2
+FPSCOUNT 14.0 38938 2754.9
+13773 frames in 5.0 seconds = 2754.432 FPS
+FPSCOUNT 16.0 44350 2705.9
+FPSCOUNT 18.0 49562 2605.9
+13301 frames in 5.0 seconds = 2660.096 FPS
+FPSCOUNT 20.0 54993 2715.4
+FPSCOUNT 22.0 60427 2716.7
+FPSCOUNT 24.0 65926 2749.4
+13972 frames in 5.0 seconds = 2794.398 FPS
+FPSCOUNT 26.0 72008 3040.8
+FPSCOUNT 28.0 78088 3039.6
+--- run: bash -c env T=30 bash /tmp/gears.sh native glxgears (wall 30.0 s; 100% = one core) ---
+  glxgears                  27.0 cpu-s    90.0%
+  kwin_x11                  16.3 cpu-s    54.2%
+  Xorg                       2.5 cpu-s     8.5%
+  irq/67-host_syn            2.3 cpu-s     7.6%
+  python3                    1.9 cpu-s     6.3%
+  htop                       1.7 cpu-s     5.7%
+  nvgpu_channel_p            1.7 cpu-s     5.5%
+  polkitd                    0.6 cpu-s     2.0%
+  kworker/u8:4               0.5 cpu-s     1.6%
+  kworker/u8:0               0.5 cpu-s     1.5%
+  ALL PROCESSES             57.3 cpu-s   190.8%
+  exit status 0

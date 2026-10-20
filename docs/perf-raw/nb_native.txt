@@ -1,0 +1,18 @@
+### nb native
+FPSCOUNT 40.2 2411 60.0
+FPSCOUNT 42.2 2531 60.0
+FPSCOUNT 44.2 2652 60.0
+FPSCOUNT total 44.46 2656 59.7
+--- run: bash -c bash /tmp/nb_bench.sh native (wall 45.2 s; 100% = one core) ---
+  neverball                 20.1 cpu-s    44.5%
+  python3                    2.8 cpu-s     6.1%
+  htop                       2.5 cpu-s     5.5%
+  pipewire-pulse             0.7 cpu-s     1.6%
+  sugov:0                    0.7 cpu-s     1.5%
+  plasmashell                0.5 cpu-s     1.2%
+  Xorg                       0.5 cpu-s     1.0%
+  irq/75-gk20a_st            0.5 cpu-s     1.0%
+  pipewire                   0.4 cpu-s     0.8%
+  avahi-daemon               0.3 cpu-s     0.6%
+  ALL PROCESSES             30.6 cpu-s    67.5%
+  exit status 0
