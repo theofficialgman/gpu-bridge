@@ -691,6 +691,9 @@ void gb_cl_poll_upcalls(struct gb_cl *cx)
 		memcpy(&h, in.p, sizeof(h));
 		if (h.flags & GB_CMD_F_UPCALL)
 			dispatch_upcall(cx, &in);
+		else if (cx->lag_pending && (h.flags & GB_CMD_F_REPLY) &&
+			 h.seq == cx->lag_seq)
+			cx->lag_pending = 0; /* the late answer to the last swap */
 		/* anything else cannot be pending: no request is outstanding */
 		gb_in_release(&in);
 	}
@@ -839,8 +842,15 @@ static int wait_reply_locked(struct gb_cl *cx, struct gb_in *in, uint32_t op)
 		if (rc)
 			break;
 		memcpy(&h, in->p, sizeof(h));
-		if (!(h.flags & GB_CMD_F_UPCALL))
+		if (!(h.flags & GB_CMD_F_UPCALL)) {
+			if (cx->lag_pending && (h.flags & GB_CMD_F_REPLY) &&
+			    h.seq == cx->lag_seq && h.seq != cx->chan.seq) {
+				cx->lag_pending = 0; /* the late reply: not ours */
+				gb_in_release(in);
+				continue;
+			}
 			break;
+		}
 		dispatch_upcall(cx, in); /* callbacks run in the calling thread */
 		gb_in_release(in);
 	}
@@ -862,6 +872,39 @@ static int wait_reply_locked(struct gb_cl *cx, struct gb_in *in, uint32_t op)
 		return -EPROTO;
 	}
 	return 0;
+}
+
+void gb_cl_lag_reply(struct gb_cl *cx)
+{
+	uint32_t mine = cx->chan.seq;
+	struct gb_in in;
+
+	if (cx->helper_on)
+		pthread_mutex_lock(&cx->rsp_mu);
+	while (cx->lag_pending && !cx->lost) {
+		struct gb_cmd_hdr h;
+
+		if (gb_in_recv(&in, &cx->chan.rsp, -1)) {
+			dbg("lag reply: receive failed");
+			gb_cl_lost(cx);
+			break;
+		}
+		memcpy(&h, in.p, sizeof(h));
+		if (h.flags & GB_CMD_F_UPCALL)
+			dispatch_upcall(cx, &in);
+		else if ((h.flags & GB_CMD_F_REPLY) && h.seq == cx->lag_seq)
+			cx->lag_pending = 0;
+		else {
+			dbg("lag reply desync: op %u seq %u flags %#x (want %u)", h.opcode,
+			    h.seq, h.flags, cx->lag_seq);
+			gb_cl_lost(cx); /* out of order */
+		}
+		gb_in_release(&in);
+	}
+	cx->lag_pending = !cx->lost;
+	cx->lag_seq = mine;
+	if (cx->helper_on)
+		pthread_mutex_unlock(&cx->rsp_mu);
 }
 
 int gb_cl_wait_reply(struct gb_cl *cx, struct gb_in *in, uint32_t op)

@@ -118,6 +118,7 @@ struct gb_ctxstate {
 	uint32_t client_active_tex; /* texture unit index */
 	int8_t core;                /* -1 unknown, 0 compat/ES, 1 core profile */
 	int8_t es;                  /* -1 unknown, 0 desktop GL, 1 OpenGL ES */
+	int8_t basevertex_ok;       /* -1 unknown; 1: desktop GL >= 3.2 (glDrawElementsBaseVertex) */
 	int32_t max_attribs;        /* GL_MAX_VERTEX_ATTRIBS, 0 = not queried */
 	int npersist;               /* live persistent mappings */
 	int8_t es_restart;          /* ES: fixed-index restart on? -1 unknown */
@@ -177,6 +178,9 @@ struct gb_cl {
 	/* small asynchronous requests wait here and go out as one GB_OPX_Batch */
 	uint8_t *stage;
 	uint32_t stage_len;
+	uint32_t lazy_clean, lazy_skip; /* GB_LAZY_GETERROR bookkeeping */
+	uint32_t lag_seq;           /* request whose reply is still to be collected */
+	int lag_pending;
 };
 
 struct gb_proc {
@@ -198,6 +202,8 @@ int gb_cl_begin(struct gb_cl *cx, struct gb_out *o, uint32_t op,
 		uint32_t total, uint32_t flags);
 void gb_cl_end(struct gb_cl *cx, struct gb_out *o);
 void gb_cl_flush(struct gb_cl *cx); /* send the staged requests */
+/* the request just sent is answered later; wait for the previous such one */
+void gb_cl_lag_reply(struct gb_cl *cx);
 int gb_cl_wait_reply(struct gb_cl *cx, struct gb_in *in, uint32_t op);
 void gb_cl_poll_upcalls(struct gb_cl *cx);
 /* Deliver non-blocking upcalls (debug messages) from a helper thread while

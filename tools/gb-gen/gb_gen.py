@@ -730,7 +730,12 @@ def emit_client(cmd, public, opname):
 
     L.append("\tgb_cl_end(__cx, &__o);")
 
-    if cmd.sync:
+    if cmd.name in cfg.LAG_SYNC:
+        # the caller does not wait for this request's reply but for the
+        # previous one's (a frame of pipelining)
+        L.append("\tgb_cl_lag_reply(__cx);")
+        L.append("\treturn;")
+    elif cmd.sync:
         L.append("\tstruct gb_in __in;")
         L.append(f"\tif (gb_cl_wait_reply(__cx, &__in, __op)) {{ {retstmt} }}")
         L.append("\tstruct gb_r __r;")

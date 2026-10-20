@@ -266,6 +266,12 @@ WRAPPED = {"all": set().union(*_WRAPPED.values())}
 # Calls that must block even though they return nothing.
 FORCE_SYNC = {"glFinish", "glXSwapBuffers", "glXWaitGL", "glXWaitX"}
 
+# Synchronous requests whose reply is collected one call later: the caller
+# waits for the previous swap, not the one it just queued, so the application
+# builds the next frame while the server presents this one (the same one
+# frame of queueing a driver does). GLX swaps return nothing.
+LAG_SYNC = {"glXSwapBuffers"}
+
 # Commands whose registry entry lacks a usable len=.
 LEN_OVERRIDES = {
     # evaluator / pixel-map getters: the element count depends on map state;

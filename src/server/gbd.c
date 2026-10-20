@@ -744,6 +744,8 @@ static void handle_batch(struct gb_sth *t, const uint8_t *p, uint32_t size,
 	gb_sv_upcall_flush(t); /* messages from the whole batch, in order */
 }
 
+static uint64_t g_sync_ct[GB_OP_COUNT], g_sync_opx[64]; /* requests wanting a reply */
+
 static void handle_msg(struct gb_sth *t, const uint8_t *p, uint32_t size,
 		       int stats, int trace_ops, int trace_errs, int in_batch)
 {
@@ -756,6 +758,12 @@ static void handle_msg(struct gb_sth *t, const uint8_t *p, uint32_t size,
 	t_recent_cur = h.opcode;
 	t_recent[t_recent_n++ % RECENT_OPS] = h.opcode;
 	t->cur_req_sync = !!(h.flags & GB_CMD_F_WANT_REPLY);
+	if (stats && t->cur_req_sync) {
+		if (h.opcode < GB_OP_COUNT)
+			g_sync_ct[h.opcode]++;
+		else if (h.opcode - GB_OPX_BASE < 64)
+			g_sync_opx[h.opcode - GB_OPX_BASE]++;
+	}
 	if (trace_ops) {
 		char tb[96];
 		int tn = snprintf(tb, sizeof(tb), "op %s\n",
@@ -895,6 +903,12 @@ static void usr1_report(int sig)
 
 static void report_native(void)
 {
+	for (unsigned i = 0; i < GB_OP_COUNT; i++)
+		if (g_sync_ct[i] > 1000)
+			fprintf(stderr, "gbd sync %-28s %9llu\n", gb_op_names[i], (unsigned long long)g_sync_ct[i]);
+	for (int i = 0; i < 64; i++)
+		if (g_sync_opx[i] > 1000)
+			fprintf(stderr, "gbd sync opx %-24d %9llu\n", i, (unsigned long long)g_sync_opx[i]);
 	uint64_t total = 0, calls = 0;
 	char used[GB_OP_COUNT] = { 0 };
 
@@ -907,6 +921,15 @@ static void report_native(void)
 			fprintf(stderr, "gbd opx %2d: %9llu calls %9.1f ms %8.2f us/call\n",
 				i, (unsigned long long)g_opx[i].calls,
 				g_opx[i].ns / 1e6, g_opx[i].ns / 1e3 / (double)g_opx[i].calls);
+	{
+		extern uint64_t gb_dc_ns[8], gb_dc_n[8];
+		static const char *nm[] = { "orphan", "subdata", "pointer", "drawarrays", "drawelements" };
+		for (int i = 0; i < 5; i++)
+			fprintf(stderr, "gbd DrawClient %-12s %9llu calls %9.1f ms\n", nm[i],
+				(unsigned long long)gb_dc_n[i], gb_dc_ns[i] / 1e6);
+		fprintf(stderr, "gbd DrawClient bytes %llu MB, %llu draws over 32 KB\n",
+			(unsigned long long)(gb_dc_n[6] >> 20), (unsigned long long)gb_dc_n[7]);
+	}
 	fprintf(stderr, "gbd native driver time: %.1f ms over %llu calls "
 		"(%.2f us/call)\n  top by time:\n", total / 1e6,
 		(unsigned long long)calls,

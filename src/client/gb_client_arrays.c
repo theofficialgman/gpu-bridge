@@ -36,6 +36,7 @@ struct gb_ctxstate *gb_state_for(uint32_t ctx_id)
 		s->vao = &s->vao0;
 		s->core = -1;
 		s->es = -1;
+		s->basevertex_ok = -1;
 		s->es_restart = -1;
 		s->pack = (struct gb_pixstore){ 4, 0, 0, 0, 0, 0 };
 		s->unpack = (struct gb_pixstore){ 4, 0, 0, 0, 0, 0 };
@@ -354,6 +355,41 @@ static int ctx_is_core(struct gb_ctxstate *st)
 #endif
 }
 
+static int gb_trace_draws(void)
+{
+	static int on = -1;
+
+	if (__builtin_expect(on < 0, 0))
+		on = getenv("GB_TRACE_DRAWS") != NULL;
+	return on;
+}
+
+/* Can the server draw with a base vertex (so that it may upload only the
+ * part of the arrays the indices reach)? Desktop GL 3.2 and later. */
+static int ctx_has_basevertex(struct gb_ctxstate *st)
+{
+#ifdef GB_LIB_GL
+	if (st->basevertex_ok < 0) {
+		const char *v = (const char *)glGetString(GL_VERSION);
+		int ok = 0;
+
+		if (v && strncmp(v, "OpenGL ES", 9)) {
+			int maj = atoi(v), min = 0;
+			const char *dot = strchr(v, '.');
+
+			if (dot)
+				min = atoi(dot + 1);
+			ok = maj > 3 || (maj == 3 && min >= 2);
+		}
+		st->basevertex_ok = (int8_t)ok;
+	}
+	return st->basevertex_ok;
+#else
+	(void)st;
+	return 0;
+#endif
+}
+
 /* The index that restarts the primitive for an index type, or -1 when
  * primitive restart is off. ES 3.0+ always restarts on the fixed index. */
 /* ES 3.0+ context? (st->es is computed once) */
@@ -587,7 +623,7 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 	struct gb_vao *v = st->vao;
 	struct gb_out o;
 	struct gb_w w;
-	uint32_t nclient = 0, ibytes = 0, nverts;
+	uint32_t nclient = 0, ibytes = 0, nverts, vfirst = 0;
 	struct {
 		uint32_t slot, size, type, stride, flags, divisor, len;
 		const uint8_t *src;
@@ -604,7 +640,7 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 	for (int i = 0; i < CA_COUNT; i++)
 		if (is_client_array(&v->a[i]))
 			nclient++;
-	if (nclient && getenv("GB_TRACE_DRAWS")) {
+	if (nclient && gb_trace_draws()) {
 		fprintf(stderr, "c: client-array draw mode %#x vao %u (element buf %u):",
 			mode, v->name, v->element_buffer);
 		for (int i = 0; i < CA_COUNT; i++)
@@ -708,7 +744,7 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 			gb_cl_gl_error(0x0502);
 			return 1;
 		}
-		int64_t maxv = -1, rs = restart_value(st, itype);
+		int64_t maxv = -1, minv = INT64_MAX, rs = restart_value(st, itype);
 		int skipped = 0;
 		/* The indices are application memory: not necessarily aligned,
 		 * and not necessarily readable (an invalid call is rejected by
@@ -754,6 +790,8 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 			x += basevertex;
 			if (x > maxv)
 				maxv = x;
+			if (x < minv)
+				minv = x;
 		}
 		if (maxv < 0 && skipped)
 			maxv = 0;
@@ -765,7 +803,13 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 			gb_cl_gl_error(maxv < 0 ? 0x0502 : 0x0505);
 			return 1;
 		} else {
-			nverts = (uint32_t)maxv + 1;
+			/* upload only what the indices reach: vertices
+			 * minv..maxv, drawn with a base vertex that moves them
+			 * back (a mesh drawn in slices would otherwise send
+			 * everything before its slice again for every draw) */
+			if (minv > 0 && minv <= maxv && ctx_has_basevertex(st))
+				vfirst = (uint32_t)minv;
+			nverts = (uint32_t)(maxv - vfirst) + 1;
 		}
 		ibytes = (uint32_t)count * (uint32_t)ib;
 	} else {
@@ -801,6 +845,8 @@ attrs:;
 			elems = nverts;
 			if (!indexed)
 				src += (int64_t)first * stride;
+			else
+				src += (int64_t)vfirst * stride;
 		} else {
 			/* a plain draw is one instance of an instanced draw */
 			elems = (uint64_t)((is_instanced ? instances : 1) - 1) /
@@ -824,7 +870,7 @@ attrs:;
 		na++;
 	}
 
-	uint32_t sz = 16 + 60 + 28 * na;
+	uint32_t sz = 16 + 64 + 28 * na;
 	if (ibytes)
 		sz = GB_ALIGN_UP(sz, 8u) + ibytes;
 	for (uint32_t i = 0; i < na; i++)
@@ -851,6 +897,7 @@ attrs:;
 		gb_w_u32(&w, (uint32_t)((uint64_t)rs & 0xffffffffu));
 		gb_w_u32(&w, (uint32_t)((uint64_t)rs >> 32));
 	}
+	gb_w_u32(&w, vfirst);
 	for (uint32_t i = 0; i < na; i++) {
 		gb_w_u32(&w, at[i].slot);
 		gb_w_u32(&w, at[i].size);
@@ -901,11 +948,47 @@ static GLenum get_error_raw(void)
 	return gbx_glGetError();
 }
 
+/*
+ * GB_LAZY_GETERROR=1: an application that polls glGetError after every draw
+ * call (Extreme Tux Racer: ~800 times per frame) pays a round trip to the
+ * server each time, which also makes the client wait for the server to work
+ * off everything queued before the poll. Once a run of polls came back clean
+ * the next ones are answered GL_NO_ERROR without asking, and every 64th is
+ * real. A GL error is a sticky flag in the driver, so one that happens in
+ * between is not lost; the application sees it a few calls later than it
+ * would otherwise. Off by default: exact error timing is part of the API.
+ */
+static int lazy_geterror(void)
+{
+	static int v = -1;
+
+	if (v < 0)
+		v = getenv("GB_LAZY_GETERROR") != NULL;
+	return v;
+}
+
 GB_API GLenum glGetError(void)
 {
-	GLenum e = get_error_raw();
+	GLenum e;
+	struct gb_cl *cx;
 
-	if (getenv("GB_TRACE_OPS"))
+	if (__builtin_expect(lazy_geterror(), 0) && (cx = gb_cl_get()) != NULL) {
+		if (!cx->gl_error && cx->lazy_clean >= 8 && cx->lazy_skip < 63) {
+			cx->lazy_skip++;
+			return 0;
+		}
+		e = get_error_raw();
+		cx->lazy_skip = 0;
+		cx->lazy_clean = e ? 0 : cx->lazy_clean + 1;
+		return e;
+	}
+	e = get_error_raw();
+
+	static int trace = -1;
+
+	if (__builtin_expect(trace < 0, 0))
+		trace = getenv("GB_TRACE_OPS") != NULL;
+	if (trace)
 		fprintf(stderr, "c: glGetError -> %#x\n", e);
 	return e;
 }

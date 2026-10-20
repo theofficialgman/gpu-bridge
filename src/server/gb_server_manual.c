@@ -29,6 +29,11 @@ struct gb_scratch {
 	void *ctx; /* EGLContext or GLXContext (whichever is current) */
 	GLuint vbo, ebo;
 	size_t vbo_cap, vbo_off, ebo_cap, ebo_off;
+	/* persistent coherent mappings of vbo/ebo (GL >= 4.4): an upload is a
+	 * memcpy instead of a glBufferSubData, which the Tegra driver spends
+	 * several microseconds on */
+	uint8_t *vmap, *emap;
+	int map_mode; /* 0 not probed, 1 use persistent mappings, -1 do not */
 	/* selection / feedback buffers the driver retains and writes through
 	 * (glSelectBuffer / glFeedbackBuffer); the previous generation is kept
 	 * one call longer in case the replacing call failed */
@@ -55,6 +60,9 @@ static void *current_ctx_key(struct gb_sth *t)
 	t->ctx_valid = 1;
 	return k;
 }
+
+uint64_t gb_dc_ns[8], gb_dc_n[8]; /* DrawClient phases (GB_STATS) */
+#define DCT(i, ...) do { uint64_t t0_ = gb_stats_on ? gb_stat_mono_ns() : 0; __VA_ARGS__; if (gb_stats_on) { gb_dc_ns[i] += gb_stat_mono_ns() - t0_; gb_dc_n[i]++; } } while (0)
 
 static struct gb_scratch *scratch_for(struct gb_sth *t)
 {
@@ -500,10 +508,12 @@ void gb_sv_scratch_buffers_deleted(int32_t n, const uint32_t *names)
 		for (int32_t i = 0; i < n; i++) {
 			if (names[i] && names[i] == s->vbo) {
 				s->vbo = 0;
+				s->vmap = NULL;
 				s->vbo_cap = s->vbo_off = 0;
 			}
 			if (names[i] && names[i] == s->ebo) {
 				s->ebo = 0;
+				s->emap = NULL;
 				s->ebo_cap = s->ebo_off = 0;
 			}
 		}
@@ -1706,6 +1716,70 @@ static void set_pointer(const struct cattr *a, size_t off)
 	}
 }
 
+#define GB_MAP_WRITE_BIT 0x0002
+#define GB_MAP_PERSISTENT_BIT 0x0040
+#define GB_MAP_COHERENT_BIT 0x0080
+
+/* Desktop GL 4.4 and later have buffer storage and persistent mappings. */
+static int scratch_can_map(struct gb_scratch *s)
+{
+	if (!s->map_mode) {
+		GB_NATIVE(glGetString, const unsigned char *, (GLenum));
+		GB_NATIVE(glBufferStorage, void, (GLenum, GLsizeiptr, const void *, GLbitfield));
+		GB_NATIVE(glMapBufferRange, void *, (GLenum, GLintptr, GLsizeiptr, GLbitfield));
+		const char *v = fn_glGetString ? (const char *)fn_glGetString(0x1F02) : NULL;
+		int ok = 0;
+
+		if (v && v[0] >= '1' && v[0] <= '9' && v[1] == '.' && fn_glBufferStorage &&
+		    fn_glMapBufferRange && !getenv("GB_NO_SCRATCH_MAP"))
+			ok = v[0] > '4' || (v[0] == '4' && v[2] >= '4');
+		s->map_mode = ok ? 1 : -1;
+	}
+	return s->map_mode > 0;
+}
+
+/*
+ * (Re)allocate a scratch buffer of `cap` bytes with fresh contents: a
+ * mapped immutable store when possible (the previous one is deleted; the
+ * driver keeps it alive for draws still using it), otherwise an orphaned
+ * mutable store. Leaves the buffer bound to `target`.
+ */
+static void scratch_alloc(struct gb_scratch *s, GLenum target, GLuint *name,
+			  uint8_t **map, size_t cap)
+{
+	GB_NATIVE(glGenBuffers, void, (GLsizei, GLuint *));
+	GB_NATIVE(glDeleteBuffers, void, (GLsizei, const GLuint *));
+	GB_NATIVE(glBindBuffer, void, (GLenum, GLuint));
+	GB_NATIVE(glBufferData, void, (GLenum, GLsizeiptr, const void *, GLenum));
+	GB_NATIVE(glBufferStorage, void, (GLenum, GLsizeiptr, const void *, GLbitfield));
+	GB_NATIVE(glMapBufferRange, void *, (GLenum, GLintptr, GLsizeiptr, GLbitfield));
+
+	if (scratch_can_map(s) && fn_glDeleteBuffers) {
+		if (*name)
+			fn_glDeleteBuffers(1, name);
+		*name = 0;
+		*map = NULL;
+		fn_glGenBuffers(1, name);
+		fn_glBindBuffer(target, *name);
+		fn_glBufferStorage(target, (GLsizeiptr)cap, NULL,
+				   GB_MAP_WRITE_BIT | GB_MAP_PERSISTENT_BIT |
+					   GB_MAP_COHERENT_BIT);
+		*map = fn_glMapBufferRange(target, 0, (GLsizeiptr)cap,
+					   GB_MAP_WRITE_BIT | GB_MAP_PERSISTENT_BIT |
+						   GB_MAP_COHERENT_BIT);
+		if (*map)
+			return;
+		/* mapping failed: stop trying, use a mutable store */
+		s->map_mode = -1;
+		fn_glDeleteBuffers(1, name);
+		*name = 0;
+	}
+	if (!*name)
+		fn_glGenBuffers(1, name);
+	fn_glBindBuffer(target, *name);
+	fn_glBufferData(target, (GLsizeiptr)cap, NULL, GL_STREAM_DRAW);
+}
+
 /*
  * DrawClient wire layout (after the 16-byte header):
  *   u32 mode, kind (0 arrays, 1 elements), i32 count, u32 index type,
@@ -1730,8 +1804,10 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	uint32_t bound_off = gb_r_u32(r); /* kind 2: byte offset in bound EBO */
 	uint32_t rs_lo = gb_r_u32(r), rs_hi = gb_r_u32(r);
 	int64_t restart = (int64_t)(((uint64_t)rs_hi << 32) | rs_lo); /* -1: off */
+	uint32_t vfirst = gb_r_u32(r); /* first vertex of the arrays sent (indexed) */
 
 	if (r->err || kind > 2 || count < 0 || nattr > CA_COUNT ||
+	    (vfirst && kind != 1) || vfirst > (1u << 26) ||
 	    (nattr == 0 && kind != 1) || nverts > (1u << 26) ||
 	    ibytes > GB_MAX_ARRAY_BYTES || instances > (1u << 24))
 		goto bad;
@@ -1773,7 +1849,7 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 					    : ((const uint32_t *)idx)[i];
 			if (v == restart)
 				continue;
-			v += basevertex;
+			v += (int64_t)basevertex - vfirst;
 			if (v < 0 || v >= (int64_t)nverts)
 				goto bad;
 		}
@@ -1845,12 +1921,14 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 			if (getenv("GB_TRACE_DRAWS"))
 				fprintf(stderr, "s: scratch vbo %u was deleted\n", s->vbo);
 			s->vbo = 0;
+			s->vmap = NULL;
 			s->vbo_cap = s->vbo_off = 0;
 		}
 		if (s->ebo && !fn_glIsBuffer(s->ebo)) {
 			if (getenv("GB_TRACE_DRAWS"))
 				fprintf(stderr, "s: scratch ebo %u was deleted\n", s->ebo);
 			s->ebo = 0;
+			s->emap = NULL;
 			s->ebo_cap = s->ebo_off = 0;
 		}
 	}
@@ -1859,24 +1937,31 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	size_t vtotal = 0;
 	for (uint32_t i = 0; i < nattr; i++)
 		vtotal += GB_ALIGN_UP(a[i].len, 16u);
+	if (gb_stats_on) {
+		gb_dc_n[6] += vtotal + ibytes;
+		if (vtotal + ibytes > 32768)
+			gb_dc_n[7]++;
+	}
 	if (nattr) {
-		if (!s->vbo)
-			fn_glGenBuffers(1, &s->vbo);
-		fn_glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
-		if (s->vbo_cap < vtotal || s->vbo_off + vtotal > s->vbo_cap) {
+		if (!s->vbo || s->vbo_cap < vtotal ||
+		    s->vbo_off + vtotal > s->vbo_cap) {
 			size_t cap = s->vbo_cap ? s->vbo_cap : SCRATCH_VBO_BYTES;
 			if (cap < vtotal)
 				cap = vtotal;
-			fn_glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)cap, NULL,
-					GL_STREAM_DRAW); /* orphan */
+			DCT(0, scratch_alloc(s, GL_ARRAY_BUFFER, &s->vbo, &s->vmap, cap));
 			s->vbo_cap = cap;
 			s->vbo_off = 0;
+		} else {
+			fn_glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
 		}
 		for (uint32_t i = 0; i < nattr; i++) {
-			fn_glBufferSubData(GL_ARRAY_BUFFER,
+			if (s->vmap)
+				DCT(1, memcpy(s->vmap + s->vbo_off, data[i], a[i].len));
+			else
+				DCT(1, fn_glBufferSubData(GL_ARRAY_BUFFER,
 					   (GLintptr)s->vbo_off,
-					   (GLsizeiptr)a[i].len, data[i]);
-			set_pointer(&a[i], s->vbo_off);
+					   (GLsizeiptr)a[i].len, data[i]));
+			DCT(2, set_pointer(&a[i], s->vbo_off));
 			s->vbo_off += GB_ALIGN_UP(a[i].len, 16u);
 		}
 	}
@@ -1885,19 +1970,20 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	size_t ioff = kind == 2 ? bound_off : 0;
 	if (kind == 1) {
 		size_t itotal = GB_ALIGN_UP(ibytes, 16u);
-		if (!s->ebo)
-			fn_glGenBuffers(1, &s->ebo);
-		fn_glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s->ebo);
-		if (s->ebo_cap < itotal || s->ebo_off + itotal > s->ebo_cap) {
+		if (!s->ebo || s->ebo_cap < itotal ||
+		    s->ebo_off + itotal > s->ebo_cap) {
 			size_t cap = s->ebo_cap ? s->ebo_cap : SCRATCH_EBO_BYTES;
 			if (cap < itotal)
 				cap = itotal;
-			fn_glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)cap,
-					NULL, GL_STREAM_DRAW);
+			scratch_alloc(s, GL_ELEMENT_ARRAY_BUFFER, &s->ebo, &s->emap, cap);
 			s->ebo_cap = cap;
 			s->ebo_off = 0;
+		} else {
+			fn_glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s->ebo);
 		}
-		if (ibytes)
+		if (ibytes && s->emap)
+			memcpy(s->emap + s->ebo_off, idx, ibytes);
+		else if (ibytes)
 			fn_glBufferSubData(GL_ELEMENT_ARRAY_BUFFER,
 					   (GLintptr)s->ebo_off,
 					   (GLsizeiptr)ibytes, idx);
@@ -1906,10 +1992,11 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	}
 
 	const void *ip = (const void *)(uintptr_t)ioff;
+	basevertex -= (int32_t)vfirst; /* the arrays start at vertex vfirst */
 	if (kind == 0) {
 		if (!instances) {
 			if (fn_glDrawArrays)
-				fn_glDrawArrays(mode, 0, count);
+				DCT(3, fn_glDrawArrays(mode, 0, count));
 		} else if (baseinstance && fn_glDrawArraysInstancedBaseInstance) {
 			fn_glDrawArraysInstancedBaseInstance(mode, 0, count,
 							     (GLsizei)instances,
@@ -1935,7 +2022,7 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 			fn_glDrawElementsBaseVertex(mode, count, itype, ip,
 						    basevertex);
 		} else if (fn_glDrawElements) {
-			fn_glDrawElements(mode, count, itype, ip);
+			DCT(4, fn_glDrawElements(mode, count, itype, ip));
 		}
 		if (kind == 1)
 			fn_glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, old_ebo);
