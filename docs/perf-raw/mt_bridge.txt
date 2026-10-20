@@ -1,0 +1,29 @@
+### mt bridge
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+FPSCOUNT 54.2 2958 55.5
+FPSCOUNT 56.2 3069 55.3
+FPSCOUNT 58.2 3181 55.5
+FPSCOUNT 60.3 3293 55.6
+--- run: bash -c bash /tmp/mt.sh bridge (wall 63.7 s; 100% = one core) ---
+  gbd                       58.0 cpu-s    91.0%
+  minetest                  54.7 cpu-s    85.8%
+  kwin_x11                   8.6 cpu-s    13.5%
+  python3                    5.2 cpu-s     8.1%
+  Xorg                       4.1 cpu-s     6.4%
+  htop                       3.7 cpu-s     5.8%
+  nvgpu_channel_p            1.0 cpu-s     1.5%
+  tegradc.1/a                0.8 cpu-s     1.2%
+  irq/75-gk20a_st            0.8 cpu-s     1.2%
+  irq/67-host_syn            0.7 cpu-s     1.1%
+  ALL PROCESSES            141.2 cpu-s   221.7%
+  exit status 0

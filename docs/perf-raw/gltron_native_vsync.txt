@@ -1,0 +1,15 @@
+### gltron native
+/tmp/games.sh: line 60: l: command not found
+--- run: bash -c bash /tmp/games.sh gltron native (wall 69.6 s; 100% = one core) ---
+  gltron                    60.7 cpu-s    87.2%
+  import                    14.9 cpu-s    21.4%
+  python3                    4.6 cpu-s     6.6%
+  htop                       3.7 cpu-s     5.3%
+  Xorg                       1.5 cpu-s     2.2%
+  pipewire-pulse             1.2 cpu-s     1.8%
+  plasmashell                1.1 cpu-s     1.6%
+  irq/67-host_syn            1.0 cpu-s     1.5%
+  nvgpu_channel_p            1.0 cpu-s     1.5%
+  pipewire                   0.9 cpu-s     1.2%
+  ALL PROCESSES             94.6 cpu-s   135.9%
+  exit status 127

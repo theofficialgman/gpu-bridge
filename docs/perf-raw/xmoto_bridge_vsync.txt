@@ -1,0 +1,32 @@
+### xmoto bridge
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+FPSCOUNT 36.7 1553 50.0
+FPSCOUNT 38.7 1643 44.5
+FPSCOUNT 40.8 1744 50.0
+FPSCOUNT 42.8 1845 50.1
+--- run: bash -c bash /tmp/games.sh xmoto bridge (wall 46.9 s; 100% = one core) ---
+  import                    15.4 cpu-s    32.8%
+  xmoto                     10.9 cpu-s    23.3%
+  gbd                        3.8 cpu-s     8.0%
+  python3                    3.0 cpu-s     6.4%
+  htop                       2.4 cpu-s     5.1%
+  plasmashell                0.9 cpu-s     2.0%
+  pipewire-pulse             0.8 cpu-s     1.7%
+  Xorg                       0.6 cpu-s     1.4%
+  irq/75-gk20a_st            0.5 cpu-s     1.0%
+  pipewire                   0.4 cpu-s     0.9%
+  ALL PROCESSES             41.7 cpu-s    88.9%
+  exit status 0

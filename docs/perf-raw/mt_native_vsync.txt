@@ -1,0 +1,18 @@
+### mt native
+FPSCOUNT 56.4 3253 60.0
+FPSCOUNT 58.4 3374 60.0
+FPSCOUNT 60.4 3494 60.0
+FPSCOUNT total 62.31 3576 57.4
+--- run: bash -c bash /tmp/mt.sh native (wall 62.6 s; 100% = one core) ---
+  minetest                  34.8 cpu-s    55.6%
+  kwin_x11                   6.6 cpu-s    10.6%
+  python3                    4.2 cpu-s     6.7%
+  htop                       3.3 cpu-s     5.3%
+  Xorg                       3.1 cpu-s     4.9%
+  sugov:0                    1.1 cpu-s     1.8%
+  irq/75-gk20a_st            1.1 cpu-s     1.8%
+  tegradc.1/a                0.7 cpu-s     1.2%
+  nvgpu_channel_p            0.7 cpu-s     1.1%
+  irq/67-host_syn            0.6 cpu-s     1.0%
+  ALL PROCESSES             59.1 cpu-s    94.3%
+  exit status 0

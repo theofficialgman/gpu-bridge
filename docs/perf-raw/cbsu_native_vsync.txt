@@ -1,0 +1,18 @@
+### cbsu native
+FPSCOUNT 40.3 2056 52.1
+FPSCOUNT 42.3 2173 58.0
+FPSCOUNT 44.3 2292 59.0
+FPSCOUNT total 44.63 2307 51.7
+--- run: bash -c bash /tmp/games.sh cbsu native (wall 45.1 s; 100% = one core) ---
+  import                    17.5 cpu-s    38.7%
+  python3                    2.8 cpu-s     6.2%
+  chromium-bsu               2.7 cpu-s     6.1%
+  htop                       2.3 cpu-s     5.1%
+  plasmashell                0.7 cpu-s     1.5%
+  Xorg                       0.5 cpu-s     1.1%
+  irq/75-gk20a_st            0.4 cpu-s     1.0%
+  avahi-daemon               0.3 cpu-s     0.7%
+  irq/72-tegradc.            0.2 cpu-s     0.5%
+  nvgpu_channel_p            0.2 cpu-s     0.4%
+  ALL PROCESSES             28.9 cpu-s    64.1%
+  exit status 0

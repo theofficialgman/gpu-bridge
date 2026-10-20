@@ -1,0 +1,14 @@
+### gltron native
+--- run: bash -c bash /tmp/games.sh gltron native (wall 1045.6 s; 100% = one core) ---
+  gltron                  1027.1 cpu-s    98.2%
+  python3                   61.8 cpu-s     5.9%
+  htop                      52.9 cpu-s     5.1%
+  import                    26.8 cpu-s     2.6%
+  avahi-daemon               5.9 cpu-s     0.6%
+  irq/72-tegradc.            4.4 cpu-s     0.4%
+  plasmashell                3.4 cpu-s     0.3%
+  upowerd                    3.1 cpu-s     0.3%
+  Xorg                       2.7 cpu-s     0.3%
+  sugov:0                    2.6 cpu-s     0.3%
+  ALL PROCESSES           1209.3 cpu-s   115.7%
+  exit status 0

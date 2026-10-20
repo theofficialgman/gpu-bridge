@@ -1,0 +1,18 @@
+### xmoto native
+FPSCOUNT 40.3 1643 45.2
+FPSCOUNT 42.3 1743 50.0
+FPSCOUNT 44.3 1843 50.0
+FPSCOUNT total 44.91 1861 41.4
+--- run: bash -c bash /tmp/games.sh xmoto native (wall 45.3 s; 100% = one core) ---
+  import                    15.9 cpu-s    35.1%
+  xmoto                     12.2 cpu-s    26.9%
+  python3                    2.9 cpu-s     6.3%
+  htop                       2.3 cpu-s     5.1%
+  pipewire-pulse             0.8 cpu-s     1.7%
+  plasmashell                0.7 cpu-s     1.6%
+  Xorg                       0.5 cpu-s     1.1%
+  irq/75-gk20a_st            0.4 cpu-s     0.9%
+  pipewire                   0.4 cpu-s     0.9%
+  avahi-daemon               0.3 cpu-s     0.7%
+  ALL PROCESSES             38.4 cpu-s    84.7%
+  exit status 0

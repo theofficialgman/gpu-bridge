@@ -1,0 +1,18 @@
+### stux native
+FPSCOUNT 42.4 2502 50.6
+FPSCOUNT 44.4 2623 60.0
+FPSCOUNT 46.4 2743 60.0
+FPSCOUNT total 48.30 2844 58.9
+--- run: bash -c bash /tmp/games.sh stux native (wall 50.3 s; 100% = one core) ---
+  supertux2                 19.7 cpu-s    39.1%
+  import                    10.9 cpu-s    21.7%
+  python3                    3.1 cpu-s     6.2%
+  htop                       2.6 cpu-s     5.3%
+  Xorg                       1.0 cpu-s     2.1%
+  plasmashell                1.0 cpu-s     2.0%
+  sugov:0                    0.6 cpu-s     1.2%
+  pipewire                   0.5 cpu-s     0.9%
+  irq/75-gk20a_st            0.4 cpu-s     0.8%
+  avahi-daemon               0.3 cpu-s     0.7%
+  ALL PROCESSES             42.6 cpu-s    84.6%
+  exit status 0

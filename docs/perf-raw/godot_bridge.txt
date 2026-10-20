@@ -1,0 +1,31 @@
+### godot bridge
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+FPSCOUNT 36.9 27170 816.2
+FPSCOUNT 38.9 28566 698.0
+FPSCOUNT 40.9 29985 709.4
+FPSCOUNT 42.9 31373 693.3
+--- run: bash -c bash /tmp/games.sh godot bridge (wall 45.1 s; 100% = one core) ---
+  gbd                       41.6 cpu-s    92.3%
+  kwin_x11                  38.8 cpu-s    86.1%
+  godot3                    19.1 cpu-s    42.4%
+  import                     5.8 cpu-s    12.8%
+  python3                    3.7 cpu-s     8.2%
+  Xorg                       3.5 cpu-s     7.7%
+  htop                       2.6 cpu-s     5.9%
+  nvgpu_channel_p            2.0 cpu-s     4.4%
+  irq/67-host_syn            1.1 cpu-s     2.6%
+  pipewire-pulse             1.0 cpu-s     2.3%
+  ALL PROCESSES            124.0 cpu-s   275.2%
+  exit status 0

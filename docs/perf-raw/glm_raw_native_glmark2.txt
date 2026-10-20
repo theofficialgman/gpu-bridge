@@ -1,0 +1,35 @@
+    GL_RENDERER:    NVIDIA Tegra X1 (nvgpu)/integrated
+    GL_VERSION:     4.6.0 NVIDIA 32.3.1
+[build] duration=2.0:use-vbo=false: FPS: 1321 FrameTime: 0.757 ms
+[build] duration=2.0:use-vbo=true: FPS: 3733 FrameTime: 0.268 ms
+[texture] duration=2.0:texture-filter=nearest: FPS: 2995 FrameTime: 0.334 ms
+[texture] duration=2.0:texture-filter=linear: FPS: 2990 FrameTime: 0.335 ms
+[texture] duration=2.0:texture-filter=mipmap: FPS: 3198 FrameTime: 0.313 ms
+[shading] duration=2.0:shading=gouraud: FPS: 2622 FrameTime: 0.381 ms
+[shading] duration=2.0:shading=blinn-phong-inf: FPS: 2593 FrameTime: 0.386 ms
+[shading] duration=2.0:shading=phong: FPS: 2559 FrameTime: 0.391 ms
+[shading] duration=2.0:shading=cel: FPS: 2611 FrameTime: 0.383 ms
+[bump] bump-render=high-poly:duration=2.0: FPS: 2049 FrameTime: 0.488 ms
+[bump] bump-render=normals:duration=2.0: FPS: 4035 FrameTime: 0.248 ms
+[bump] bump-render=height:duration=2.0: FPS: 3905 FrameTime: 0.256 ms
+[effect2d] duration=2.0:kernel=0,1,0;1,-4,1;0,1,0;: FPS: 2255 FrameTime: 0.444 ms
+[effect2d] duration=2.0:kernel=1,1,1,1,1;1,1,1,1,1;1,1,1,1,1;: FPS: 1153 FrameTime: 0.867 ms
+[pulsar] duration=2.0:quads=5:texture=false: FPS: 3655 FrameTime: 0.274 ms
+[desktop] blur-radius=5:duration=2.0:effect=blur:passes=1:separable=true:windows=4: FPS: 1131 FrameTime: 0.885 ms
+[desktop] duration=2.0:effect=shadow:windows=4: FPS: 1348 FrameTime: 0.742 ms
+[buffer] columns=200:duration=2.0:interleave=false:update-dispersion=0.9:update-fraction=0.5:update-method=map: FPS: 361 FrameTime: 2.776 ms
+[buffer] columns=200:duration=2.0:interleave=false:update-dispersion=0.9:update-fraction=0.5:update-method=subdata: FPS: 353 FrameTime: 2.840 ms
+[buffer] columns=200:duration=2.0:interleave=true:update-dispersion=0.9:update-fraction=0.5:update-method=map: FPS: 451 FrameTime: 2.222 ms
+[ideas] duration=2.0:speed=duration: FPS: 1731 FrameTime: 0.578 ms
+[jellyfish] duration=2.0: FPS: 1393 FrameTime: 0.718 ms
+[terrain] duration=2.0: FPS: 175 FrameTime: 5.743 ms
+[shadow] duration=2.0: FPS: 2173 FrameTime: 0.460 ms
+[refract] duration=2.0: FPS: 244 FrameTime: 4.106 ms
+[conditionals] duration=2.0:fragment-steps=0:vertex-steps=0: FPS: 3056 FrameTime: 0.327 ms
+[conditionals] duration=2.0:fragment-steps=5:vertex-steps=0: FPS: 2920 FrameTime: 0.343 ms
+[function] duration=2.0:fragment-complexity=low:fragment-steps=5: FPS: 3108 FrameTime: 0.322 ms
+[function] duration=2.0:fragment-complexity=medium:fragment-steps=5: FPS: 3023 FrameTime: 0.331 ms
+[loop] duration=2.0:fragment-loop=false:fragment-steps=5:vertex-steps=5: FPS: 3106 FrameTime: 0.322 ms
+[loop] duration=2.0:fragment-steps=5:fragment-uniform=false:vertex-steps=5: FPS: 3090 FrameTime: 0.324 ms
+[loop] duration=2.0:fragment-steps=5:fragment-uniform=true:vertex-steps=5: FPS: 3092 FrameTime: 0.323 ms
+                                  glmark2 Score: 2262 

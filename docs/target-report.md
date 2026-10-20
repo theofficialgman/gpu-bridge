@@ -462,3 +462,58 @@ and bridged on the dev machine's GPU through the DRM render node: 39,202 pass /
 4,531 skip / 96 fail / 385 crash / 10 warn on both sides, **0 differences**
 (STATUS.md, "Dev-machine conformance loop"). It found the Begin/End, list
 compile, shadow-reuse and indexed-getter bugs that the Tegra selection missed.
+
+## More applications (apt, armhf through the bridge vs arm64 native)
+
+Installed from the Ubuntu archive with apt, one architecture at a time, and
+removed afterwards (scripts in `tools/realapps`: `glm.sh`, `mt.sh`, `games.sh`,
+`runall.sh`; raw output in `docs/perf-raw/`). Each runs unlocked
+(`__GL_SYNC_TO_VBLANK=0`) and vsynced; 100% is one core. Games that limit their
+own frame rate (Chromium B.S.U., X-Moto, SuperTux) show the same fps in both
+columns. The screenshot tool and the user's `htop` appear in some top-10 lists
+and are not part of the application.
+
+| Application (API) | Native arm64 | Bridge armhf (app + gbd) |
+|---|---|---|
+| glmark2 2023.01, GLX (GL 2.0 scenes, 31 scenes) | score 2262; app 95% | **2174 (96%)**; 30% + 87% |
+| glmark2-es2, EGL (GLES 2.0) | score 2263; app 96% | **2135 (94%)**; 25% + 86% |
+| minetest 5.6.1 (Irrlicht, fixed-function with client arrays), unlocked | **179 fps**; 112% | **55 fps**; 86% + 91% |
+| minetest, vsynced | 60 fps; 56% | **30 fps**; 93% + 50% |
+| SuperTux 0.6.3 (SDL2, GL 3.3 core), a level | 60 fps; 40% | 57 fps; 72% + 63% |
+| Chromium B.S.U. (fixed-function GL, textures, blending) | 49 fps; 6% | 47 fps; 10% + 7% |
+| X-Moto 0.6.2 (fixed-function GL), tutorial level | 50 fps; 28% | 50 fps; 23% + 8% |
+| Armagetron Advanced 0.2.9 (fixed-function GL) | one core (96%), fps not captured | ~215 fps; 31% + 81% |
+| GLtron 0.70 | renders (fps not captured) | ~770 fps; 48% + 72% |
+| Godot 3.5 (GLES3 renderer, rotating lit meshes with shadows) | ~650 fps; 96% (kwin 78%) | ~730 fps; 42% + 92% (kwin 86%) |
+
+All of them render on the NVIDIA GPU through the bridge with the same picture
+(windows captured with `import`). Findings:
+
+* **The scenes that are slow are the ones that do per-frame work in client
+  memory.** glmark2 per scene (`docs/perf-raw/glm_raw_*`): 29 of 31 scenes are at
+  92-105% of native in both GL and ES2. `build use-vbo=false` (client arrays
+  every frame) is at 53% (GL) and 38% (ES2), `buffer ... update-method=map
+  interleave=true` (mapped-buffer writes) at 21% and 19%, and a few 2D scenes
+  (`desktop`, `ideas`) at 58-79% of native.
+* **minetest is the worst real case.** `GB_STATS` shows 3.5 million indexed
+  client-array draws in 50 s, 8 GB of vertex data sent (160 MB/s), `gbd` busy
+  95% of the time at 9.8 us per draw: 2.4 us in the driver's draw, 0.8 us per
+  attribute copy into the scratch buffer, 0.6 us per `gl*Pointer`, the rest
+  index validation and buffer binds. The client side is as busy (86-93%),
+  copying the same arrays into the ring. Vsynced it needs two vblanks per
+  frame (30 fps). Next steps if wanted: keep client arrays that did not
+  change (static meshes drawn every frame) in the server's buffer instead of
+  sending them again, and fewer driver calls per draw (two `glIsBuffer` and
+  four `glBindBuffer` per draw can mostly go).
+* **SuperTux is at 57-60 fps but costs 3.4 times the CPU** (135% against 40%):
+  a call-rate effect like the ones above, not a rendering problem.
+* **Native arm64 GLtron hangs when it is asked to quit**: after SIGTERM it
+  spins at 98% in `sprintf` with its window closed (16 minutes before I killed
+  it). Not related to the bridge; the armhf build exits normally. The harness
+  now uses `timeout -k`.
+* Godot 3 runs its GLES3 renderer (OpenGL ES 3.0 context on the NVIDIA driver)
+  correctly through the bridge. Its bridged frame rate is higher than native
+  here because the scene is GPU-limited and the compositor takes less of the
+  GPU in the bridged run (kwin 86% vs 78% CPU either way); treat it as equal.
+* Stellarium and Warzone 2100 have no armhf data package in the archive,
+  0 A.D. needs 3.2 GB of data; they were not tested.

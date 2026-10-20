@@ -15,6 +15,10 @@ case $sc in
  mpv)  if [ -n "$VSYNC" ]; then cmd="env UNTIMED= T=170 bash /tmp/mpv.sh $mode --vo=gpu --gpu-context=x11egl --profile=high-quality --frames=1800 av://lavfi:testsrc2=size=1280x720:rate=60"; else cmd="env T=170 bash /tmp/mpv.sh $mode --vo=gpu --gpu-context=x11egl --profile=high-quality --frames=1500 av://lavfi:testsrc2=size=1280x720:rate=60"; fi ;;
  gears) cmd="env T=30 bash /tmp/gears.sh $mode glxgears" ;;
  es2gears) cmd="env T=30 bash /tmp/gears.sh $mode es2gears_x11" ;;
+ glm)  cmd="bash /tmp/glm.sh $mode glmark2" ;;
+ glmes) cmd="bash /tmp/glm.sh $mode glmark2-es2" ;;
+ mt)   cmd="bash /tmp/mt.sh $mode" ;;
+ cbsu|gltron|stux|xmoto|agt|godot) cmd="bash /tmp/games.sh $sc $mode" ;;
  nb)   cmd="bash /tmp/nb_bench.sh $mode" ;;
  etr)  cmd="bash /tmp/etr_bench.sh $mode" ;;
 esac

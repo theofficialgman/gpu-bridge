@@ -1,0 +1,18 @@
+### godot native
+FPSCOUNT 36.7 23885 730.2
+FPSCOUNT 38.7 25202 658.3
+FPSCOUNT 40.7 26595 696.0
+FPSCOUNT 42.7 28013 708.8
+--- run: bash -c bash /tmp/games.sh godot native (wall 45.1 s; 100% = one core) ---
+  godot3                    43.4 cpu-s    96.1%
+  kwin_x11                  15.2 cpu-s    33.7%
+  import                    13.1 cpu-s    28.9%
+  python3                    3.4 cpu-s     7.6%
+  Xorg                       3.0 cpu-s     6.7%
+  htop                       2.5 cpu-s     5.6%
+  nvgpu_channel_p            1.6 cpu-s     3.5%
+  irq/67-host_syn            1.1 cpu-s     2.4%
+  pipewire-pulse             1.0 cpu-s     2.2%
+  pipewire                   0.5 cpu-s     1.2%
+  ALL PROCESSES             88.5 cpu-s   196.2%
+  exit status 0

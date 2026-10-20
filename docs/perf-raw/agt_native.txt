@@ -1,0 +1,14 @@
+### agt native
+--- run: bash -c bash /tmp/games.sh agt native (wall 50.3 s; 100% = one core) ---
+  armagetronad.re           48.2 cpu-s    95.9%
+  import                    15.9 cpu-s    31.6%
+  python3                    3.7 cpu-s     7.3%
+  htop                       2.9 cpu-s     5.7%
+  pipewire-pulse             2.5 cpu-s     5.0%
+  Xorg                       2.3 cpu-s     4.6%
+  pipewire                   1.8 cpu-s     3.5%
+  tegradc.1/a                1.7 cpu-s     3.4%
+  plasmashell                1.1 cpu-s     2.2%
+  irq/67-host_syn            0.7 cpu-s     1.5%
+  ALL PROCESSES             84.6 cpu-s   168.3%
+  exit status 0

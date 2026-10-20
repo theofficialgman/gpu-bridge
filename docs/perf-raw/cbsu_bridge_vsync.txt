@@ -1,0 +1,32 @@
+### cbsu bridge
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+ERROR: ld.so: object '/tmp/fpscount32.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS32): ignored.
+FPSCOUNT 36.2 1786 48.8
+FPSCOUNT 38.2 1876 45.0
+FPSCOUNT 40.2 1974 48.7
+FPSCOUNT 42.2 2071 48.4
+--- run: bash -c bash /tmp/games.sh cbsu bridge (wall 46.7 s; 100% = one core) ---
+  import                    17.3 cpu-s    37.1%
+  chromium-bsu               3.9 cpu-s     8.3%
+  gbd                        3.6 cpu-s     7.6%
+  python3                    2.8 cpu-s     6.1%
+  htop                       2.4 cpu-s     5.1%
+  plasmashell                0.7 cpu-s     1.5%
+  irq/75-gk20a_st            0.5 cpu-s     1.0%
+  Xorg                       0.4 cpu-s     0.9%
+  avahi-daemon               0.3 cpu-s     0.7%
+  irq/72-tegradc.            0.2 cpu-s     0.5%
+  ALL PROCESSES             33.8 cpu-s    72.4%
+  exit status 0
