@@ -256,9 +256,9 @@ Presentation locked to the display (60 fps in every case; CPU as above):
 | mpv (60 fps video, high-quality) | 50.8% (kwin 15%) | 49.1% + 24.0% = 73.1% (kwin 14%) | +22 points |
 | glxgears | 8.1% | gbd 7.9% (client below the top 10) | whole machine 45.9% vs 48.6% |
 | es2gears (EGL/GLES2) | 8.4% | gbd 7.7% | whole machine 44.7% vs 47.0% |
-
 | neverball (both presented at 60 fps) | 59.7 fps; app 47.6% | 60 fps; client 24.2% + gbd 83.1% = 107% | +60 points |
 | Extreme Tux Racer (2560x1600 fullscreen) | display-bound; app 39.8% (frame counter could not hook SFML) | **about 25 fps**; client 65.7% + gbd 83.1% | |
+
 
 (The `__GL_SYNC_TO_VBLANK=0` override did not unlock neverball or Extreme Tux
 Racer, so they have no separate unlocked row.)
