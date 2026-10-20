@@ -256,21 +256,61 @@ Presentation locked to the display (60 fps in every case; CPU as above):
 | mpv (60 fps video, high-quality) | 50.8% (kwin 15%) | 49.1% + 24.0% = 73.1% (kwin 14%) | +22 points |
 | glxgears | 8.1% | gbd 7.9% (client below the top 10) | whole machine 45.9% vs 48.6% |
 | es2gears (EGL/GLES2) | 8.4% | gbd 7.7% | whole machine 44.7% vs 47.0% |
-| neverball (both presented at 60 fps) | 59.7 fps; app 47.6% | 60 fps; client 24.2% + gbd 83.1% = 107% | +60 points |
-| Extreme Tux Racer (2560x1600 fullscreen) | display-bound; app 39.8% (frame counter could not hook SFML) | **about 25 fps**; client 65.7% + gbd 83.1% | |
+| neverball (both presented at 60 fps) | 59.7 fps; app 47.6% | 60 fps; client 18.9% + gbd 55.6% = 74.5% (was 24.2% + 83.1%) | +27 points (was +60) |
+| Extreme Tux Racer (2560x1600 fullscreen) | display-bound; app 39.8% (frame counter could not hook SFML) | **54 fps**, client 59.9% + gbd 69.9% (was 25 fps, 65.7% + 83.1%); with `GB_LAZY_GETERROR=1` **59 fps**, client 46.0% + gbd 61.1% | |
 
 
 (The `__GL_SYNC_TO_VBLANK=0` override did not unlock neverball or Extreme Tux
 Racer, so they have no separate unlocked row.)
 
-neverball and Extreme Tux Racer are the limit of the design: both use
-immediate-mode and matrix calls (neverball about 17,400 requests per frame,
-about 1 million per second; Extreme Tux Racer about 18,700 per frame, mostly
-`glVertex3f`/`glNormal3f` between `glBegin`/`glEnd`). `gbd` spends about 0.8 us
-per request in neverball and sustains it at 60 fps with 83% of a core; Extreme
-Tux Racer needs about 1.8 us per request (the armhf client alone is at 66%) and
-falls to about 25 fps. Packing `glBegin`..`glEnd` blocks (and runs of matrix
-calls) into one request would be the next optimisation.
+neverball and Extreme Tux Racer are the worst case for a remoting layer: both
+use immediate-mode and matrix calls (neverball about 17,400 requests per frame,
+Extreme Tux Racer about 18,700 plus about 800 client-array draws), and Extreme
+Tux Racer also polls `glGetError` after every draw. The first measurements
+(25 fps) were not explained by the per-request cost. `GB_STATS` and phase timers
+in `gbd` found four causes, now fixed:
+
+1. **Every indexed client-array draw sent the arrays from vertex 0 up to the
+   largest index.** Extreme Tux Racer draws its terrain in slices, so each
+   draw re-sent everything before its slice: 4 GB in 38 s, 640 KB per draw. The
+   client now sends only the vertices from the smallest to the largest index
+   and the server draws with a base vertex that moves them back
+   (`glDrawElementsBaseVertex`, desktop GL 3.2 and later). 1.9 GB over the same
+   run, the rest being genuinely large arrays. This was the largest single gain:
+   34 to 59 fps (with the options below already in).
+2. **`glBufferSubData` into the scratch buffer cost 4.8 us per call on the
+   Tegra** (2.4 million calls). The scratch buffers are now persistent coherent
+   mappings (`glBufferStorage`, GL 4.4+) and an upload is a `memcpy` (1.1 us per
+   attribute including cache misses). A new store replaces a full buffer.
+   `GB_NO_SCRATCH_MAP=1` goes back to `glBufferSubData`.
+3. **Small asynchronous requests are batched.** Up to 32 KB of requests of at
+   most 1 KB each (everything that does not wait for a reply) are collected in a
+   staging area and sent as one `GB_OPX_Batch` ring message, flushed before any
+   other kind of request, on `glFlush`, and at thread exit. `gbd` handles each
+   record with the same dispatch code and sends debug messages once per batch.
+   On the x86 loopback a `glVertex3f` costs the armhf client 28 ns instead of
+   65 (`callbench`), and on the Tegra the client-plus-server cost of an
+   immediate-mode call fell from 329 ns to 129 ns (native: 70 ns). `GB_NO_BATCH=1` turns it off; a registered debug callback
+   turns it off too (the helper thread cannot flush another thread's staging
+   area and the callback must see messages promptly).
+4. **`glXSwapBuffers` waited for its own reply**, so the client could not build
+   the next frame while the server presented the current one. The reply is now
+   collected one swap later (`LAG_SYNC` in the generator); any later request that
+   waits for a reply collects it on the way. One frame of queueing, as in a
+   driver.
+
+`GB_LAZY_GETERROR=1` is an option, off by default: after eight clean
+`glGetError` polls in a row, the next 63 are answered `GL_NO_ERROR` without
+asking `gbd` and the 64th is real. A GL error is a sticky flag in the driver
+so an error in between is not lost, it is reported up to 63 polls late. That
+saves the 800 round trips a frame that Extreme Tux Racer makes (54 -> 59 fps)
+but changes the exact timing of errors, which conformance suites test, so it
+is for applications that only look for "any error" after the fact.
+
+Results on the other applications with the same changes (unlocked, same
+scenarios as the tables above): OpenArena GL3.2 renderer 324 -> 415 fps in the
+timedemo (native 358), OpenArena fixed-function 287 -> 533 fps (native 669),
+glxgears about 2,700 fps (unchanged).
 
 The full top-10 process list of every run is in `docs/perf-top10.md` (raw
 output in `docs/perf-raw/`).

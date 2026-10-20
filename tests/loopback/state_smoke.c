@@ -840,6 +840,85 @@ static void test_labels(void)
 	err();
 }
 
+/*
+ * Indexed draws from client memory send only the vertices the indices reach
+ * (min..max), drawn with a base vertex that moves them back; the result must
+ * be the same as drawing the whole array.
+ */
+static void test_client_array_range(void)
+{
+	GLfloat pos[400], col[800];
+	GLubyte i8[4] = { 100, 101, 102, 103 };
+	GLushort i16[4] = { 150, 151, 152, 153 };
+	GLuint i32[4] = { 3000000, 3000001, 3000002, 3000003 };
+	GLubyte px[4];
+
+	for (int v = 0; v < 200; v++) { /* everything off screen, red */
+		pos[2 * v] = pos[2 * v + 1] = 9.0f;
+		col[4 * v] = 1; col[4 * v + 1] = col[4 * v + 2] = 0; col[4 * v + 3] = 1;
+	}
+	static const GLfloat quad[8] = { -1, -1, 1, -1, 1, 1, -1, 1 };
+
+	memcpy(&pos[2 * 100], quad, sizeof quad);
+	memcpy(&pos[2 * 50], quad, sizeof quad); /* the same quad, for basevertex */
+	for (int v = 100; v < 104; v++) { /* green where the quad is */
+		col[4 * v] = 0; col[4 * v + 1] = 1;
+	}
+	for (int v = 50; v < 54; v++) { /* blue */
+		col[4 * v] = 0; col[4 * v + 2] = 1;
+	}
+	glViewport(0, 0, 64, 64);
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+	glDisable(GL_DEPTH_TEST);
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glEnableClientState(GL_COLOR_ARRAY);
+	glVertexPointer(2, GL_FLOAT, 0, pos);
+	glColorPointer(4, GL_FLOAT, 0, col);
+	err();
+
+	/* start high: only vertices 100..103 travel */
+	glClearColor(0, 0, 0, 1);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glDrawElements(GL_QUADS, 4, GL_UNSIGNED_BYTE, i8);
+	glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+	CHECK(px[0] == 0 && px[1] == 255 && px[2] == 0, "ubyte indices: %d %d %d",
+	      px[0], px[1], px[2]);
+
+	/* base vertex: indices 150..153 + (-50) = 100..103 */
+	glClear(GL_COLOR_BUFFER_BIT);
+	glDrawElementsBaseVertex(GL_QUADS, 4, GL_UNSIGNED_SHORT, i16, -50);
+	glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+	CHECK(px[0] == 0 && px[1] == 255 && px[2] == 0, "basevertex -50: %d %d %d",
+	      px[0], px[1], px[2]);
+
+	/* base vertex that lands on 50..53 */
+	glClear(GL_COLOR_BUFFER_BIT);
+	glDrawElementsBaseVertex(GL_QUADS, 4, GL_UNSIGNED_SHORT, i16, -100);
+	glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+	CHECK(px[0] == 0 && px[1] == 0 && px[2] == 255, "basevertex -100: %d %d %d",
+	      px[0], px[1], px[2]);
+
+	/* range draw */
+	glClear(GL_COLOR_BUFFER_BIT);
+	glDrawRangeElements(GL_QUADS, 100, 103, 4, GL_UNSIGNED_BYTE, i8);
+	glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+	CHECK(px[0] == 0 && px[1] == 255 && px[2] == 0, "range: %d %d %d", px[0],
+	      px[1], px[2]);
+
+	/* huge indices with a base vertex that brings them into the array */
+	glClear(GL_COLOR_BUFFER_BIT);
+	glDrawElementsBaseVertex(GL_QUADS, 4, GL_UNSIGNED_INT, i32, -(3000000 - 100));
+	glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+	CHECK(px[0] == 0 && px[1] == 255 && px[2] == 0, "large: %d %d %d", px[0],
+	      px[1], px[2]);
+	EXPECT_ERR(GL_NO_ERROR, "client array draws");
+	glDisableClientState(GL_VERTEX_ARRAY);
+	glDisableClientState(GL_COLOR_ARRAY);
+}
+
 int main(void)
 {
 	Display *dpy = XOpenDisplay(NULL);
@@ -897,6 +976,7 @@ int main(void)
 	test_pointer_errors();
 	test_sync_errors();
 	test_labels();
+	test_client_array_range();
 
 	glXMakeCurrent(dpy, None, NULL);
 	glXDestroyContext(dpy, ctx);
