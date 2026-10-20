@@ -505,15 +505,15 @@ All of them render on the NVIDIA GPU through the bridge with the same picture
   change (static meshes drawn every frame) in the server's buffer instead of
   sending them again, and fewer driver calls per draw (two `glIsBuffer` and
   four `glBindBuffer` per draw can mostly go).
-* **SuperTux is at 57-60 fps but costs 3.4 times the CPU** (135% against 40%):
-  a call-rate effect like the ones above, not a rendering problem.
+* **SuperTux is at 57-60 fps but costs 3.4 times the CPU** (135% against 40%).
+  Not profiled yet; it uses the GL 3.3 core renderer, so it is not the
+  client-array path above.
 * **Native arm64 GLtron hangs when it is asked to quit**: after SIGTERM it
   spins at 98% in `sprintf` with its window closed (16 minutes before I killed
   it). Not related to the bridge; the armhf build exits normally. The harness
   now uses `timeout -k`.
 * Godot 3 runs its GLES3 renderer (OpenGL ES 3.0 context on the NVIDIA driver)
-  correctly through the bridge. Its bridged frame rate is higher than native
-  here because the scene is GPU-limited and the compositor takes less of the
-  GPU in the bridged run (kwin 86% vs 78% CPU either way); treat it as equal.
+  correctly through the bridge. The bridged frame rate (730) is a little above
+  native (650); I did not investigate why, treat it as equal.
 * Stellarium and Warzone 2100 have no armhf data package in the archive,
   0 A.D. needs 3.2 GB of data; they were not tested.
