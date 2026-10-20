@@ -922,9 +922,10 @@ static void report_native(void)
 				i, (unsigned long long)g_opx[i].calls,
 				g_opx[i].ns / 1e6, g_opx[i].ns / 1e3 / (double)g_opx[i].calls);
 	{
-		extern uint64_t gb_dc_ns[8], gb_dc_n[8];
-		static const char *nm[] = { "orphan", "subdata", "pointer", "drawarrays", "drawelements" };
-		for (int i = 0; i < 5; i++)
+		extern uint64_t gb_dc_ns[16], gb_dc_n[16];
+		static const char *nm[] = { "orphan", "subdata", "pointer", "drawarrays", "drawelements", "?", "?", "?", "parse", "to-upload", "binds" };
+		for (int i = 0; i < 11; i++)
+			if (i < 5 || i > 7)
 			fprintf(stderr, "gbd DrawClient %-12s %9llu calls %9.1f ms\n", nm[i],
 				(unsigned long long)gb_dc_n[i], gb_dc_ns[i] / 1e6);
 		fprintf(stderr, "gbd DrawClient bytes %llu MB, %llu draws over 32 KB\n",

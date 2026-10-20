@@ -1,6 +1,8 @@
 #!/bin/bash
 # glm.sh native|bridge glmark2|glmark2-es2 : the glmark2 scene list, 2 s each, per-scene fps (apt glmark2 of the matching architecture installed)
 mode=$1; app=$2
+# binaries unpacked with getapp.sh / getapp64.sh (armhf in root, arm64 in root64): no apt install needed
+if [ $mode = native ]; then BIN=$HOME/gb/apps2/root64/usr/bin; else BIN=$HOME/gb/apps2/root/usr/bin; fi
 export DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json GB_ABORT_ON_SERVER_LOSS=1 GB_SERVER=$HOME/gb/build64/gbd
 [ $mode = bridge ] && export LD_LIBRARY_PATH=$HOME/gb/build32/shim32
 cat > /tmp/glm.list <<'L'
@@ -37,4 +39,4 @@ loop:fragment-loop=false:fragment-steps=5:vertex-steps=5:duration=2.0
 loop:fragment-steps=5:fragment-uniform=false:vertex-steps=5:duration=2.0
 loop:fragment-steps=5:fragment-uniform=true:vertex-steps=5:duration=2.0
 L
-timeout 300 $app -s 800x600 -f /tmp/glm.list 2>&1 | grep -a "FPS:\|Score\|GL_RENDERER\|GL_VERSION"
+timeout 300 $BIN/$app -s 800x600 -f /tmp/glm.list 2>&1 | grep -a "FPS:\|Score\|GL_RENDERER\|GL_VERSION"

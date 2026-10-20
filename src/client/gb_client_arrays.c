@@ -746,52 +746,22 @@ int gb_draw_client(struct gb_ctxstate *st, uint32_t mode, int indexed,
 		}
 		int64_t maxv = -1, minv = INT64_MAX, rs = restart_value(st, itype);
 		int skipped = 0;
+
 		/* The indices are application memory: not necessarily aligned,
 		 * and not necessarily readable (an invalid call is rejected by
 		 * the driver before it looks at them, so tests pass junk). */
-		union { uint8_t b[256]; uint32_t w[64]; } ch;
-		int per = (int)sizeof ch.b / ib;
-
-		for (int32_t i = 0; i < count; i++) {
-			int64_t x;
-			int k = i % per;
-
-			if (k == 0) {
-				int32_t n = count - i < per ? count - i : per;
-
-				if (gb_cl_copy_in(ch.b, (const uint8_t *)indices +
-						  (size_t)i * ib,
-						  (size_t)n * ib)) {
-					/* unreadable: leave it to the driver
-					 * if the call is invalid anyway */
-					if (mode > 0xE)
-						return 0;
-					gb_cl_gl_error(0x0502);
-					return 1;
-				}
-			}
-			if (ib == 1) {
-				x = ch.b[k];
-			} else if (ib == 2) {
-				uint16_t t;
-
-				memcpy(&t, ch.b + 2 * k, 2);
-				x = t;
-			} else {
-				uint32_t t;
-
-				memcpy(&t, ch.b + 4 * k, 4);
-				x = t;
-			}
-			if (x == rs) { /* restart marker, not a vertex */
-				skipped = 1;
-				continue;
-			}
-			x += basevertex;
-			if (x > maxv)
-				maxv = x;
-			if (x < minv)
-				minv = x;
+		if (gb_cl_scan_indices(indices, count, ib, rs, &minv, &maxv,
+				       &skipped)) {
+			/* unreadable: leave it to the driver if the call is
+			 * invalid anyway */
+			if (mode > 0xE)
+				return 0;
+			gb_cl_gl_error(0x0502);
+			return 1;
+		}
+		if (maxv >= 0) {
+			maxv += basevertex;
+			minv += basevertex;
 		}
 		if (maxv < 0 && skipped)
 			maxv = 0;
@@ -870,11 +840,63 @@ attrs:;
 		na++;
 	}
 
-	uint32_t sz = 16 + 64 + 28 * na;
+	/*
+	 * Attributes whose memory overlaps (an interleaved vertex array is
+	 * four attributes of one buffer) travel once: the blobs are the unions
+	 * of the overlapping ranges, each attribute names its blob and offset.
+	 */
+	struct { uintptr_t lo, hi; } bl[CA_COUNT];
+	uint32_t owner[CA_COUNT], bi[CA_COUNT], nb = 0;
+
+	for (uint32_t i = 0; i < na; i++) {
+		bl[i].lo = (uintptr_t)at[i].src;
+		bl[i].hi = bl[i].lo + at[i].len;
+		owner[i] = i;
+	}
+	for (int again = 1; again;) {
+		again = 0;
+		for (uint32_t a2 = 0; a2 < na; a2++) {
+			if (owner[a2] != a2)
+				continue;
+			for (uint32_t b2 = a2 + 1; b2 < na; b2++) {
+				if (owner[b2] != b2 || bl[b2].lo >= bl[a2].hi ||
+				    bl[a2].lo >= bl[b2].hi)
+					continue;
+				if (bl[b2].lo < bl[a2].lo)
+					bl[a2].lo = bl[b2].lo;
+				if (bl[b2].hi > bl[a2].hi)
+					bl[a2].hi = bl[b2].hi;
+				for (uint32_t k = 0; k < na; k++)
+					if (owner[k] == b2)
+						owner[k] = a2;
+				again = 1;
+			}
+		}
+	}
+	uint32_t blen[CA_COUNT];
+	const uint8_t *bsrc[CA_COUNT];
+
+	for (uint32_t i = 0; i < na; i++) {
+		if (owner[i] == i) {
+			bi[i] = nb;
+			bsrc[nb] = (const uint8_t *)bl[i].lo;
+			if (bl[i].hi - bl[i].lo > GB_MAX_ARRAY_BYTES) {
+				gb_cl_gl_error(0x0505 /* OUT_OF_MEMORY */);
+				return 1;
+			}
+			blen[nb++] = (uint32_t)(bl[i].hi - bl[i].lo);
+		}
+	}
+	uint32_t blob_of[CA_COUNT];
+
+	for (uint32_t i = 0; i < na; i++)
+		blob_of[i] = bi[owner[i]];
+
+	uint32_t sz = 16 + 68 + 36 * na + 4 * nb;
 	if (ibytes)
 		sz = GB_ALIGN_UP(sz, 8u) + ibytes;
-	for (uint32_t i = 0; i < na; i++)
-		sz = GB_ALIGN_UP(sz, 8u) + at[i].len;
+	for (uint32_t i = 0; i < nb; i++)
+		sz = GB_ALIGN_UP(sz, 8u) + blen[i];
 	if (gb_cl_msg_begin(cx, &o, &w, GB_OPX_DrawClient, sz, 0))
 		return 1;
 	gb_w_u32(&w, mode);
@@ -898,6 +920,7 @@ attrs:;
 		gb_w_u32(&w, (uint32_t)((uint64_t)rs >> 32));
 	}
 	gb_w_u32(&w, vfirst);
+	gb_w_u32(&w, nb);
 	for (uint32_t i = 0; i < na; i++) {
 		gb_w_u32(&w, at[i].slot);
 		gb_w_u32(&w, at[i].size);
@@ -906,11 +929,15 @@ attrs:;
 		gb_w_u32(&w, at[i].flags);
 		gb_w_u32(&w, at[i].divisor);
 		gb_w_u32(&w, at[i].len);
+		gb_w_u32(&w, blob_of[i]);
+		gb_w_u32(&w, (uint32_t)((uintptr_t)at[i].src - (uintptr_t)bsrc[blob_of[i]]));
 	}
+	for (uint32_t i = 0; i < nb; i++)
+		gb_w_u32(&w, blen[i]);
 	if (ibytes)
 		memcpy(gb_w_blob(&w, ibytes), indices, ibytes);
-	for (uint32_t i = 0; i < na; i++)
-		memcpy(gb_w_blob(&w, at[i].len), at[i].src, at[i].len);
+	for (uint32_t i = 0; i < nb; i++)
+		memcpy(gb_w_blob(&w, blen[i]), bsrc[i], blen[i]);
 	gb_cl_end(cx, &o);
 	return 1;
 }

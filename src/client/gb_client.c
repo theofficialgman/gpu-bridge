@@ -313,7 +313,7 @@ static struct gb_cl *new_channel_locked(void)
 	struct gb_cl *c = calloc(1, sizeof(*c));
 	if (!c)
 		return NULL;
-	if (gb_chan_create(&c->chan, GB_CHAN_RING_BYTES, GB_CHAN_RING_BYTES)) {
+	if (gb_chan_create(&c->chan, GB_CHAN_REQ_RING_BYTES, GB_CHAN_RING_BYTES)) {
 		free(c);
 		return NULL;
 	}
@@ -1364,6 +1364,85 @@ int gb_cl_copy_in(void *dst, const void *src, size_t n)
 	copy_jmp = &jb;
 	memcpy(dst, src, n);
 	copy_jmp = saved;
+	return 0;
+}
+
+/*
+ * Smallest and largest index of an application's index array (restart
+ * values excluded), read under the same fault handler: the memory may be
+ * junk for a call that is invalid anyway. -1 if it cannot be read.
+ */
+int gb_cl_scan_indices(const void *p, int32_t count, int ib, int64_t rs,
+		       int64_t *mn, int64_t *mx, int *skipped)
+{
+	sigjmp_buf jb;
+	sigjmp_buf *volatile saved;
+	uint32_t lo = UINT32_MAX, hi = 0;
+	int any_restart = 0, any = 0;
+
+	pthread_once(&copy_once, copy_install);
+	saved = copy_jmp;
+	if (sigsetjmp(jb, 0)) {
+		copy_jmp = saved;
+		return -1;
+	}
+	copy_jmp = &jb;
+	if (rs < 0) {
+		const uint8_t *b = p;
+
+		if (ib == 1) {
+			for (int32_t i = 0; i < count; i++) {
+				uint32_t x = b[i];
+				lo = x < lo ? x : lo;
+				hi = x > hi ? x : hi;
+			}
+		} else if (ib == 2) {
+			for (int32_t i = 0; i < count; i++) {
+				uint16_t t;
+
+				memcpy(&t, b + 2 * (size_t)i, 2);
+				lo = t < lo ? t : lo;
+				hi = t > hi ? t : hi;
+			}
+		} else {
+			for (int32_t i = 0; i < count; i++) {
+				uint32_t t;
+
+				memcpy(&t, b + 4 * (size_t)i, 4);
+				lo = t < lo ? t : lo;
+				hi = t > hi ? t : hi;
+			}
+		}
+		any = count > 0;
+	} else {
+		const uint8_t *b = p;
+
+		for (int32_t i = 0; i < count; i++) {
+			uint32_t x;
+
+			if (ib == 1) {
+				x = b[i];
+			} else if (ib == 2) {
+				uint16_t t;
+
+				memcpy(&t, b + 2 * (size_t)i, 2);
+				x = t;
+			} else {
+				memcpy(&x, b + 4 * (size_t)i, 4);
+			}
+			if ((int64_t)x == rs) {
+				any_restart = 1;
+				continue;
+			}
+			any = 1;
+			lo = x < lo ? x : lo;
+			hi = x > hi ? x : hi;
+		}
+	}
+	copy_jmp = saved;
+	*skipped = any_restart;
+	*mn = any ? (int64_t)lo : INT64_MAX;
+	*mx = any ? (int64_t)hi : -1;
 	return 0;
 }
 

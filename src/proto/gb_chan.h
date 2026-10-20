@@ -14,6 +14,10 @@
 #include "gb_ring.h"
 
 #define GB_CHAN_RING_BYTES (1u << 20)
+/* The request ring is larger: a message of up to a quarter of a ring is one
+ * record the server reads in place, anything bigger is chunked and copied
+ * out of the ring (client arrays of a few hundred KB are common). */
+#define GB_CHAN_REQ_RING_BYTES (1u << 20)
 #define GB_OP_CHUNK 0xFFFFFFFEu     /* continuation of a BIG message */
 #define GB_CMD_F_BIG (1u << 3)      /* hdr is a BIG announcement */
 #define GB_CMD_F_REPLY (1u << 4)    /* server -> client response */

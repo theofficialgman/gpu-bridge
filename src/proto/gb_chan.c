@@ -17,7 +17,7 @@ static size_t ring_span(uint32_t bytes)
 
 static uint32_t max_inline(const struct gb_ring *r)
 {
-	return r->size / 4;
+	return r->size / 2;
 }
 
 int gb_chan_create(struct gb_chan *c, uint32_t req_bytes, uint32_t rsp_bytes)

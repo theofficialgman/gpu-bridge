@@ -33,6 +33,7 @@ struct gb_scratch {
 	 * memcpy instead of a glBufferSubData, which the Tegra driver spends
 	 * several microseconds on */
 	uint8_t *vmap, *emap;
+	unsigned guard; /* draws since the scratch names were last checked with glIsBuffer */
 	int map_mode; /* 0 not probed, 1 use persistent mappings, -1 do not */
 	/* selection / feedback buffers the driver retains and writes through
 	 * (glSelectBuffer / glFeedbackBuffer); the previous generation is kept
@@ -61,7 +62,7 @@ static void *current_ctx_key(struct gb_sth *t)
 	return k;
 }
 
-uint64_t gb_dc_ns[8], gb_dc_n[8]; /* DrawClient phases (GB_STATS) */
+uint64_t gb_dc_ns[16], gb_dc_n[16]; /* DrawClient phases (GB_STATS) */
 #define DCT(i, ...) do { uint64_t t0_ = gb_stats_on ? gb_stat_mono_ns() : 0; __VA_ARGS__; if (gb_stats_on) { gb_dc_ns[i] += gb_stat_mono_ns() - t0_; gb_dc_n[i]++; } } while (0)
 
 static struct gb_scratch *scratch_for(struct gb_sth *t)
@@ -1611,6 +1612,7 @@ static int index_type_bytes(uint32_t type)
 
 struct cattr {
 	uint32_t slot, size, type, stride, flags, divisor, len;
+	uint32_t blob, boff; /* which uploaded blob, and where in it */
 };
 
 /* Point native array state for `a` at offset 0 of the currently bound
@@ -1790,9 +1792,11 @@ static void scratch_alloc(struct gb_scratch *s, GLenum target, GLuint *name,
  *   per attribute (7 x u32): slot, size, type, stride, flags, divisor, len
  *   blobs: indices (if ibytes), then each attribute's data in order.
  */
+#define BIND_(t_, n_) DCT(10, fn_glBindBuffer(t_, n_))
 static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 			  struct gb_r *r)
 {
+	uint64_t tp0_ = gb_stats_on ? gb_stat_mono_ns() : 0;
 	uint32_t mode = gb_r_u32(r), kind = gb_r_u32(r);
 	int32_t count = (int32_t)gb_r_u32(r);
 	uint32_t itype = gb_r_u32(r), nverts = gb_r_u32(r),
@@ -1801,13 +1805,16 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	int32_t basevertex = (int32_t)gb_r_u32(r);
 	uint32_t baseinstance = gb_r_u32(r);
 	uint32_t old_abo = gb_r_u32(r), old_ebo = gb_r_u32(r);
+	(void)old_ebo; /* client indices need no element buffer */
 	uint32_t bound_off = gb_r_u32(r); /* kind 2: byte offset in bound EBO */
 	uint32_t rs_lo = gb_r_u32(r), rs_hi = gb_r_u32(r);
 	int64_t restart = (int64_t)(((uint64_t)rs_hi << 32) | rs_lo); /* -1: off */
 	uint32_t vfirst = gb_r_u32(r); /* first vertex of the arrays sent (indexed) */
+	uint32_t nblob = gb_r_u32(r);  /* distinct memory ranges sent (<= nattr) */
 
 	if (r->err || kind > 2 || count < 0 || nattr > CA_COUNT ||
-	    (vfirst && kind != 1) || vfirst > (1u << 26) ||
+	    (vfirst && kind != 1) || vfirst > (1u << 26) || nblob > nattr ||
+	    (nattr && !nblob) ||
 	    (nattr == 0 && kind != 1) || nverts > (1u << 26) ||
 	    ibytes > GB_MAX_ARRAY_BYTES || instances > (1u << 24))
 		goto bad;
@@ -1821,7 +1828,12 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		a[i].flags = gb_r_u32(r);
 		a[i].divisor = gb_r_u32(r);
 		a[i].len = gb_r_u32(r);
+		a[i].blob = gb_r_u32(r);
+		a[i].boff = gb_r_u32(r);
 	}
+	uint32_t blen[CA_COUNT];
+	for (uint32_t j = 0; j < nblob; j++)
+		blen[j] = gb_r_u32(r);
 	if (r->err)
 		goto bad;
 
@@ -1843,15 +1855,52 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		if (ibytes && !idx)
 			goto bad;
 		/* Every referenced vertex must lie inside what was uploaded. */
-		for (int32_t i = 0; have_plain && i < count; i++) {
-			int64_t v = ib == 1 ? idx[i]
-				  : ib == 2 ? ((const uint16_t *)idx)[i]
-					    : ((const uint32_t *)idx)[i];
-			if (v == restart)
-				continue;
-			v += (int64_t)basevertex - vfirst;
-			if (v < 0 || v >= (int64_t)nverts)
-				goto bad;
+		if (have_plain && count) {
+			int64_t lo = INT64_MAX, hi = INT64_MIN;
+
+			if (restart < 0) { /* no restart index: a tight min/max */
+				uint32_t mn = UINT32_MAX, mx = 0;
+
+				if (ib == 1) {
+					for (int32_t i = 0; i < count; i++) {
+						uint32_t x = idx[i];
+						mn = x < mn ? x : mn;
+						mx = x > mx ? x : mx;
+					}
+				} else if (ib == 2) {
+					const uint16_t *p16 = (const uint16_t *)idx;
+					for (int32_t i = 0; i < count; i++) {
+						uint32_t x = p16[i];
+						mn = x < mn ? x : mn;
+						mx = x > mx ? x : mx;
+					}
+				} else {
+					const uint32_t *p32 = (const uint32_t *)idx;
+					for (int32_t i = 0; i < count; i++) {
+						uint32_t x = p32[i];
+						mn = x < mn ? x : mn;
+						mx = x > mx ? x : mx;
+					}
+				}
+				lo = mn;
+				hi = mx;
+			} else {
+				for (int32_t i = 0; i < count; i++) {
+					int64_t v = ib == 1 ? idx[i]
+						  : ib == 2 ? ((const uint16_t *)idx)[i]
+							    : ((const uint32_t *)idx)[i];
+					if (v == restart)
+						continue;
+					lo = v < lo ? v : lo;
+					hi = v > hi ? v : hi;
+				}
+			}
+			if (hi >= lo) { /* at least one real index */
+				lo += (int64_t)basevertex - vfirst;
+				hi += (int64_t)basevertex - vfirst;
+				if (lo < 0 || hi >= (int64_t)nverts)
+					goto bad;
+			}
 		}
 	} else if (ibytes || (uint32_t)count != nverts) {
 		goto bad;
@@ -1877,12 +1926,20 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		if (elems == 0 || elems > (1u << 26))
 			goto bad;
 		uint64_t need = (elems - 1) * (uint64_t)stride + eb;
-		if (need != a[i].len)
-			goto bad;
-		data[i] = gb_r_blob(r, a[i].len);
-		if (!data[i])
+		if (need != a[i].len || a[i].blob >= nblob ||
+		    (uint64_t)a[i].boff + a[i].len > blen[a[i].blob])
 			goto bad;
 	}
+	const uint8_t *bdata[CA_COUNT];
+	for (uint32_t j = 0; j < nblob; j++) {
+		if (blen[j] > GB_MAX_ARRAY_BYTES)
+			goto bad;
+		bdata[j] = gb_r_blob(r, blen[j]);
+		if (!bdata[j])
+			goto bad;
+	}
+	for (uint32_t i = 0; i < nattr; i++)
+		data[i] = bdata[a[i].blob] + a[i].boff;
 
 	GB_NATIVE(glGenBuffers, void, (GLsizei, GLuint *));
 	GB_NATIVE(glBindBuffer, void, (GLenum, GLuint));
@@ -1907,6 +1964,39 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	    !fn_glBufferSubData)
 		return;
 
+	if (gb_stats_on) { gb_dc_ns[8] += gb_stat_mono_ns() - tp0_; gb_dc_n[8]++; }
+	/*
+	 * Direct mode (default): the driver gets pointers into this request, as
+	 * it would get the application's. The data is already here, checked
+	 * against the indices, and a GL consumes client arrays during the draw
+	 * call, so there is nothing to upload, no scratch buffer to bind and
+	 * no per-attribute offsets to keep. GB_ARRAYS_VIA_VBO=1 uploads to a
+	 * scratch buffer instead.
+	 */
+	static int direct = -1;
+
+	if (__builtin_expect(direct < 0, 0))
+		direct = getenv("GB_ARRAYS_VIA_VBO") == NULL;
+	if (gb_stats_on) {
+		size_t tot = 0;
+
+		for (uint32_t j = 0; j < nblob; j++)
+			tot += blen[j];
+		gb_dc_n[6] += tot + ibytes;
+		if (tot + ibytes > 32768)
+			gb_dc_n[7]++;
+	}
+	if (direct) {
+		if (!current_ctx_key(t))
+			return; /* no current context: native would error anyway */
+		if (nattr) {
+			if (old_abo)
+				BIND_(GL_ARRAY_BUFFER, 0);
+			for (uint32_t i = 0; i < nattr; i++)
+				DCT(2, set_pointer(&a[i],
+						   (size_t)(uintptr_t)(bdata[a[i].blob] + a[i].boff)));
+		}
+	} else {
 	struct gb_scratch *s = scratch_for(t);
 	if (!s)
 		return; /* no current context: native would error anyway */
@@ -1916,7 +2006,10 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 	 * takes them away, and a draw through a name the driver no longer
 	 * knows reads indices from a garbage address. Check before use. */
 	GB_NATIVE(glIsBuffer, GLboolean, (GLuint));
-	if (fn_glIsBuffer) {
+	/* (glDeleteBuffers through the bridge already takes the names away from
+	 * the scratch; this catches deletions the server cannot see, so a
+	 * check every 64 draws is enough and keeps two driver calls off the rest) */
+	if (fn_glIsBuffer && (s->guard++ & 63) == 0) {
 		if (s->vbo && !fn_glIsBuffer(s->vbo)) {
 			if (getenv("GB_TRACE_DRAWS"))
 				fprintf(stderr, "s: scratch vbo %u was deleted\n", s->vbo);
@@ -1933,10 +2026,11 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		}
 	}
 
+	if (gb_stats_on) { gb_dc_ns[9] += gb_stat_mono_ns() - tp0_; gb_dc_n[9]++; }
 	/* ---- vertex data: one buffer, running offset, orphan on wrap ---- */
 	size_t vtotal = 0;
-	for (uint32_t i = 0; i < nattr; i++)
-		vtotal += GB_ALIGN_UP(a[i].len, 16u);
+	for (uint32_t j = 0; j < nblob; j++)
+		vtotal += GB_ALIGN_UP(blen[j], 16u);
 	if (gb_stats_on) {
 		gb_dc_n[6] += vtotal + ibytes;
 		if (vtotal + ibytes > 32768)
@@ -1952,46 +2046,32 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 			s->vbo_cap = cap;
 			s->vbo_off = 0;
 		} else {
-			fn_glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
+			BIND_(GL_ARRAY_BUFFER, s->vbo);
 		}
-		for (uint32_t i = 0; i < nattr; i++) {
+		size_t boffs[CA_COUNT];
+
+		for (uint32_t j = 0; j < nblob; j++) {
 			if (s->vmap)
-				DCT(1, memcpy(s->vmap + s->vbo_off, data[i], a[i].len));
+				DCT(1, memcpy(s->vmap + s->vbo_off, bdata[j], blen[j]));
 			else
 				DCT(1, fn_glBufferSubData(GL_ARRAY_BUFFER,
 					   (GLintptr)s->vbo_off,
-					   (GLsizeiptr)a[i].len, data[i]));
-			DCT(2, set_pointer(&a[i], s->vbo_off));
-			s->vbo_off += GB_ALIGN_UP(a[i].len, 16u);
+					   (GLsizeiptr)blen[j], bdata[j]));
+			boffs[j] = s->vbo_off;
+			s->vbo_off += GB_ALIGN_UP(blen[j], 16u);
 		}
+		for (uint32_t i = 0; i < nattr; i++)
+			DCT(2, set_pointer(&a[i], boffs[a[i].blob] + a[i].boff));
+	}
 	}
 
-	/* ---- indices ---- */
+	/* ---- indices ----
+	 * kind 1: the indices came with the request and the application has no
+	 * element buffer bound (that is why the client sent them), so the
+	 * driver reads them from our memory as it would from the
+	 * application's. kind 2: they are in the application's own buffer. */
 	size_t ioff = kind == 2 ? bound_off : 0;
-	if (kind == 1) {
-		size_t itotal = GB_ALIGN_UP(ibytes, 16u);
-		if (!s->ebo || s->ebo_cap < itotal ||
-		    s->ebo_off + itotal > s->ebo_cap) {
-			size_t cap = s->ebo_cap ? s->ebo_cap : SCRATCH_EBO_BYTES;
-			if (cap < itotal)
-				cap = itotal;
-			scratch_alloc(s, GL_ELEMENT_ARRAY_BUFFER, &s->ebo, &s->emap, cap);
-			s->ebo_cap = cap;
-			s->ebo_off = 0;
-		} else {
-			fn_glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s->ebo);
-		}
-		if (ibytes && s->emap)
-			memcpy(s->emap + s->ebo_off, idx, ibytes);
-		else if (ibytes)
-			fn_glBufferSubData(GL_ELEMENT_ARRAY_BUFFER,
-					   (GLintptr)s->ebo_off,
-					   (GLsizeiptr)ibytes, idx);
-		ioff = s->ebo_off;
-		s->ebo_off += itotal;
-	}
-
-	const void *ip = (const void *)(uintptr_t)ioff;
+	const void *ip = kind == 1 ? (const void *)idx : (const void *)(uintptr_t)ioff;
 	basevertex -= (int32_t)vfirst; /* the arrays start at vertex vfirst */
 	if (kind == 0) {
 		if (!instances) {
@@ -2024,11 +2104,9 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		} else if (fn_glDrawElements) {
 			DCT(4, fn_glDrawElements(mode, count, itype, ip));
 		}
-		if (kind == 1)
-			fn_glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, old_ebo);
 	}
-	if (nattr)
-		fn_glBindBuffer(GL_ARRAY_BUFFER, old_abo);
+	if (nattr && (!direct || old_abo))
+		BIND_(GL_ARRAY_BUFFER, old_abo);
 	return;
 bad:
 	gb_sv_proto_error(t, h);

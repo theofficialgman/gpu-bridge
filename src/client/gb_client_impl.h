@@ -284,6 +284,8 @@ void gb_cl_pack_store(struct gb_cl *cx, void *dst, const void *src,
  * pointer that is never dereferenced (tests of error paths do); a fault
  * while reading is absorbed here and the unreadable tail is sent as zeros.
  * Returns 0 if the whole range was readable. */
+int gb_cl_scan_indices(const void *p, int32_t count, int ib, int64_t rs,
+		       int64_t *mn, int64_t *mx, int *skipped);
 int gb_cl_copy_in(void *dst, const void *src, size_t n);
 /* A NULL-terminated-strings array whose entries the driver may never read
  * (it validates `count` first): unreadable or NULL entries count as "". */

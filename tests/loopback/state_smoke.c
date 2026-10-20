@@ -919,6 +919,83 @@ static void test_client_array_range(void)
 	glDisableClientState(GL_COLOR_ARRAY);
 }
 
+/*
+ * Attributes that share memory (an interleaved array) travel as one blob; the
+ * result must not depend on how the attributes are laid out.
+ */
+static void test_client_array_interleaved(void)
+{
+	struct v { GLfloat x, y; GLubyte c[4]; GLfloat pad; };
+	struct v vv[120];
+	GLubyte i8[6] = { 100, 101, 102, 100, 102, 103 };
+	GLubyte px[4];
+
+	memset(vv, 0, sizeof vv);
+	for (int i = 0; i < 120; i++) {
+		vv[i].x = vv[i].y = 9.0f;
+		vv[i].c[0] = 255; vv[i].c[3] = 255;
+	}
+	static const GLfloat q[4][2] = { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } };
+
+	for (int i = 0; i < 4; i++) {
+		vv[100 + i].x = q[i][0];
+		vv[100 + i].y = q[i][1];
+		vv[100 + i].c[0] = 0; vv[100 + i].c[1] = 200; vv[100 + i].c[2] = 50;
+	}
+	glViewport(0, 0, 64, 64);
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_CULL_FACE);
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glEnableClientState(GL_COLOR_ARRAY);
+	glVertexPointer(2, GL_FLOAT, sizeof(struct v), &vv[0].x);
+	glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(struct v), vv[0].c);
+	glClearColor(0, 0, 0, 1);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, i8);
+	glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+	CHECK(px[0] == 0 && px[1] == 200 && px[2] == 50, "interleaved: %d %d %d",
+	      px[0], px[1], px[2]);
+
+	/* a second array, disjoint: positions apart from colours */
+	GLfloat pos[8];
+	GLubyte col[16];
+
+	memcpy(pos, q, sizeof pos);
+	for (int i = 0; i < 4; i++) {
+		col[4 * i] = 10; col[4 * i + 1] = 20; col[4 * i + 2] = 230; col[4 * i + 3] = 255;
+	}
+	glVertexPointer(2, GL_FLOAT, 0, pos);
+	glColorPointer(4, GL_UNSIGNED_BYTE, 0, col);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glDrawArrays(GL_QUADS, 0, 4);
+	glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+	CHECK(px[0] == 10 && px[1] == 20 && px[2] == 230, "separate: %d %d %d",
+	      px[0], px[1], px[2]);
+
+	/* the colours point into the middle of the position array's range */
+	GLfloat mix[8 + 8];
+	GLubyte *cp = (GLubyte *)&mix[8];
+
+	memcpy(mix, q, sizeof q);
+	for (int i = 0; i < 4; i++) {
+		cp[4 * i] = 200; cp[4 * i + 1] = 100; cp[4 * i + 2] = 5; cp[4 * i + 3] = 255;
+	}
+	glVertexPointer(2, GL_FLOAT, 0, mix);
+	glColorPointer(4, GL_UNSIGNED_BYTE, 0, cp);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glDrawArrays(GL_QUADS, 0, 4);
+	glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
+	CHECK(px[0] == 200 && px[1] == 100 && px[2] == 5, "adjacent: %d %d %d",
+	      px[0], px[1], px[2]);
+	EXPECT_ERR(GL_NO_ERROR, "interleaved client arrays");
+	glDisableClientState(GL_VERTEX_ARRAY);
+	glDisableClientState(GL_COLOR_ARRAY);
+}
+
 int main(void)
 {
 	Display *dpy = XOpenDisplay(NULL);
@@ -977,6 +1054,7 @@ int main(void)
 	test_sync_errors();
 	test_labels();
 	test_client_array_range();
+	test_client_array_interleaved();
 
 	glXMakeCurrent(dpy, None, NULL);
 	glXDestroyContext(dpy, ctx);
