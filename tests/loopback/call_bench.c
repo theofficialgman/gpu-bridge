@@ -107,6 +107,41 @@ int main(int argc, char **argv)
 		    static const float m[4] = { 0.5f, 0.5f, 0.5f, 1 };
 		    glMaterialfv(GL_FRONT, GL_DIFFUSE, m);
 	    });
+	/* a 2D sprite batch as LinCity-NG draws it: state, bind, colour and one
+	 * small Begin/End block per sprite */
+	{
+		GLuint tex;
+
+		glGenTextures(1, &tex);
+		glBindTexture(GL_TEXTURE_2D, tex);
+		RUN("sprite: enable+bind+color+quad (calls/iter)", 14,
+		    for (int i = 0; i < 1000; i++) {
+			    glEnable(GL_TEXTURE_2D);
+			    glBindTexture(GL_TEXTURE_2D, tex);
+			    glColor4ub(255, 255, 255, 255);
+			    glBegin(GL_QUADS);
+			    glTexCoord2f(0, 0); glVertex2f(-1, -1);
+			    glTexCoord2f(1, 0); glVertex2f(1, -1);
+			    glTexCoord2f(1, 1); glVertex2f(1, 1);
+			    glTexCoord2f(0, 1); glVertex2f(-1, 1);
+			    glEnd();
+			    glDisable(GL_TEXTURE_2D);
+		    });
+		RUN("sprite: glBegin/glEnd only (4 vertices)", 6,
+		    for (int i = 0; i < 1000; i++) {
+			    glBegin(GL_QUADS);
+			    glVertex2f(-1, -1);
+			    glVertex2f(1, -1);
+			    glVertex2f(1, 1);
+			    glVertex2f(-1, 1);
+			    glEnd();
+		    });
+		RUN("glEnable/glDisable(GL_TEXTURE_2D)", 2000,
+		    for (int i = 0; i < 1000; i++) {
+			    glEnable(GL_TEXTURE_2D);
+			    glDisable(GL_TEXTURE_2D);
+		    });
+	}
 	/* synchronous calls: a reply is awaited each time */
 	RUN("glGetError (nothing queued)", 1000,
 	    for (int i = 0; i < 1000; i++)

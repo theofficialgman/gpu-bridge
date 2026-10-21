@@ -97,6 +97,19 @@ void SDL_GL_SwapWindow(void *window)
 	in_sdl = 0;
 }
 
+/* SDL 1.2 applications (OpenCity ...) */
+void SDL_GL_SwapBuffers(void)
+{
+	static void (*real)(void);
+
+	if (!real)
+		real = dlsym(RTLD_NEXT, "SDL_GL_SwapBuffers");
+	tick();
+	in_sdl = 1;
+	real();
+	in_sdl = 0;
+}
+
 unsigned eglSwapBuffers(void *dpy, void *surf)
 {
 	static unsigned (*real)(void *, void *);
