@@ -591,6 +591,48 @@ handoff is 0.2 us. Changes, in order:
   (two threads that sleep and wake at random, ordering and worst-wait checks)
   reproduces the bug if the old wake is put back (it hangs) and passes now on
   both architectures, on the dev machine and the Tegra.
+* *A second bug in the same change, found by the GLX CTS groups*: after
+  answering a mailbox request the server pushes the wake-up record if it still
+  sees the client's sleep flag, and that flag can be stale (the client has woken
+  and not yet cleared it). The record stayed in the response ring until the
+  client's next ordinary reply wait, which took it for an out-of-step reply and
+  aborted (`reply desync: op 65551 ... seq 0`). EGL runs did not hit the timing;
+  four GLX groups did. The client now recognises and skips these records
+  wherever it reads the response ring (ordinary waits, the swap-reply wait, the
+  helper thread). `tests/loopback/sync_mix.c` (every kind of synchronous call,
+  random sleeps) fails on the Tegra without the filter and passes with it; the
+  four groups pass and match native again.
+
+**Pinning the two sides to one core.** Sharing a core removes the cache-line
+transfers (about 90 ns each way) but needs a context switch between the two
+processes each way instead, and gives up running them in parallel. Measured
+on the Tegra with `tests/bench/pingpong.c` (`PIN_CLIENT` / `PIN_SERVER`), per
+synchronous call, with N us of server work (the driver call); CPU is client +
+server, including the work itself:
+
+| server work | cross-core, spin: round trip / CPU | same core, futex: round trip / CPU | same core, `sched_yield` handoff |
+|---|---|---|---|
+| 0 us | 0.18 / 0.36 us | 8.7 / 8.7 us | 3.3 / 3.3 us |
+| 2 us | 2.3 / 4.7 us | 7.7 / 7.6 us | 7.5 / 7.5 us |
+| 5 us | 5.4 / 10.7 us | 10.9 / 10.8 us | 13.4 / 13.4 us |
+| 10 us | 10.4 / 20.6 us | 16.0 / 15.9 us | 23.6 / 23.4 us |
+| 30 us | 30.3 / 60.4 us | 35.8 / 35.6 us | 63.4 / 63.0 us |
+| 100 us | 100.3 / 200 us | 106 / 105 us | 203 / 202 us |
+
+Below about 5 us of work two spinning cores are both faster and no more
+expensive; around 10 us a shared core saves a quarter of the CPU for half again
+the latency; at 30 us and above it saves 40-50% for 6-18% more latency. But
+that saving is also available without pinning: a wait that is known to be long
+can sleep (the ring already does after about 25 us). SuperTux's waits are mostly
+1-2 us (a check after a cheap call), with a few 5-10 us ones, so for it the
+cross-core spin is the better choice, and an application that overlaps client
+and server work (Extreme Tux Racer: 53% + 61% of a core) would be cut to half
+its frame rate on one core. The four cores of the Tegra X1 are one cluster with
+a shared L2, so the cross-core handoff measured here (0.18 us) is already the
+cheapest the hardware offers; there is no closer pair to pick. Spinning with
+the yield hint on a *shared* core is the one pathological combination (it
+starves the peer until the time slice ends; the ring's `sched_yield` phase is
+what prevents that if the scheduler ever puts both on one core).
 
 **Results** (steady scene, repeat runs vary by about 5 points):
 
