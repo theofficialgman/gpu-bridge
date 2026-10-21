@@ -730,6 +730,8 @@ static int owner_sleeping(struct gb_cl *cx)
 	return st == 'S' || st == 'D';
 }
 
+static int is_kick(const struct gb_cmd_hdr *h);
+
 static void *upcall_helper(void *arg)
 {
 	struct gb_cl *cx = arg;
@@ -767,6 +769,11 @@ static void *upcall_helper(void *arg)
 			if (!rec || sz < sizeof(h))
 				break;
 			memcpy(&h, rec, sizeof(h));
+			if (is_kick(&h)) { /* a stale mailbox wake-up: just drop it */
+				if (!gb_in_recv(&in, &cx->chan.rsp, 0))
+					gb_in_release(&in);
+				continue;
+			}
 			/* replies, and upcalls that want an answer, are the
 			 * owner thread's */
 			if (!(h.flags & GB_CMD_F_UPCALL) ||
@@ -831,6 +838,15 @@ void gb_cl_end(struct gb_cl *cx, struct gb_out *o)
 	}
 }
 
+/* The 16-byte record the server pushes to wake a client sleeping on the
+ * mailbox (gb_ring.c kick()); it may be left in the ring when the client was
+ * already awake. Never an answer to anything. */
+static int is_kick(const struct gb_cmd_hdr *h)
+{
+	return h->opcode == GB_OPX_Ping && h->seq == 0 &&
+	       (h->flags & GB_CMD_F_REPLY) && h->size == sizeof(*h);
+}
+
 static int wait_reply_locked(struct gb_cl *cx, struct gb_in *in, uint32_t op)
 {
 	uint64_t t0 = g_stats_on == 1 ? mono_ns() : 0;
@@ -843,6 +859,10 @@ static int wait_reply_locked(struct gb_cl *cx, struct gb_in *in, uint32_t op)
 			break;
 		memcpy(&h, in->p, sizeof(h));
 		if (!(h.flags & GB_CMD_F_UPCALL)) {
+			if (is_kick(&h)) {
+				gb_in_release(in);
+				continue;
+			}
 			if (cx->lag_pending && (h.flags & GB_CMD_F_REPLY) &&
 			    h.seq == cx->lag_seq && h.seq != cx->chan.seq) {
 				cx->lag_pending = 0; /* the late reply: not ours */
@@ -932,6 +952,8 @@ void gb_cl_lag_reply(struct gb_cl *cx)
 		memcpy(&h, in.p, sizeof(h));
 		if (h.flags & GB_CMD_F_UPCALL)
 			dispatch_upcall(cx, &in);
+		else if (is_kick(&h))
+			; /* a stale mailbox wake-up */
 		else if ((h.flags & GB_CMD_F_REPLY) && h.seq == cx->lag_seq)
 			cx->lag_pending = 0;
 		else {

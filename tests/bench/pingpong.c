@@ -95,6 +95,19 @@ static inline uint32_t wfe_until_not(volatile uint32_t *p, uint32_t cur, double 
 #endif
 }
 
+static void pin(const char *env)
+{
+	const char *e = getenv(env);
+
+	if (e && *e) {
+		cpu_set_t set;
+
+		CPU_ZERO(&set);
+		CPU_SET(atoi(e), &set);
+		sched_setaffinity(0, sizeof set, &set);
+	}
+}
+
 static int strat; /* 0 pause 1 yield 2 futex 3 wfe 4 hybrid_pause 5 hybrid_wfe */
 static double spin_s = 25e-6;
 
@@ -185,6 +198,8 @@ int main(int argc, char **argv)
 	if (!pid) { /* server */
 		uint32_t seen = 0;
 
+		pin("PIN_SERVER");
+
 		for (long i = 0; i < iters; i++) {
 			uint32_t r = wait_change(&s->req, seen, &s->req_sleep);
 			seen = r;
@@ -197,6 +212,7 @@ int main(int argc, char **argv)
 		_exit(0);
 	}
 	(void)srv_cpu_fd;
+	pin("PIN_CLIENT"); /* env PIN_CLIENT / PIN_SERVER: core numbers */
 	double t0 = now(), c0 = cpu();
 
 	for (long i = 1; i <= iters; i++) {
