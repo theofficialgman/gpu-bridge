@@ -185,6 +185,16 @@ static int wait_record(struct gb_ring *ring, int64_t timeout_ns,
 			return 0;
 		if (errno == EPROTO || ring->broken)
 			return -EPROTO;
+		if (ring->mbox_watch) {
+			uint32_t q, op, arg, ta;
+
+			if (gb_mbox_pending(ring, &q, &op, &arg, &ta)) {
+				/* look at the ring again: what was published
+				 * before the request must run first */
+				*rec = gb_ring_peek(ring, size);
+				return *rec ? 0 : 1;
+			}
+		}
 		int rc = gb_ring_wait_data(ring, timeout_ns);
 		if (rc)
 			return rc;

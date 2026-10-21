@@ -57,6 +57,7 @@ struct gb_sth {
 	/* upcalls (see gb_opx.h): queued from any thread, flushed by the worker */
 	pthread_mutex_t up_lock;
 	struct gb_upmsg *up_head, *up_tail;
+	_Atomic int up_pending;     /* up_head is not empty: lets the worker skip the lock */
 	uint32_t up_seq;            /* sequence of the last blocking upcall */
 	int cur_req_sync;           /* the request being handled wants a reply */
 	struct gb_deferred *defer_head, *defer_tail;

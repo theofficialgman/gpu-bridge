@@ -874,6 +874,46 @@ static int wait_reply_locked(struct gb_cl *cx, struct gb_in *in, uint32_t op)
 	return 0;
 }
 
+/*
+ * glGetError through the mailbox: one cache line each way instead of a
+ * record in each ring. Only when nothing needs the ring's ordering with
+ * upcalls (no debug callback, not inside an upcall) and the answer can come
+ * from the server's spinning wait; the server wakes for it in any case.
+ * Returns 0 with *err set, -1 to use the ordinary request.
+ */
+int gb_cl_fast_geterror(struct gb_cl *cx, uint32_t *err)
+{
+	static int off = -1;
+	uint32_t seq, val, sz;
+	int rc;
+
+	if (__builtin_expect(off < 0, 0))
+		off = getenv("GB_NO_FAST_SYNC") != NULL;
+	if (off || cx->in_upcall || cx->sync_dbg || cx->lost ||
+	    (cx->cur && cx->cur->debug_cb))
+		return -1;
+	if (gb_ring_peek(&cx->chan.rsp, &sz) != NULL)
+		gb_cl_poll_upcalls(cx); /* the server may be waiting for an answer */
+	if (cx->helper_on)
+		pthread_mutex_lock(&cx->rsp_mu);
+	gb_cl_flush(cx);
+	seq = gb_mbox_post(&cx->chan.req, GB_MBOX_GETERROR, 0);
+	for (;;) {
+		rc = gb_mbox_wait(&cx->chan.rsp, seq, &val);
+		if (rc != 1)
+			break;
+		gb_cl_poll_upcalls(cx); /* upcalls are answered, a late swap reply noted */
+	}
+	if (cx->helper_on)
+		pthread_mutex_unlock(&cx->rsp_mu);
+	if (rc) {
+		gb_cl_lost(cx);
+		return -1;
+	}
+	*err = val;
+	return 0;
+}
+
 void gb_cl_lag_reply(struct gb_cl *cx)
 {
 	uint32_t mine = cx->chan.seq;

@@ -21,8 +21,11 @@ static double now(void)
 	return ts.tv_sec + ts.tv_nsec / 1e9;
 }
 
+static int only; /* argv[2]: run just this pattern (1-based), 0 = all */
+static int pat;
+
 #define RUN(name, calls_per_iter, ...)                                    \
-	do {                                                                 \
+	if (++pat, !only || only == pat) do {                                \
 		double t0 = now();                                           \
 		long iters = 0;                                              \
 		while (now() - t0 < secs) {                                  \
@@ -39,6 +42,8 @@ static double now(void)
 int main(int argc, char **argv)
 {
 	double secs = argc > 1 ? atof(argv[1]) : 3.0;
+
+	only = argc > 2 ? atoi(argv[2]) : 0;
 	Display *dpy = XOpenDisplay(NULL);
 
 	if (!dpy)

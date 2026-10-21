@@ -28,6 +28,21 @@
 #define GB_RING_MIN_SIZE 4096u
 #define GB_RING_MAX_SIZE (1u << 30)
 
+/*
+ * A one-cache-line mailbox for tiny synchronous calls (glGetError): the
+ * request cell lives in the request ring's control block (client writes,
+ * server polls), the reply cell in the response ring's (server writes, client
+ * polls). One line crosses in each direction instead of a record and a
+ * counter. The request is ordered behind everything already in the ring:
+ * tail_at is the published tail at the time of posting, and the server serves
+ * the mailbox once it has consumed up to there.
+ */
+struct gb_mbox {
+	_Atomic uint32_t seq; /* written last by the poster */
+	uint32_t op, arg, tail_at;
+	uint32_t pad[12];
+};
+
 struct gb_ring_ctrl {
 	uint32_t magic;
 	uint32_t size; /* data bytes, power of two */
@@ -44,6 +59,8 @@ struct gb_ring_ctrl {
 	 * least max(need, size/4) are free, not for every record it frees */
 	_Atomic uint32_t producer_need;
 	uint32_t reserved2[13];
+
+	_Alignas(64) struct gb_mbox mbox;
 };
 
 _Static_assert(offsetof(struct gb_ring_ctrl, tail) == 64, "ctrl.tail offset");
@@ -62,6 +79,9 @@ struct gb_ring {
 	uint32_t rhead;      /* consumer: next read counter */
 	int broken;          /* consumer saw a malformed record */
 	int watch_fd;        /* if >= 0: poll for POLLHUP while blocking */
+	uint32_t mbox_seq;   /* client: last mailbox request posted */
+	uint32_t mbox_done;  /* server: last mailbox request served */
+	int mbox_watch;      /* server: wait_data/recv also return for a mailbox request */
 };
 
 /* Bytes needed for a region holding `data_size` bytes of ring data. */
@@ -101,6 +121,24 @@ const void *gb_ring_peek(struct gb_ring *r, uint32_t *size_out);
 
 /* Consume the record last returned by peek(); wakes a sleeping producer. */
 void gb_ring_pop(struct gb_ring *r, uint32_t size);
+
+/* ---- mailbox (see struct gb_mbox) ---------------------------------------- */
+
+#define GB_MBOX_GETERROR 1u
+
+/* Client: post a request on `req` (publishes anything pending first) and
+ * return its sequence number. */
+uint32_t gb_mbox_post(struct gb_ring *req, uint32_t op, uint32_t arg);
+/* Client: wait for the reply to `seq` on `rsp`. 0 with *val set; 1 if data
+ * arrived on the response ring first (drain it, then call again); -EPIPE if
+ * the peer is gone. */
+int gb_mbox_wait(struct gb_ring *rsp, uint32_t seq, uint32_t *val);
+/* Server: is a request waiting? Fills the fields. */
+int gb_mbox_pending(struct gb_ring *req, uint32_t *seq, uint32_t *op,
+		    uint32_t *arg, uint32_t *tail_at);
+/* Server: answer request `seq` (reply cell in `rsp`'s control block). */
+void gb_mbox_reply(struct gb_ring *rsp, struct gb_ring *req, uint32_t seq,
+		   uint32_t val);
 
 /* ---- shutdown ---------------------------------------------------------- */
 

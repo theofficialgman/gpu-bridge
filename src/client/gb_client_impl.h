@@ -204,6 +204,8 @@ void gb_cl_end(struct gb_cl *cx, struct gb_out *o);
 void gb_cl_flush(struct gb_cl *cx); /* send the staged requests */
 /* the request just sent is answered later; wait for the previous such one */
 void gb_cl_lag_reply(struct gb_cl *cx);
+/* glGetError through the mailbox; -1: use the ordinary request */
+int gb_cl_fast_geterror(struct gb_cl *cx, uint32_t *err);
 int gb_cl_wait_reply(struct gb_cl *cx, struct gb_in *in, uint32_t op);
 void gb_cl_poll_upcalls(struct gb_cl *cx);
 /* Deliver non-blocking upcalls (debug messages) from a helper thread while

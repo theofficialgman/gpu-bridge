@@ -972,6 +972,10 @@ static GLenum get_error_raw(void)
 			cx->gl_error = d;
 		return e;
 	}
+	uint32_t fast;
+
+	if (cx && gb_cl_fast_geterror(cx, &fast) == 0)
+		return fast;
 	return gbx_glGetError();
 }
 

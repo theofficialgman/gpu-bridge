@@ -68,7 +68,9 @@ struct gb_in {
 	int heap;          /* p is malloc'd; otherwise it points into the ring */
 };
 
-/* Wait for the next complete message. 0, -ETIMEDOUT, -EPIPE or -EPROTO. */
+/* Wait for the next complete message. 0, -ETIMEDOUT, -EPIPE or -EPROTO; 1
+ * (only on a ring with mbox_watch) when the ring is drained and a mailbox
+ * request is waiting instead. */
 int gb_in_recv(struct gb_in *in, struct gb_ring *ring, int64_t timeout_ns);
 void gb_in_release(struct gb_in *in);
 

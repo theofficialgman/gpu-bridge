@@ -4,6 +4,7 @@
  */
 #define _GNU_SOURCE
 #include "gb_ring.h"
+#include "gb_opx.h"
 
 #include <errno.h>
 #include <linux/futex.h>
@@ -22,6 +23,25 @@
  * the whole time slice), then a futex sleep. Measured: pure pause-spinning
  * made a same-core sync call ~800x slower than a cross-core one.
  */
+/*
+ * Dekker-style handshakes (publish, then look at the peer's "sleeping" flag;
+ * set "sleeping", then look at what was published) need the store ordered
+ * before the load. A full barrier does it everywhere; on AArch64 a
+ * sequentially consistent store (stlr) followed by a sequentially consistent
+ * load (ldar) is ordered too and costs a fraction of a dmb (ARMv8 is
+ * multi-copy atomic, so this also holds against a peer that uses the barrier:
+ * the 32-bit client). Four of these happen per synchronous round trip.
+ */
+#if defined(__aarch64__)
+#define SB_STORE(p, v, order) atomic_store_explicit((p), (v), memory_order_seq_cst)
+#define SB_LOAD(p, order) atomic_load_explicit((p), memory_order_seq_cst)
+#define SB_FENCE() ((void)0)
+#else
+#define SB_STORE(p, v, order) atomic_store_explicit((p), (v), (order))
+#define SB_LOAD(p, order) atomic_load_explicit((p), (order))
+#define SB_FENCE() atomic_thread_fence(memory_order_seq_cst)
+#endif
+
 #define SPIN_PAUSE_ITERS 64
 #define SPIN_YIELD_ITERS 64
 #define SPIN_ITERATIONS (SPIN_PAUSE_ITERS + SPIN_YIELD_ITERS)
@@ -175,9 +195,9 @@ void gb_ring_commit(struct gb_ring *r)
 
 	if (atomic_load_explicit(&c->tail, memory_order_relaxed) == r->wtail)
 		return;
-	atomic_store_explicit(&c->tail, r->wtail, memory_order_release);
-	atomic_thread_fence(memory_order_seq_cst);
-	if (atomic_load_explicit(&c->consumer_sleeping, memory_order_relaxed))
+	SB_STORE(&c->tail, r->wtail, memory_order_release);
+	SB_FENCE();
+	if (SB_LOAD(&c->consumer_sleeping, memory_order_relaxed))
 		futex_wake(&c->tail);
 }
 
@@ -252,11 +272,9 @@ void *gb_ring_reserve(struct gb_ring *r, uint32_t bytes, int64_t timeout_ns)
 
 		atomic_store_explicit(&c->producer_need, need,
 				      memory_order_relaxed);
-		atomic_store_explicit(&c->producer_sleeping, 1,
-				      memory_order_relaxed);
-		atomic_thread_fence(memory_order_seq_cst);
-		uint32_t h = atomic_load_explicit(&c->head,
-						  memory_order_acquire);
+		SB_STORE(&c->producer_sleeping, 1, memory_order_relaxed);
+		SB_FENCE();
+		uint32_t h = SB_LOAD(&c->head, memory_order_acquire);
 		if (h == r->known_head &&
 		    !atomic_load_explicit(&c->closed, memory_order_acquire) &&
 		    futex_wait(&c->head, h, slice(r, remaining)) ==
@@ -296,6 +314,10 @@ int gb_ring_wait_data(struct gb_ring *r, int64_t timeout_ns)
 						  memory_order_acquire);
 		if (t != r->rhead)
 			return 0;
+		if (r->mbox_watch &&
+		    atomic_load_explicit(&c->mbox.seq, memory_order_acquire) !=
+			    r->mbox_done)
+			return 0;
 		if (atomic_load_explicit(&c->closed, memory_order_acquire)) {
 			/* Drain anything published before the close. */
 			t = atomic_load_explicit(&c->tail,
@@ -326,11 +348,12 @@ int gb_ring_wait_data(struct gb_ring *r, int64_t timeout_ns)
 				return -ETIMEDOUT;
 		}
 
-		atomic_store_explicit(&c->consumer_sleeping, 1,
-				      memory_order_relaxed);
-		atomic_thread_fence(memory_order_seq_cst);
-		t = atomic_load_explicit(&c->tail, memory_order_acquire);
+		SB_STORE(&c->consumer_sleeping, 1, memory_order_relaxed);
+		SB_FENCE();
+		t = SB_LOAD(&c->tail, memory_order_acquire);
 		if (t == r->rhead &&
+		    !(r->mbox_watch &&
+		      SB_LOAD(&c->mbox.seq, memory_order_acquire) != r->mbox_done) &&
 		    !atomic_load_explicit(&c->closed, memory_order_acquire) &&
 		    futex_wait(&c->tail, t, slice(r, remaining)) ==
 			    -ETIMEDOUT)
@@ -344,9 +367,9 @@ static void publish_head(struct gb_ring *r)
 {
 	struct gb_ring_ctrl *c = r->ctrl;
 
-	atomic_store_explicit(&c->head, r->rhead, memory_order_release);
-	atomic_thread_fence(memory_order_seq_cst);
-	if (atomic_load_explicit(&c->producer_sleeping, memory_order_relaxed)) {
+	SB_STORE(&c->head, r->rhead, memory_order_release);
+	SB_FENCE();
+	if (SB_LOAD(&c->producer_sleeping, memory_order_relaxed)) {
 		/*
 		 * Hysteresis: a producer that outruns the consumer keeps the
 		 * ring full. Waking it for every freed record costs a futex
@@ -413,4 +436,107 @@ void gb_ring_close(struct gb_ring *r)
 	atomic_thread_fence(memory_order_seq_cst);
 	futex_wake(&c->tail);
 	futex_wake(&c->head);
+}
+
+
+/* ---- mailbox ---------------------------------------------------------------- */
+
+/*
+ * Wake a peer that is asleep or about to sleep, for a mailbox cell it does
+ * not wait on: a futex wake sent before the sleeper reaches futex_wait is
+ * lost unless the word it sleeps on changes (the mailbox does not touch it),
+ * so push a 16-byte no-op record instead; publishing it moves the tail and
+ * wakes the sleeper the ordinary, race-free way. A full ring needs no kick:
+ * it has data. The receiver ignores the record (an asynchronous ping /
+ * a reply nobody waits for).
+ */
+static void kick(struct gb_ring *r, uint32_t flags)
+{
+	struct gb_cmd_hdr *h = gb_ring_reserve(r, sizeof(*h), 0);
+
+	if (!h)
+		return;
+	h->opcode = GB_OPX_Ping;
+	h->size = sizeof(*h);
+	h->seq = 0;
+	h->flags = flags;
+	gb_ring_commit(r);
+}
+
+uint32_t gb_mbox_post(struct gb_ring *req, uint32_t op, uint32_t arg)
+{
+	struct gb_ring_ctrl *c = req->ctrl;
+	uint32_t seq = ++req->mbox_seq;
+
+	gb_ring_commit(req); /* everything before it is visible first */
+	c->mbox.op = op;
+	c->mbox.arg = arg;
+	c->mbox.tail_at = req->wtail;
+	SB_STORE(&c->mbox.seq, seq, memory_order_release);
+	SB_FENCE();
+	if (SB_LOAD(&c->consumer_sleeping, memory_order_relaxed))
+		kick(req, 0);
+	return seq;
+}
+
+int gb_mbox_wait(struct gb_ring *rsp, uint32_t seq, uint32_t *val)
+{
+	struct gb_ring_ctrl *c = rsp->ctrl;
+	int spin = 0;
+
+	for (;;) {
+		if (atomic_load_explicit(&c->mbox.seq, memory_order_acquire) == seq) {
+			*val = c->mbox.arg;
+			return 0;
+		}
+		if (rsp->broken)
+			return -EPROTO;
+		if (atomic_load_explicit(&c->tail, memory_order_acquire) != rsp->rhead)
+			return 1; /* an upcall or a late reply: the caller drains */
+		if (atomic_load_explicit(&c->closed, memory_order_acquire))
+			return -EPIPE;
+		if (spin < SPIN_ITERATIONS) {
+			spin_step(spin++);
+			continue;
+		}
+		/* sleep on the ring's own wake-up: a reply to the mailbox, an
+		 * upcall and the peer's death all end it */
+		SB_STORE(&c->consumer_sleeping, 1, memory_order_relaxed);
+		SB_FENCE();
+		uint32_t t = SB_LOAD(&c->tail, memory_order_acquire);
+		if (t == rsp->rhead &&
+		    SB_LOAD(&c->mbox.seq, memory_order_acquire) != seq &&
+		    !atomic_load_explicit(&c->closed, memory_order_acquire) &&
+		    futex_wait(&c->tail, t, slice(rsp, -1)) == -ETIMEDOUT)
+			peer_gone(rsp);
+		atomic_store_explicit(&c->consumer_sleeping, 0, memory_order_relaxed);
+	}
+}
+
+int gb_mbox_pending(struct gb_ring *req, uint32_t *seq, uint32_t *op,
+		    uint32_t *arg, uint32_t *tail_at)
+{
+	struct gb_ring_ctrl *c = req->ctrl;
+	uint32_t s = atomic_load_explicit(&c->mbox.seq, memory_order_acquire);
+
+	if (s == req->mbox_done)
+		return 0;
+	*seq = s;
+	*op = c->mbox.op;
+	*arg = c->mbox.arg;
+	*tail_at = c->mbox.tail_at;
+	return 1;
+}
+
+void gb_mbox_reply(struct gb_ring *rsp, struct gb_ring *req, uint32_t seq,
+		   uint32_t val)
+{
+	struct gb_ring_ctrl *c = rsp->ctrl;
+
+	c->mbox.arg = val;
+	SB_STORE(&c->mbox.seq, seq, memory_order_release);
+	SB_FENCE();
+	if (SB_LOAD(&c->consumer_sleeping, memory_order_relaxed))
+		kick(rsp, 1u << 4 /* GB_CMD_F_REPLY (gb_chan.h) */);
+	req->mbox_done = seq;
 }

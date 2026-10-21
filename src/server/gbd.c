@@ -621,6 +621,7 @@ void gb_sv_upcall_post(struct gb_sth *t, uint32_t id, const void *payload,
 	else
 		t->up_head = m;
 	t->up_tail = m;
+	atomic_store_explicit(&t->up_pending, 1, memory_order_release);
 	pthread_mutex_unlock(&t->up_lock);
 }
 
@@ -649,9 +650,13 @@ void gb_sv_upcall_flush(struct gb_sth *t)
 {
 	struct gb_upmsg *m;
 
+	/* nothing queued (almost always): no lock, once or twice per request */
+	if (!atomic_load_explicit(&t->up_pending, memory_order_acquire))
+		return;
 	pthread_mutex_lock(&t->up_lock);
 	m = t->up_head;
 	t->up_head = t->up_tail = NULL;
+	atomic_store_explicit(&t->up_pending, 0, memory_order_relaxed);
 	pthread_mutex_unlock(&t->up_lock);
 	while (m) {
 		struct gb_upmsg *n = m->next;
@@ -670,17 +675,21 @@ int gb_sv_upcall_call(struct gb_sth *t, uint32_t id, const void *payload,
 {
 	uint32_t seq = ++t->up_seq;
 	int result = -1;
+	int mw = t->chan.req.mbox_watch;
 
 	if (!t->cur_req_sync || len > GB_UP_MAX_PAYLOAD)
 		return -1;
 	gb_sv_upcall_flush(t); /* keep ordering with earlier messages */
 	if (upcall_write(t, id, payload, len, GB_CMD_F_WANT_REPLY, seq))
 		return -1;
+	t->chan.req.mbox_watch = 0; /* only records matter while waiting here */
 	for (;;) {
 		struct gb_in in;
 
-		if (gb_in_recv(&in, &t->chan.req, -1))
+		if (gb_in_recv(&in, &t->chan.req, -1)) {
+			t->chan.req.mbox_watch = mw;
 			return -1;
+		}
 		struct gb_cmd_hdr h;
 		if (in.size >= sizeof(h))
 			memcpy(&h, in.p, sizeof(h));
@@ -696,6 +705,7 @@ int gb_sv_upcall_call(struct gb_sth *t, uint32_t id, const void *payload,
 				memcpy(out, in.p + sizeof(h), n);
 			result = (int)n;
 			gb_in_release(&in);
+			t->chan.req.mbox_watch = mw;
 			return result;
 		}
 		/* An ordinary request that was already queued: it must run
@@ -815,6 +825,27 @@ static void handle_msg(struct gb_sth *t, const uint8_t *p, uint32_t size,
 		gb_sv_upcall_flush(t); /* messages from asynchronous requests */
 }
 
+static uint64_t g_mbox_ct;
+
+/* A tiny synchronous call from the mailbox (see gb_ring.h): same answer the
+ * request path gives, no record in either ring. */
+static void mbox_serve(struct gb_sth *t, uint32_t seq, uint32_t op)
+{
+	uint32_t val = 0;
+
+	if (op == GB_MBOX_GETERROR) {
+		GB_NATIVE(glGetError, GLenum, (void));
+		unsigned e = 0;
+
+		if (!gb_sv_stash_take(t, &e) && fn_glGetError)
+			e = fn_glGetError();
+		val = e;
+	}
+	g_mbox_ct++;
+	gb_sv_upcall_flush(t); /* messages from earlier requests go first */
+	gb_mbox_reply(&t->chan.rsp, &t->chan.req, seq, val);
+}
+
 static void *worker_main(void *arg)
 {
 	struct gb_sth *t = arg;
@@ -851,6 +882,15 @@ static void *worker_main(void *arg)
 			rc = gb_in_recv(&in, &t->chan.req, -1);
 		}
 		uint64_t t1 = stats ? mono_ns() : 0;
+		if (rc == 1) { /* the ring is drained and a mailbox request waits */
+			uint32_t q, op, ma, ta;
+
+			if (gb_mbox_pending(&t->chan.req, &q, &op, &ma, &ta))
+				mbox_serve(t, q, op);
+			if (stats)
+				t->st_busy_ns += mono_ns() - t1;
+			continue;
+		}
 		if (rc) {
 			gb_log("channel %u ends (%d)", t->id, rc);
 			break;
@@ -903,6 +943,8 @@ static void usr1_report(int sig)
 
 static void report_native(void)
 {
+	if (g_mbox_ct)
+		fprintf(stderr, "gbd mailbox requests %llu\n", (unsigned long long)g_mbox_ct);
 	for (unsigned i = 0; i < GB_OP_COUNT; i++)
 		if (g_sync_ct[i] > 1000)
 			fprintf(stderr, "gbd sync %-28s %9llu\n", gb_op_names[i], (unsigned long long)g_sync_ct[i]);
@@ -1035,6 +1077,7 @@ static int serve(int sock)
 					free(t);
 				} else {
 					t->id = next_id++;
+					t->chan.req.mbox_watch = 1;
 					pthread_mutex_init(&t->up_lock, NULL);
 					if (g_nthreads < GB_MAX_SERVER_THREADS)
 						g_threads[g_nthreads++] = t;
