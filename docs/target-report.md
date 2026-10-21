@@ -554,6 +554,11 @@ the excess is two cores taking turns: one works while the other spins.
   5-8 points less total CPU (147-152% against 154-157%), fps unchanged.
   Tests: `state_smoke` relinks with moved attribute locations, deletes the
   program and checks unknown names.
+  Conformance: `dEQP-GLES3.functional.attribute_location` (298),
+  `dEQP-GLES3.functional.uniform_api` (2182), `dEQP-GLES2.functional.uniform_api`
+  (1267), `dEQP-GLES31.functional.program_uniform` (1014) and
+  `dEQP-GLES3.functional.shaders.linkage` (119) pass in full, bridged and
+  native, over EGL and GLX.
 * *Shorter spin* (`GB_SPIN_US`, measured on an earlier scene of the same
   level): 2 us -> 43 fps, 5 us -> 58 fps, 15 us and 40 us -> 65 fps, with the
   CPU the same in every case: a side that sleeps instead of spinning costs
