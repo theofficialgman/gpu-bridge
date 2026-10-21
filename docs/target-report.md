@@ -509,6 +509,51 @@ All of them render on the NVIDIA GPU through the bridge with the same picture
   on ES2 (72%, 58%) are dominated by the driver's own per-draw cost: a 60-byte
   client-array draw takes 12 us inside the driver there, natively as well.
 
+## More games, played by hand
+
+Games that need menus and real input were played by a person: `tools/realapps/play.sh`
+launches the game windowed with the frame counter (`fpscount`), the person clicks
+through to gameplay and says when they are in, then `play.sh measure` records 45 s
+of fps (a 2 s window each) and the CPU of the top 10 processes. The same was done
+with the native arm64 build. Both sides were driven by hand, so the scenes are
+similar but not identical (a car in a race, a city of some size): treat the CPU
+figures as indicative. Unlocked (`__GL_SYNC_TO_VBLANK=0`) unless the game sets its
+own swap interval. 100% is one core; "app + gbd" for the bridge.
+
+| Game (GL use) | Native arm64 | Bridge armhf |
+|---|---|---|
+| Trigger Rally 0.6.6.1 (SDL2, fixed-function 3D, immediate mode) | 260 fps (233-277); app 60% | **152 fps** (121-179); 47% + 57% = 104% |
+| Neverputt 1.6 (fixed-function, game vsyncs itself) | 60 fps; 13.7% | 60 fps; 4.7% + 10.4% = 15.1% |
+| OpenCity 0.0.7 (SDL 1.2, fixed-function, display lists) | 23.6 fps (20-33); 51% | 28.0 fps (24-37); 23% + 38% = 61% |
+| LinCity-NG 2.10 (SDL, many small textured quads) | 18.7 fps (15-30); 32% | 18.4 fps (12-37); 19% + 49% = 68% |
+| Teeworlds 0.7.5 (SDL2, batched 2D quads, local server) | 60 fps; 20.5% | 59.8 fps (56-60); 14.6% + 14.2% = 28.8% |
+
+Not run: **AssaultCube** (the armhf build crashes with SIGBUS on an unaligned
+`ldrd` in its own code before any GL work, identically with no bridge at all: the
+same hardware limitation as the CTS `advanced-bindingUpdate` case), **VLC** (skipped:
+the arm64 ffmpeg here is patched for the Tegra's hardware decoders and the armhf
+one is not, so a decoder comparison would hide the display path), Crawl (starts and
+renders, turn-based so not measured).
+
+* **Trigger Rally is the one with a real gap (59% of native fps).** The server
+  statistics of a session (`STATS=1`) show about 11,000 immediate-mode calls per
+  frame (`glVertex3fv`, `glNormal3fv`, `glTexCoord2fv`, `glBegin`, ...; 115 million
+  messages in the session) and one `glFinish` per frame, a synchronous call that
+  waits about 1.9 ms for the GPU. The driver's own cost per vertex call is the same
+  as native (0.1-0.2 us); what is added is the per-message handling (about 0.1-0.2
+  us each, 11,000 of them a frame) and that `glFinish` serialises client and server
+  once per frame, so the client cannot build the next frame while the GPU finishes the
+  last, as it does natively. Packing `glBegin`..`glEnd` blocks into one message would
+  save part of the per-message cost; I estimate 5-10% of the frame, so it was not done.
+* **LinCity-NG at the same frame rate costs about twice the CPU.** A micro-pattern
+  of its sprite drawing (`tests/loopback/call_bench.c`: enable, bind, colour, a
+  four-vertex quad, disable) takes 6.5 us per sprite natively and 8.8 us through the
+  bridge (1.36 times), nearly all of it the driver's texture-state cost (native too);
+  its frames hold about 9,700 such blocks. The remaining difference is the per-call
+  handling and waiting that every immediate-mode call pays.
+* The rest (Neverputt, Teeworlds, OpenCity) are at native frame rates with a similar
+  or lower total CPU.
+
 ## SuperTux: native vs the layer
 
 SuperTux 0.6.3 (SDL2, GL 3.3 core renderer), level `23rd_airborne` with Tux
