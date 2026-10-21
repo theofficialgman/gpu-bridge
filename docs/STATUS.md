@@ -680,6 +680,41 @@ Fixed afterwards (found while chasing the open items):
   (3,789 cases) now runs in one process with no differences from native except
   the 35 GLES1 cases (not in that build).
 
+### Regression sweep after the performance work (2026-10-21)
+
+Everything done since the final regression above (request batching, mapped
+scratch buffers, vertex-range upload, lagged swap reply, the client-array
+rework, location caching, the faster synchronous path with the `glGetError`
+mailbox) was checked with the same four bridged passes, same lists and
+configurations, against the same native baselines (commit `4007039`, 13.8 h,
+every session completed on its first attempt, no hangs or retries):
+
+| Set | Compared | Pass/Pass | Other identical | Differences |
+|---|---|---|---|---|
+| GL 4.6 over EGL (configs 1,2,3,28,55) | 280,494 | 252,622 | NotSupported 22,204; Fail/Fail 5,620; warnings 48 | **0** |
+| GL 4.6 over GLX (config 1) | 83,364 | 71,251 | NotSupported 9,114; Fail/Fail 2,990; warnings 8 | 1 (native Fail, bridged Pass; the same one as before) |
+| ES 3.2 over GLX (config 1) | 21,045 | 13,353 | NotSupported 7,624; Fail/Fail 67; 1 warning | **0** |
+| ES 3.2 over EGL | 187,792 | 175,400 | NotSupported 11,772; Fail/Fail 503; 81 warnings | 36 |
+
+The 36 ES 3.2 EGL differences are the 35 GLES1 cases (no GLES1 in that build)
+and the one `primitive_restart.basic.line_loop.unsigned_int.draw_elements`
+ResourceError (`glGetError` returned `GL_OUT_OF_MEMORY` late in a long
+session; the same case, with the same message, in the previous final
+regression, i.e. before this work; it passes alone 5 of 5 times, bridged and
+native). The two timing-correlation cases of the previous run
+(`flush_finish`) passed this time. Nothing is native-ok / bridged-failing
+except that one case, and nothing regressed.
+
+Other checks along the way: the conformance spot-checks of each change
+(GLES2/3/3.1 vertex arrays, draw, draw-indirect, primitive restart, vertex
+attribute binding, uniform API, attribute location, program uniform, linkage,
+debug, negative API, FBO completeness; `KHR-GL46` draw-indirect and direct
+state access) match native over EGL and GLX. Two bugs in the new synchronous
+path were found that way and fixed before this sweep (a lost wake-up, and a
+stale wake-up record read as an out-of-step reply; see
+`docs/target-report.md`), each now covered by a test
+(`tests/unit/test_mbox.c`, `tests/loopback/sync_mix.c`).
+
 ## Real applications
 
 See `docs/target-report.md` for the armhf `glmark2` (96.1% of native, all 33
