@@ -521,6 +521,8 @@ at once changed nothing). Measured with `tools/realapps/stux_run.sh`, which
 checks the screenshot of every run (the first measurements in this session
 were partly title-card runs: the game needs window focus for its key presses).
 
+(Results at the start of the analysis; the current ones are below.)
+
 | | native arm64 | bridge, exact errors (client + gbd) | bridge, `GB_LAZY_GETERROR=1` |
 |---|---|---|---|
 | vsync off (game-limited) | 66.0 fps; 41.5% | 65.5 fps; 78% + 69% = 147% | 65.8 fps; 40% + 38% = 78% |
@@ -542,37 +544,94 @@ client's samples and 33% of gbd's in ring-wait spinning (`gb_ring_wait_data`,
 loading and music, `floorl`, ...) and almost none of it is marshalling. So
 the excess is two cores taking turns: one works while the other spins.
 
-**What was tried.**
+**Where a synchronous call's time goes, and what was done about it.**
+Measured on the Tegra with `tests/bench/pingpong.c` (two processes, a
+simulated driver call of N us on the server) and `tests/bench/ring_pingpong.c`:
 
-* *Location caching (implemented).* `glGetUniformLocation` and
-  `glGetAttribLocation` (and the ARB forms) are answered from a per-context
-  cache once the driver has returned a non-negative location, and forgotten on
+| way of waiting | idle round trip | CPU per wait of 30 us |
+|---|---|---|
+| spin with the CPU yield hint | 0.18 us | 30 us |
+| spin with `sched_yield` (the ring's default) | 0.31 us | 31 us |
+| `wfe` (user space can use it here) | 0.20 us | 30 us |
+| futex (sleep at once) | 10.5 us | 7 us + 7 us on the other side, 12 us more latency |
+
+So a spin costs exactly the wait, a sleep costs a fixed 14 us of CPU and 11 us
+of latency, and the break-even is around 15-20 us. SuperTux's waits are 1-10
+us, so spinning is right (the earlier `GB_SPIN_US` experiment says the same:
+sleeping sooner gave the same CPU and fewer frames). `wfe` would only lower
+power, not the CPU percentage (the process is still running; the battery
+gauge cannot show it while the Switch is charging, so it was not measured).
+The half of the cost that can go is the protocol's own: a `glGetError` took
+0.72-0.83 us bridged, the ring layer alone is 0.45-0.54 us, a raw shared-word
+handoff is 0.2 us. Changes, in order:
+
+* *Upcall queue lock*: the server took a mutex on every request (twice for a
+  synchronous one) to look at an upcall queue that is almost always empty; now
+  an atomic flag is checked first.
+* *Ring handshakes on AArch64*: the publish-then-look-at-the-peer's-sleep-flag
+  steps (four per round trip) used a full barrier; a sequentially consistent
+  store followed by a sequentially consistent load (`stlr`/`ldar`) orders them
+  at a fraction of the cost (ARMv8 is multi-copy atomic, so it also holds
+  against the 32-bit client's barrier). `glGetError` 830 -> 770 ns.
+* *Mailbox for `glGetError`*: a request and a reply cell, one cache line each
+  way, in the rings' control blocks, instead of a record and a tail counter
+  each way. The request is ordered behind everything already in the ring (the
+  server consumes the ring up to the post first). Used unless a debug
+  callback is registered, inside an upcall, or `GB_NO_FAST_SYNC` is set; it
+  keeps answering upcalls that arrive while it waits. `glGetError` 770 ->
+  345 ns (32-bit client; 715 -> 350 ns 64-bit); `glEnable` + `glGetError`
+  610 -> 410 ns (native: 25 ns).
+* *A lost wake-up, found by SuperTux and not by the loopback tests*: the first
+  version woke a sleeping peer with a bare futex wake. A wake that arrives
+  after the peer announced it will sleep but before it reaches `futex_wait`
+  is lost when the futex word did not change, and the mailbox does not touch
+  the word; both sides slept until the 100 ms watchdog (10 fps, then a hang).
+  The fix: when the peer's sleep flag is seen, push a 16-byte no-op record,
+  which moves the tail and wakes it the ordinary way. `tests/unit/test_mbox.c`
+  (two threads that sleep and wake at random, ordering and worst-wait checks)
+  reproduces the bug if the old wake is put back (it hangs) and passes now on
+  both architectures, on the dev machine and the Tegra.
+
+**Results** (steady scene, repeat runs vary by about 5 points):
+
+| | native arm64 | bridge exact errors, at the start of this analysis | bridge exact errors, now | bridge, `GB_LAZY_GETERROR=1`, now |
+|---|---|---|---|---|
+| vsync off (game-limited) | 65.9 fps; 41-44% | 65.5 fps; 147% (78% + 69%) | **65.8 fps; 110% (60.0% + 49.7%)** | 65.9 fps; 78% (38.8% + 38.8%) |
+| vsync on | 59.3-59.6 fps; about 40% | 58.7 fps; 135% (72% + 63%) | **59.1 fps; 97% (53.1% + 43.7%)** | 59.2 fps; 71% (35.9% + 34.8%) |
+
+(The native vsync-on CPU is from the earlier verified runs, 39.7-41.5%; a
+later native vsync-on run failed its gameplay check and was discarded.)
+Exact-error mode went from 3.5 times native CPU to 2.5 times, with the same
+frame rates and the same error semantics; lazy mode, which does not wait at
+all, is unchanged at 1.7-1.9 times.
+
+**What else was tried or considered.**
+
+* *Location caching* (done, earlier in this section's history):
+  `glGetUniformLocation` / `glGetAttribLocation` answered from a per-context
+  cache once the driver has returned a non-negative location, forgotten on
   `glLinkProgram`, `glDeleteProgram`, `glProgramBinary` and context
-  destruction (any context sharing the program name is invalidated too).
-  -1 is never cached (it may carry an error). It removes the 350 round trips
-  a frame; A/B on this scene (`GB_NO_LOC_CACHE=1` turns it off): about
-  5-8 points less total CPU (147-152% against 154-157%), fps unchanged.
-  Tests: `state_smoke` relinks with moved attribute locations, deletes the
-  program and checks unknown names.
+  destruction (any context sharing the program name is invalidated too); -1
+  is never cached. It removes the 350 round trips a frame; A/B
+  (`GB_NO_LOC_CACHE=1`): 5-8 points less CPU, fps unchanged.
   Conformance: `dEQP-GLES3.functional.attribute_location` (298),
   `dEQP-GLES3.functional.uniform_api` (2182), `dEQP-GLES2.functional.uniform_api`
   (1267), `dEQP-GLES31.functional.program_uniform` (1014) and
   `dEQP-GLES3.functional.shaders.linkage` (119) pass in full, bridged and
-  native, over EGL and GLX.
-* *Shorter spin* (`GB_SPIN_US`, measured on an earlier scene of the same
-  level): 2 us -> 43 fps, 5 us -> 58 fps, 15 us and 40 us -> 65 fps, with the
-  CPU the same in every case: a side that sleeps instead of spinning costs
-  about as much CPU in futex wake-ups, and the waits get longer. The default
-  spin stays.
-* *Not done: skipping `glGetError` round trips by proving the preceding
-  calls cannot have failed.* It is possible for a few calls
-  (`glActiveTexture`, `glBindTexture`, `glEnableVertexAttribArray`,
-  `glVertexAttribPointer` against tracked state) but not for the ones that
-  matter most here (`glBufferData` can run out of memory, draws and uniforms
-  depend on a lot of state), and each of those still has to be waited for, so
-  it would remove only part of the waiting for a lot of validation code that
-  has to stay exactly right. The opt-in lazy mode already shows the result of
-  not waiting at all: 78% and 68%, about 1.7 times native.
+  native, over EGL and GLX. `state_smoke` relinks with moved attribute
+  locations, deletes the program and checks unknown names.
+* *Not done: skipping `glGetError` round trips by proving the preceding calls
+  cannot have failed.* Possible for a few calls (`glActiveTexture`,
+  `glBindTexture`, `glEnableVertexAttribArray`, `glVertexAttribPointer`
+  against tracked state), not for the ones that matter most here
+  (`glBufferData` can run out of memory, draws and uniforms depend on a lot
+  of state), and each of those still has to be waited for.
+* *Timeline view of the remaining cost.* In exact mode the client and the
+  server take turns, so each is busy (working or spinning) for about the whole
+  critical path: client work + server work + (calls x round trip). Every
+  microsecond taken off a round trip comes off both processes' CPU: 2,000
+  checks a frame x 0.45 us saved = 0.9 ms of a 15.6 ms frame, about 11 points
+  of the total.
 
 ## Client arrays (minetest, glmark2 `build`, ETR)
 
