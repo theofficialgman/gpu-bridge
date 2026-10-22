@@ -515,12 +515,47 @@ void gb_cl_flush(struct gb_cl *cx)
 		gb_cl_lost(cx);
 }
 
+/*
+ * GB_FPS=1: print "FPSCOUNT <seconds> <frames> <fps>" to stderr every 2 s, one
+ * frame per buffer swap, from inside the client library. For applications whose
+ * swap call an LD_PRELOAD counter cannot see (an x86 game under box86 reaches
+ * glXSwapBuffers through box86's own wrappers).
+ */
+static int g_fps_on;
+
+static void fps_frame(void)
+{
+	static unsigned long frames, last_frames;
+	static double t_start, t_last;
+	struct timespec ts;
+	double t;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	t = ts.tv_sec + ts.tv_nsec / 1e9;
+	if (!frames)
+		t_start = t_last = t;
+	frames++;
+	if (t - t_last >= 2.0) {
+		fprintf(stderr, "FPSCOUNT %.1f %lu %.1f\n", t - t_start, frames,
+			(frames - last_frames) / (t - t_last));
+		last_frames = frames;
+		t_last = t;
+	}
+}
+
 int gb_cl_begin(struct gb_cl *cx, struct gb_out *o, uint32_t op,
 		uint32_t total, uint32_t flags)
 {
+	if (__builtin_expect(g_fps_on, 0) &&
+	    (op == GB_OP_glXSwapBuffers || op == GB_OP_eglSwapBuffers ||
+	     op == GB_OP_eglSwapBuffersWithDamageKHR ||
+	     op == GB_OP_eglSwapBuffersWithDamageEXT))
+		fps_frame();
 	if (__builtin_expect(g_stats_on != 0, 0)) {
-		if (g_stats_on < 0)
+		if (g_stats_on < 0) {
 			g_stats_on = getenv("GB_STATS") != NULL;
+			g_fps_on = getenv("GB_FPS") != NULL;
+		}
 		if (g_stats_on) {
 			unsigned s = stat_slot(op);
 			g_stat[s].calls++;

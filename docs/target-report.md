@@ -554,6 +554,33 @@ renders, turn-based so not measured).
 * The rest (Neverputt, Teeworlds, OpenCity) are at native frame rates with a similar
   or lower total CPU.
 
+## x86 games under box86 (32-bit x86 -> armhf -> the bridge)
+
+box86 0.3.9 (dynarec) runs 32-bit x86 binaries on the armhf side; it loads the
+armhf `libGL.so.1`, so with the bridge's client library first on the library
+path every GL call of an emulated game goes through it. The reference is the
+x86_64 build of the same game under box64 on the arm64 side with the real
+NVIDIA driver (no bridge). The games live on the external drive
+(`/media/gman/.../Applications_x86_64`); they were run in place with a scratch
+`HOME` so no saves or configs were touched. Both sides were played by hand with
+`tools/realapps/play.sh`. Frames are counted inside the bridge client
+(`GB_FPS=1`, same `FPSCOUNT` lines as the preload counter) because box86 reaches
+`glXSwapBuffers` through its own wrappers, which an `LD_PRELOAD` counter cannot
+see; the box64 runs therefore have no frame counter and are compared on CPU.
+
+| Game (engine) | box86 through the bridge | box64 native (no bridge) |
+|---|---|---|
+| vektor2089 (SDL2 + GL, 480x272 pixel art, 60 fps) | 60.0 fps; game 98% + gbd 51% | game 97% |
+| SkyRogue (Unity, 1024x600, title screen with the game running) | 49 fps (22-78); game 160% + gbd 46% | game 181% |
+
+* Both games render correctly through the bridge (title screens, the games
+  themselves). The emulated game is the CPU ceiling in both setups: vektor2089's
+  process is at 97-98% with and without the bridge (the bridge's addition is the
+  second core for `gbd`), and SkyRogue's Unity threads are at 160-180%.
+* Not run: **Celeste** (the folder does not have the libraries box86 needs:
+  FAudio and others), and the other titles on that drive (Baba Is You, Forget
+  the Brakes, Mixolumia, Cook Serve Delicious) have not been tried yet.
+
 ## SuperTux: native vs the layer
 
 SuperTux 0.6.3 (SDL2, GL 3.3 core renderer), level `23rd_airborne` with Tux

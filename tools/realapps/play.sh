@@ -3,6 +3,7 @@
 #   play.sh start <name> <native|bridge> <command...>   launch with the frame counter; log in /tmp/play_<name>_<mode>.log
 #   play.sh measure <name> <native|bridge> <seconds>    CPU (top 10 processes) and fps over the next <seconds>
 #   play.sh stop <name>                                 end the game
+# FPS_CLIENT=1 counts frames inside the bridge client library (GB_FPS=1) instead of the LD_PRELOAD counter (needed for box86).
 # HOME for the game is /tmp/h_<name> (prepare config there first); VSYNC=1 leaves the swap interval to the game,
 # otherwise __GL_SYNC_TO_VBLANK=0.
 cmd=$1; name=$2
@@ -11,11 +12,12 @@ case $cmd in
 start)
   mode=$3; shift 3
   log=/tmp/play_${name}_${mode}.log
-  export DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json GB_ABORT_ON_SERVER_LOSS=1 GB_SERVER=$HOME/gb/build64/gbd
+  export DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json GB_ABORT_ON_SERVER_LOSS=1 GB_SERVER=${GB_SERVER:-$HOME/gb/build64/gbd}
   [ -z "$VSYNC" ] && export __GL_SYNC_TO_VBLANK=0
   [ -n "$STATS" ] && export GB_SERVER_STATS=1 # then `measure` dumps gbd's counters into /tmp/play_<name>_<mode>.stats
   if [ $mode = bridge ]; then
-    export LD_LIBRARY_PATH=$HOME/gb/build32/shim32:$R/usr/lib/arm-linux-gnueabihf:$R/lib/arm-linux-gnueabihf LD_PRELOAD=/tmp/fpscount32.so
+    export LD_LIBRARY_PATH=$HOME/gb/build32/shim32:$R/usr/lib/arm-linux-gnueabihf:$R/lib/arm-linux-gnueabihf
+    if [ -n "$FPS_CLIENT" ]; then export GB_FPS=1; else export LD_PRELOAD=/tmp/fpscount32.so; fi # FPS_CLIENT=1: count in the bridge client (box86 games)
   else
     export LD_PRELOAD=/tmp/fpscount64.so
     R64=$HOME/gb/apps2/root64; export LD_LIBRARY_PATH=$R64/usr/lib/aarch64-linux-gnu:$R64/lib/aarch64-linux-gnu
