@@ -578,8 +578,9 @@ see; the box64 runs therefore have no frame counter and are compared on CPU.
   process is at 97-98% with and without the bridge (the bridge's addition is the
   second core for `gbd`), and SkyRogue's Unity threads are at 160-180%.
 * Not run: **Celeste** (the folder does not have the libraries box86 needs:
-  FAudio and others), and the other titles on that drive (Baba Is You, Forget
-  the Brakes, Mixolumia, Cook Serve Delicious) have not been tried yet.
+  FAudio and others). The other titles on that drive (Baba Is You, Forget the
+  Brakes, Mixolumia, Cook Serve Delicious) only have x86_64 builds, which need
+  box64 on the arm64 side and so never reach the bridge.
 
 ## SuperTux: native vs the layer
 
