@@ -54,10 +54,45 @@ Checked against the Khronos conformance test suites by comparing each result wit
 on the 64-bit driver, and runs a range of real games and applications. Results, measurements and known gaps are in
 [docs/STATUS.md](docs/STATUS.md) and [docs/target-report.md](docs/target-report.md).
 
-## Install
+## Build and install
 
-A single arm64 Debian package installs both halves and replaces the system's armhf libglvnd
-libraries (kept as dpkg diversions and restored on removal). See [packaging/README.md](packaging/README.md).
+Everything is built on the Tegra itself: the server natively (arm64) and the client library with the
+armhf compiler.
+
+**1. Dependencies** (Ubuntu-based L4T, with the `armhf` architecture enabled). This is what the
+build machine had; it is the set that is known to work:
+
+    sudo apt install build-essential cmake ninja-build python3 gcc-arm-linux-gnueabihf \
+        libx11-dev libgl-dev libegl-dev libglx-dev \
+        libc6-dev:armhf libx11-dev:armhf libgl-dev:armhf libegl-dev:armhf libglx-dev:armhf
+
+**2. Build** the server (arm64) and the client library (armhf) in separate build directories:
+
+    cmake -S . -B build64 -G Ninja -DCMAKE_BUILD_TYPE=Release
+    cmake -S . -B build32 -G Ninja -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_C_COMPILER=arm-linux-gnueabihf-gcc
+    ninja -C build64 gbd
+    ninja -C build32 gb32_glx
+
+(The first `cmake` run prints a "`-m32`" error: it is a probe for the x86 dev setup and can be ignored.)
+This produces `build64/gbd` and `build32/shim32/libGL.so.1.7.0`. The generator (`python3`) reads the
+Khronos XML under `registry/`; nothing is downloaded. On a 4-core Tegra X1 each target takes about
+one to one and a half minutes.
+
+**3a. Install** as a Debian package (replaces the system's armhf libglvnd libraries; reversible):
+
+    packaging/build-deb.sh build32 build64 out
+    sudo dpkg -i out/gpu-bridge_*_arm64.deb
+    sudo dpkg -r gpu-bridge          # to undo; restores the original libraries
+
+See [packaging/README.md](packaging/README.md) for what the package does to the system.
+
+**3b. Or try it without installing**, for one program at a time:
+
+    LD_LIBRARY_PATH=$PWD/build32/shim32 GB_SERVER=$PWD/build64/gbd glxgears.arm-linux-gnueabihf
+
+**Check it works:** `glxinfo.arm-linux-gnueabihf -B` (from `mesa-utils-bin:armhf`) should report
+`NVIDIA Tegra X1`, not `llvmpipe`.
 
 ## More
 

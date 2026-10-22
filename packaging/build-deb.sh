@@ -13,7 +13,8 @@
 # Run it where dpkg-deb is (the Tegra builds both trees). See packaging/README.md.
 set -e
 here=$(cd "$(dirname "$0")" && pwd); root=$(dirname "$here")
-b32=$(cd "$1" && pwd); b64=$(cd "$2" && pwd); out=${3:-$PWD}
+mkdir -p "${3:-.}"
+b32=$(cd "$1" && pwd); b64=$(cd "$2" && pwd); out=$(cd "${3:-.}" && pwd)
 [ -f "$b32/shim32/libGL.so.1.7.0" ] && [ -x "$b64/gbd" ] || { echo "need $b32/shim32/libGL.so.1.7.0 and $b64/gbd" >&2; exit 2; }
 ver=${GB_VERSION:-0.1.0~git$(date +%Y%m%d).$(git -C "$root" rev-parse --short HEAD 2>/dev/null || echo local)}
 maint="theofficialgman <dofficialgman@gmail.com>"

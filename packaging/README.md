@@ -14,9 +14,9 @@ bridge; if not, the armhf files are inert.
 
 ## Build
 
-On the target, after `~/gb/build.sh` has produced the armhf and arm64 builds:
+On the target, after building both halves (see the top-level [README](../README.md)):
 
-    packaging/build-deb.sh ~/gb/build32 ~/gb/build64 /tmp/debs
+    packaging/build-deb.sh build32 build64 out
 
 (`GB_VERSION=...` sets the version; `STRIP32` / `STRIP64` choose the strip tools.)
 
