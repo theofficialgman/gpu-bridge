@@ -527,6 +527,7 @@ own swap interval. 100% is one core; "app + gbd" for the bridge.
 | OpenCity 0.0.7 (SDL 1.2, fixed-function, display lists) | 23.6 fps (20-33); 51% | 28.0 fps (24-37); 23% + 38% = 61% |
 | LinCity-NG 2.10 (SDL, many small textured quads) | 18.7 fps (15-30); 32% | 18.4 fps (12-37); 19% + 49% = 68% |
 | Teeworlds 0.7.5 (SDL2, batched 2D quads, local server) | 60 fps; 20.5% | 59.8 fps (56-60); 14.6% + 14.2% = 28.8% |
+| SuperTuxKart 1.4 (GL 3.3 core, four-kart race on lighthouse, 1024x576, unlocked) | 110.3 fps (109-111); 82.5% | **106.6 fps** (96-110); 74.2% + 52.5% = 126.7% |
 
 Not run: **AssaultCube** (the armhf build crashes with SIGBUS on an unaligned
 `ldrd` in its own code before any GL work, identically with no bridge at all: the
@@ -551,6 +552,9 @@ renders, turn-based so not measured).
   bridge (1.36 times), nearly all of it the driver's texture-state cost (native too);
   its frames hold about 9,700 such blocks. The remaining difference is the per-call
   handling and waiting that every immediate-mode call pays.
+* SuperTuxKart, driven by hand through a race (the earlier scripted runs in this
+  report predate the batching, client-array and synchronous-path work): 97% of
+  native frame rate at 1.5 times the CPU (the extra is `gbd`'s core).
 * The rest (Neverputt, Teeworlds, OpenCity) are at native frame rates with a similar
   or lower total CPU.
 
