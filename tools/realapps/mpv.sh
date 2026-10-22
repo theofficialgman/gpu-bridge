@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # mpv.sh bridge|native|sw [mpv args]
 mode=$1; shift
 R=$HOME/gb/apps2/root; A=arm-linux-gnueabihf; MPV=$R/usr/bin/mpv

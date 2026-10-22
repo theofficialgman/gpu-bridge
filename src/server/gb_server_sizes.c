@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_server_sizes.c - size rules that need native GL state.
  *

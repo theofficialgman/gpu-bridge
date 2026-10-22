@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_handle.c - opaque handle <-> native pointer tables.
  *

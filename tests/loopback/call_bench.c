@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * call_bench.c - cost per GL call for the call patterns of legacy
  * applications (immediate mode, matrix stack, state changes). Prints ns per

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * spin_cube.c - visual demo: a spinning, depth-tested, per-face-coloured cube
  * in an X11 window, rendered with EGL + GLES2. Linked against the bridge it

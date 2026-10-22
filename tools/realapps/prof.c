@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * prof.c - LD_PRELOAD CPU profiler for processes perf cannot be used on:
  * SIGPROF every 1 ms of CPU time (all threads), program counter histogram,

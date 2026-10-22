@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_client_strings.c - glGetString / glGetStringi / glShaderSource, shared
  * by both client libraries. Extension strings are filtered to the entry

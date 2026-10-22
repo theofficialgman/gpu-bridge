@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * call_overhead.c - micro-benchmark of API-call cost, linked three ways like
  * gles2_smoke.c (native driver / bridge 64-bit / bridge 32-bit).

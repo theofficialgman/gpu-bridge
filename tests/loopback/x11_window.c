@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * x11_window.c - Strategy X test: the app owns an X11 window (its own Xlib
  * connection) and renders to it through EGL. Under the bridge the render

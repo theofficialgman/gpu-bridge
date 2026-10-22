@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_client_map.c - mapped buffer objects (glMapBuffer*, glUnmapBuffer,
  * glFlushMappedBufferRange, glGet*BufferPointerv).

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_chan.c - channel + message layer. See gb_chan.h.
  */

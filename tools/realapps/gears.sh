@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # gears.sh bridge|native|sw glxgears|es2gears_x11 : 30 s of a tiny GL app (CPU cost of the bridge with almost no GL work)
 mode=$1; app=$2
 R=$HOME/gb/apps2/root; A=arm-linux-gnueabihf

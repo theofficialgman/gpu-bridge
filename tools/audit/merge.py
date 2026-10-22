@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """merge.py data/*.txt > ../../src/proto/gb_pname_measured.h
 
 Merges the "M <class> <pname> <count>" lines produced by pname_audit on each

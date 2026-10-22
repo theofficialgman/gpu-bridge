@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_opx.h - hand-written ("extra") opcodes that have no registry entry or
  * need custom client/server logic. Values start above any generated opcode.

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_client_impl.h - internal interface of the client libraries (the arm32
  * side): channel/connection runtime used by the generated stubs and by the

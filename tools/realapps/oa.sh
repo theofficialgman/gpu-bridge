@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # oa.sh bridge|native|sw cfgfile : run OpenArena client with an exec'd config, print the interesting lines
 mode=$1; cfg=$2
 if [ $mode = native ]; then R=$HOME/gb/apps2/root64; A=aarch64-linux-gnu; B=ioquake3; else R=$HOME/gb/apps2/root; A=arm-linux-gnueabihf; fi

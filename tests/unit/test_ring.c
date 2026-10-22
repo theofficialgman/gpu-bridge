@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * test_ring.c - unit/stress tests for gb_ring. Built for both -m64 and -m32.
  */

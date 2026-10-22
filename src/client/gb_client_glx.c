@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_client_glx.c - GLX specific part of the desktop-GL client library
  * (libGL replacement): strings, FBConfig lists, proc addresses and

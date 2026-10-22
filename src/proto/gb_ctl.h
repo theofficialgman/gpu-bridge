@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_ctl.h - control socket protocol (AF_UNIX SOCK_SEQPACKET socketpair).
  *

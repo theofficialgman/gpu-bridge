@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * sync_mix.c - synchronous calls of every kind in quick succession, with
  * short random sleeps so that both sides keep going to sleep and waking

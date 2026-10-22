@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_ring.c - SPSC shared-memory byte ring with futex wakeups.
  * See gb_ring.h for the contract. Compiles unchanged for -m32 and -m64.

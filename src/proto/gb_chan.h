@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_chan.h - a bidirectional channel (request ring + response ring in one
  * memfd) and the message layer on top of it, including transparent

@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # glm.sh native|bridge glmark2|glmark2-es2 : the glmark2 scene list, 2 s each, per-scene fps (apt glmark2 of the matching architecture installed)
 mode=$1; app=$2
 # binaries unpacked with getapp.sh / getapp64.sh (armhf in root, arm64 in root64): no apt install needed

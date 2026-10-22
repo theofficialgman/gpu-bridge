@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 gen_config.py - hand-maintained policy for gb_gen.py.
 

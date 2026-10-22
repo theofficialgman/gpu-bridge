@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # mt.sh native|bridge : minetest (devtest game) walking forward in a fresh world, 60 s; fps from the fpscount preload
 mode=$1
 if [ $mode = native ]; then MT=$HOME/gb/apps2/root64/usr/games/minetest; else MT=$HOME/gb/apps2/root/usr/games/minetest; fi

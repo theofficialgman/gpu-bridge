@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gles2_smoke.c - end-to-end EGL/GLES2 test. The same source is linked three
  * ways: against the system driver (reference), against the bridge client for

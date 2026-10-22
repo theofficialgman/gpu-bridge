@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """why_missing.py native.txt bridged.txt build/gen/gb_client_all_gen.c
 
 For each extension the native driver advertises but the bridge does not, say

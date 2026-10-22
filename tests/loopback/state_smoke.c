@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * state_smoke.c - getter element counts, error behaviour and buffer mapping
  * through the bridge. Every expectation here must also hold for the system

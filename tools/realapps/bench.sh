@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # bench.sh <scenario> <native|bridge|sw> : unlocked frame rate + per-process CPU (top 10) for one app scenario.
 # Needs /tmp/fpscount32.so /tmp/fpscount64.so (fpscount.c), cpuwin.py, and the app wrappers oa.sh stk.sh mpv.sh in /tmp.
 sc=$1; mode=$2

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * pname_audit.c - empirical check of the pname -> element-count tables.
  *

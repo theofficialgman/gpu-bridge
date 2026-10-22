@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_client_gl.c - EGL / OpenGL ES specific part of the client library:
  *

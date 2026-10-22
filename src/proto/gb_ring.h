@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_ring.h - single-producer / single-consumer byte ring for shared memory.
  *

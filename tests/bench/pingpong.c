@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * pingpong.c - what a synchronous request/reply costs between two processes
  * for different ways of waiting: the server does `work_us` of busy work per

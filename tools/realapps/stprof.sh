@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # stprof.sh [lazy] : bridged SuperTux, vsync off (VSYNC=1 for on), CPU profile of the client and of gbd
 export DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json
 cat > /tmp/gbd_prof.sh <<'W'

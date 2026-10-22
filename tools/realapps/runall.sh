@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # runall.sh native|bridge : every apt-game scenario, unlocked and vsynced (results in /tmp/bench/*.txt)
 mode=$1
 for sc in glm glmes; do bash /tmp/bench.sh $sc $mode >/dev/null 2>&1; done

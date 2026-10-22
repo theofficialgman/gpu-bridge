@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_client_debug.c - GL_KHR_debug / ARB_debug_output.
  *

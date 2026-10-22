@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * fpscount.c - LD_PRELOAD frame counter. Wraps glXSwapBuffers / eglSwapBuffers /
  * SDL_GL_SwapWindow

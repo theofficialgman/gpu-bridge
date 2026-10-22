@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 tag=$1; export DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json GB_ABORT_ON_SERVER_LOSS=1 GB_SERVER=$HOME/gb/build64/gbd
 [ -n "$BRIDGE" ] && export LD_LIBRARY_PATH=$HOME/gb/build32/shim32
 rm -rf /tmp/etr_home; mkdir -p /tmp/etr_home

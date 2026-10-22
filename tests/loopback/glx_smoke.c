@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * glx_smoke.c - GLX + desktop OpenGL end-to-end test. Built three ways like
  * the EGL tests: against the system libGL (reference), against the bridge

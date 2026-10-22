@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # games.sh <app> native|bridge : small apt games driven with xdotool for ~40 s, fps from the fpscount preload
 #   app: cbsu (Chromium B.S.U.), gltron, stux (SuperTux), xmoto, agt (Armagetron Advanced), godot (generated 3D test project)
 app=$1; mode=$2

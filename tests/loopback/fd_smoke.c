@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * fd_smoke.c - file descriptors across the bridge: a dma-buf exported from
  * one EGLImage and imported as another (the plane fds travel as tokens over

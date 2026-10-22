@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * test_ring_xabi.c - cross-ABI ring test: a 32-bit and a 64-bit process share
  * one memfd ring. Built twice (-m32, -m64); the 64-bit build is the driver.

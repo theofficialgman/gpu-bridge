@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # play.sh start|measure|stop ... : games played by hand (a person clicks through the menus)
 #   play.sh start <name> <native|bridge> <command...>   launch with the frame counter; log in /tmp/play_<name>_<mode>.log
 #   play.sh measure <name> <native|bridge> <seconds>    CPU (top 10 processes) and fps over the next <seconds>

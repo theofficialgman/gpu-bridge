@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_server_x11.c - the server's own Xlib access.
  *

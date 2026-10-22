@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * test_mbox.c - the ring mailbox (gb_mbox_*) between two threads that sleep
  * and wake at random: every request must see all records published before it

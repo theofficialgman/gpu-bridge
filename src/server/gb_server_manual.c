@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_server_manual.c - hand-written server handlers for operations that the
  * registry-driven generator cannot express safely: native display/window

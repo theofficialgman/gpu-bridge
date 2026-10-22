@@ -698,3 +698,9 @@ the "target" column is where the design is meant to end up.
 | Window-system ordering | not considered | client `XSync`s before calls that name X resources | the server's separate X connection is not ordered with the app's (found by running the real glxgears) |
 | Pixel transfers with PBOs | guard + error | encoder sends a buffer offset when the matching binding is non-zero | works for ES3 and desktop alike |
 | Core-profile client arrays | n/a | rejected at the pointer call, like the driver | fidelity: do not be more permissive than the real driver |
+
+## License
+
+MIT, see `LICENSE`. The Khronos API registry files in `registry/` keep their own
+Apache-2.0 (vk.xml: Apache-2.0 OR MIT) terms; see `THIRD_PARTY_NOTICES.md`. Source
+files carry `SPDX-License-Identifier: MIT`.

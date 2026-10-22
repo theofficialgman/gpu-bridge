@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_codec.h - bounds-checked reader/writer used by the generated
  * encoders (client) and decoders (server).

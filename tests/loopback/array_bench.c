@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * array_bench.c - cost per draw call with vertex data in client memory (what
  * Irrlicht/minetest, glmark2 "build" and many fixed-function games do). Prints

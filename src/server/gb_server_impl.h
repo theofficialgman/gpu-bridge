@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_server_impl.h - internal interface of the 64-bit render server (gbd),
  * shared by the generated decoders and the hand-written handlers.

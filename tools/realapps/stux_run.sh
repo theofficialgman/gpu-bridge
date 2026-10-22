@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # stux_run.sh native|bridge [vsync] [lazy] : one verified SuperTux run (gameplay on screen at the end, else retried up to 3 times)
 # prints the bench.sh summary lines
 mode=$1; vs=$2; lz=$3

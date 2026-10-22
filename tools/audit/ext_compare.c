@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * ext_compare.c - print every advertised extension / version of each API the
  * bridge serves, one per line, so a native run and a bridged run can be

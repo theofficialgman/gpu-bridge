@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_carr.h - slot numbering for vertex-array state, shared by the client's
  * shadow state and the DrawClient wire message.

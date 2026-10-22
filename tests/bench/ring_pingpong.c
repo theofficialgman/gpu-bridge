@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * ring_pingpong.c - round trip through two gb_rings (request + reply, 32-byte
  * records, the spin/futex waits of the real channel) between two processes,

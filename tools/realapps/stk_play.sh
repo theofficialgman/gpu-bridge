@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # stk_play.sh native|bridge : SuperTuxKart for play.sh (HOME is the scratch dir play.sh sets); a 4-kart lighthouse race starts at once
 mode=$1
 if [ $mode = native ]; then R=$HOME_REAL/gb/apps2/root64; A=aarch64-linux-gnu; else R=$HOME_REAL/gb/apps2/root; A=arm-linux-gnueabihf; fi

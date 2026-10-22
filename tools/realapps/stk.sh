@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
 # stk.sh bridge|native|sw [extra args]
 mode=$1; shift
 if [ $mode = native ]; then R=$HOME/gb/apps2/root64; A=aarch64-linux-gnu; else R=$HOME/gb/apps2/root; A=arm-linux-gnueabihf; fi

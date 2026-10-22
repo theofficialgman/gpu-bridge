@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_client_arrays.c - client-side shadow of vertex-array / buffer-binding /
  * pixel-store state, and the client-memory draw path.

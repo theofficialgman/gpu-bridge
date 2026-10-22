@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_proto.h - wire-level definitions shared by the arm32/i386 client and the
  * arm64/x86_64 server.

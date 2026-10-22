@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gbd.c - gpu-bridge render server (64-bit).
  *

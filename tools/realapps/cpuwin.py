@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """Run a command and report CPU use per process name over its run.
 
 usage: cpuwin.py [--idle SECS] [--top N] -- cmd args...

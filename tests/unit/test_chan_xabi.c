@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * test_chan_xabi.c - end-to-end transport test: a 32-bit client and a 64-bit
  * server speak the control protocol, share a channel memfd, exchange small

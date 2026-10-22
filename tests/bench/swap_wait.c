@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * swap_wait.c - CPU used by a vsynced glXSwapBuffers loop with and without an
  * explicit swap interval call. swap_wait <mode> <seconds>:

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gears.c - visual demo for the GLX / desktop-GL bridge: three meshing
  * gears using legacy fixed-function OpenGL (display lists, lighting, matrix

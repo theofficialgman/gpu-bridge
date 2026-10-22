@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 import socket,json,sys,time
 s=socket.socket(socket.AF_UNIX); 
 for i in range(50):

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /*
  * gb_gl_sizes.h - size rules for COMPSIZE() arguments and EGL attribute
  * lists. Compiled into BOTH the client and the server: the client uses these
