@@ -39,8 +39,8 @@ struct gb_ctxstate *gb_state_for(uint32_t ctx_id)
 		s->es = -1;
 		s->basevertex_ok = -1;
 		s->es_restart = -1;
-		s->pack = (struct gb_pixstore){ 4, 0, 0, 0, 0, 0 };
-		s->unpack = (struct gb_pixstore){ 4, 0, 0, 0, 0, 0 };
+		s->pack = (struct gb_pixstore){ .alignment = 4 };
+		s->unpack = (struct gb_pixstore){ .alignment = 4 };
 		s->next = g_states;
 		g_states = s;
 	}
@@ -298,7 +298,7 @@ int gb_cl_geti(void *ctx, uint32_t pname)
 int64_t gb_cl_pixel_bytes(int mode, uint32_t format, uint32_t type, int64_t w,
 			  int64_t h, int64_t d)
 {
-	static const struct gb_pixstore def = { 4, 0, 0, 0, 0, 0 };
+	static const struct gb_pixstore def = { .alignment = 4 };
 	struct gb_ctxstate *st = gb_cur_state();
 	const struct gb_pixstore *ps = &def;
 
@@ -316,7 +316,7 @@ int64_t gb_cl_compressed_bytes(int64_t size, int64_t w, int64_t h, int64_t d)
 
 int64_t gb_cl_bitmap_bytes(int mode, int64_t w, int64_t h)
 {
-	static const struct gb_pixstore def = { 4, 0, 0, 0, 0, 0 };
+	static const struct gb_pixstore def = { .alignment = 4 };
 	struct gb_ctxstate *st = gb_cur_state();
 	const struct gb_pixstore *ps = &def;
 

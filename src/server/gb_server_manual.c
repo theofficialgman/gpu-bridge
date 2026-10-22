@@ -11,6 +11,7 @@
  */
 #include <stddef.h>
 #include <stdio.h>
+#include <unistd.h>
 
 #include "gb_server_impl.h"
 
@@ -1907,7 +1908,6 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		goto bad;
 	}
 
-	const uint8_t *data[CA_COUNT];
 	for (uint32_t i = 0; i < nattr; i++) {
 		int eb = gb_attrib_elem_bytes(a[i].type, (int)a[i].size);
 		int64_t stride = a[i].stride ? (int64_t)a[i].stride : eb;
@@ -1939,8 +1939,6 @@ static void h_draw_client(struct gb_sth *t, const struct gb_cmd_hdr *h,
 		if (!bdata[j])
 			goto bad;
 	}
-	for (uint32_t i = 0; i < nattr; i++)
-		data[i] = bdata[a[i].blob] + a[i].boff;
 
 	GB_NATIVE(glGenBuffers, void, (GLsizei, GLuint *));
 	GB_NATIVE(glBindBuffer, void, (GLenum, GLuint));

@@ -611,7 +611,6 @@ static void test_string_getters(void)
 	      len == (GLsizei)strlen("a_long_uniform_name"), "length %d", len);
 	CHECK(buf[need - 1] == 0, "terminator");
 	CHECK(buf[need] == 'Z', "wrote past the terminator (bufSize 256)");
-	free(buf);
 
 	/* bufSize 0: size and type are still reported */
 	size = -1;
@@ -620,6 +619,7 @@ static void test_string_getters(void)
 	glGetActiveUniform(p, 0, 0, &len, &size, &type, buf);
 	CHECK(size == 1 && type == GL_FLOAT_VEC4, "bufSize 0: size %d type %x",
 	      size, type);
+	free(buf);
 
 	/* info log: same rule */
 	char log[64];
