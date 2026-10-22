@@ -1,8 +1,9 @@
 # gpu-bridge: implementation status
 
-Last updated after the dev-machine conformance loop, the full version /
-extension generation, the upcall and fd-passing mechanisms (see "Coverage",
-"Dev-machine conformance loop" and "Conformance" below). Read together with
+Last updated 2026-10-21, after the performance work (request batching, client
+arrays, the faster synchronous path), a full conformance regression sweep, a
+round of real applications and games on the Tegra, the licence and the Debian
+package. Read together with
 [ARCHITECTURE.md](../ARCHITECTURE.md) (the design) and
 [target-report.md](target-report.md) (measurements on the real device) — this
 file records what actually exists, what was measured, and what is known to be
@@ -13,8 +14,13 @@ missing.
 ```
 sudo apt install gcc-multilib libc6-dev-i386     # once, for the -m32 builds
 cmake -S . -B build -G Ninja && ninja -C build
-ctest --test-dir build                            # 14 tests
+ctest --test-dir build                            # 22 tests
 ```
+
+On the Tegra itself (arm64 server, armhf client library, separate build
+directories), and installing the result as a Debian package, see the top-level
+[README](../README.md) and [packaging/README.md](../packaging/README.md). A fresh
+build is warning-free on arm64, armhf and the x86 `-m32` setup.
 
 On the dev machine "32-bit client" is **i386** and "64-bit server" is
 **x86_64**. The bridge logic depends on pointer width, not the ISA, so this
@@ -196,7 +202,11 @@ Reading the table:
 * **Client-array draws are ~5x slower** than VBO draws (upload per draw).
 * **Readback is a double copy** through the response ring (~3.4 GB/s).
 
-None of this is a Tegra number. Re-run `bench_b32` on the device in Phase 0.
+None of this is a Tegra number. The Tegra numbers are in
+[target-report.md](target-report.md) ("Performance on the Tegra X1"; that table
+is the first measurement, from before the performance work: the synchronous
+`glGetError` there, 0.65 us, is 0.35 us now, and client-array draws cost about
+35-40% of what they did).
 
 ## Lessons learned (all fixed; kept here because they will recur)
 
@@ -717,14 +727,35 @@ stale wake-up record read as an out-of-step reply; see
 
 ## Real applications
 
-See `docs/target-report.md` for the armhf `glmark2` (96.1% of native, all 33
-scenes) and `mesa-utils-bin` results on the Tegra, and the profiling that
-found and fixed the client-array upload path. `GB_STATS=1` prints per-opcode
-client call/stall counts and the server's busy/idle/native-driver-time split.
-`GB_SPIN_US=<n>` sets a time-bounded spin before sleeping on a reply.
-`GB_TRACE_OPS=1` makes the server print one line per request (op name) on
-stderr: useful for comparing a bridged call sequence with what the app does
-natively.
+Unmodified armhf distribution binaries on the Tegra X1, each compared with the
+arm64 build of the same program on the same device (details, CPU figures and
+method in [target-report.md](target-report.md)):
+
+| Application (API) | Bridge vs native arm64 |
+|---|---|
+| glmark2 (GLX) and glmark2-es2 (EGL) | score 99% and 96% of native |
+| minetest (fixed-function, client arrays) | 166 fps unlocked vs 179; 60 fps vsynced |
+| SuperTux (SDL2, GL 3.3 core) | same frame rate (59 fps vsynced); about 2.5x the CPU with exact `glGetError` semantics, 1.7-1.9x with the opt-in `GB_LAZY_GETERROR=1` |
+| SuperTuxKart 1.4 (GL 3.3 core) | 97% of native fps, 1.5x the CPU |
+| Chromium B.S.U., X-Moto, Armagetron, GLtron, Godot 3 (GLES3), Neverputt, Teeworlds, OpenCity, LinCity-NG | native frame rate or within noise |
+| Trigger Rally (immediate mode, about 11,000 calls a frame) | 59% of native fps: the weakest real case |
+| x86 games under `box86` (32-bit x86 on armhf) | render through the bridge (vektor2089, SkyRogue) |
+
+Not run: AssaultCube (the armhf build itself crashes on an unaligned `ldrd`,
+without the bridge too) and VLC (the arm64 ffmpeg is patched for the Tegra's
+hardware decoders, the armhf one is not, so the comparison would not be fair).
+
+Tools: `GB_STATS=1` prints per-opcode client call/stall counts and the server's
+busy/idle/native-driver-time split (`SIGUSR1` dumps it while running);
+`GB_FPS=1` prints a client-side frame counter; `GB_SPIN_US=<n>` sets a
+time-bounded spin before sleeping on a reply; `GB_TRACE_OPS=1` makes the server
+print one line per request (op name) on stderr, for comparing a bridged call
+sequence with what the app does natively. A/B switches for the optimisations:
+`GB_NO_BATCH`, `GB_NO_SCRATCH_MAP`, `GB_ARRAYS_VIA_VBO`, `GB_NO_LOC_CACHE`,
+`GB_NO_FAST_SYNC`. `GB_LAZY_GETERROR=1` (opt-in, changes `glGetError` timing,
+not its semantics for correct programs) answers `glGetError` without waiting
+for the server. The benchmarks are in `tests/bench` and `tests/loopback`
+(`call_bench`, `array_bench`, `sync_mix`), the harnesses in `tools/realapps`.
 
 ## Known limitations / not yet done
 
@@ -765,15 +796,31 @@ a crash or silent wrong answer):
   no entry points are passed through only if listed in `EXT_NO_COMMANDS`
   (pure enums/behaviour known to be safe).
 
-Performance (by design, not yet optimised):
+Performance (what is left; the by-design costs of the first version are gone:
+asynchronous calls are batched into one publish, client-array draws read the
+request's own memory, and a synchronous `glGetError` is 0.35 us, see
+[target-report.md](target-report.md)):
 
-* One shared-memory publish (`seq_cst` fence) per call; batching is Phase 2.
-* GL object names are server-allocated (each `glGen*` is a round trip);
-  client-allocated names are Phase 2.
-* (Done: client-array draws now use a persistent scratch buffer with
-  sub-data at a running offset.)
-* Large reads/writes copy through the rings; a shared arena / dma-buf mapping
-  removes a copy.
+* **Immediate mode is one message per call.** Trigger Rally issues about 11,000
+  `glVertex*`/`glNormal*`/`glTexCoord*` calls a frame and runs at 59% of native.
+  Packing a `glBegin`..`glEnd` block into one message would save part of it
+  (estimated 5-10% of the frame; not done), and its per-frame `glFinish`
+  serialises client and server.
+* **Mapped-buffer writes** (`glMapBuffer(WRITE_ONLY)`, `glMapBufferRange`) download
+  the whole buffer from the server at every map and upload it at unmap:
+  glmark2's `buffer ... update-method=map` scenes run at 18-34% of native. Needs
+  dirty-range tracking or a trustworthy mirror of the buffer.
+* **Large reads and writes copy through the rings** (readback of a 256x256 frame
+  is about 7x slower than native on the Tegra). A shared arena or dma-buf
+  mapping removes the copies; it is also what persistent mappings would need.
+* **GL object names are server-allocated**, so each `glGen*` is a round trip;
+  client-allocated, server-validated names would remove it.
+* **Exact `glGetError`** costs a synchronous round trip per check, so a program
+  that checks after every call (SuperTux, Extreme Tux Racer) runs both
+  processes at near full load: about 2.5x native CPU, 1.7-1.9x with
+  `GB_LAZY_GETERROR=1`. Kept opt-in on purpose.
+* **Client-array draws** still make one driver call per attribute plus the draw;
+  skipping them would mean tracking the driver's pointer state.
 
 Robustness:
 
@@ -812,16 +859,28 @@ design choices marked `[VERIFY]` in ARCHITECTURE.md:
 
 ## Next steps (suggested order)
 
-1. `GL_NV_path_rendering` (83 entry points): path-name types incl. UTF-8/16
+Done since the previous list: the install story (a single arm64 Debian package
+that diverts the armhf libglvnd, `packaging/`), batched publish, the client-array
+and synchronous-path work, more real applications (with an arm64 baseline for
+each), a full conformance regression sweep, and the licence.
+
+1. Immediate-mode packing (`glBegin`..`glEnd` into one message): the largest
+   remaining gap in a real application (Trigger Rally, 59% of native).
+2. Mapped-buffer writes without the whole-buffer download (dirty ranges), for
+   glmark2's `buffer` scenes and apps that stream data through `glMapBuffer`.
+3. A shared arena or dma-buf mapping for bulk transfers (readback, uploads) and
+   for persistent buffer mappings, which are refused today.
+4. Client-allocated GL object names (no round trip per `glGen*`).
+5. Packaging: an upgrade of libglvnd that changes its version numbers
+   (`libEGL.so.1.x.y`) makes `ldconfig` prefer the new file until `gpu-bridge`
+   is reinstalled; a dpkg trigger could re-divert. Pin the EGL vendor for `gbd`
+   (NVIDIA first) instead of relying on file-name order of the glvnd vendor files.
+6. More applications (each with a native arm64 baseline first); armhf programs
+   that use the Tegra's multimedia stack are out of scope.
+7. `GL_NV_path_rendering` (83 entry points): path-name types incl. UTF-8/16
    (sized by parsing), glyph metric/spacing arrays, `COMPSIZE` rules; verify
    each count on the NVIDIA driver with an audit program like
    `tools/audit/pname_audit.c`.
-2. 32-bit coverage on the dev machine: an i386 build of piglit (from source)
-   would exercise the widening paths in the 44k-test loop.
-3. Persistent buffer mappings and a shared arena for bulk transfers (readback
-   is ~7x slower than native; mapped buffers are shadow copies).
-4. Decide how armhf applications are meant to pick up the bridge system-wide
-   (soname shims in `LD_LIBRARY_PATH` work today; an install story is open).
-5. Performance pass (Phase 2): client-allocated names, batched publish.
-6. Larger real applications (each with a native arm64 baseline first).
-7. Vulkan (Phase 4): evaluate adopting the Venus protocol.
+8. Fuzz the server decoders; an i386 build of piglit on the dev machine would
+   exercise the widening paths in the 44k-test loop.
+9. Vulkan (Phase 4): evaluate adopting the Venus protocol.
