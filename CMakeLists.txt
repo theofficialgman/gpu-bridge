@@ -47,7 +47,8 @@ endif()
 # The 32-bit multiarch library directory (for linking libX11 by soname when
 # there is no -dev symlink).
 execute_process(COMMAND ${CMAKE_C_COMPILER} ${GB_M32} -print-multiarch
-                OUTPUT_VARIABLE GB_MULTIARCH32 OUTPUT_STRIP_TRAILING_WHITESPACE)
+                OUTPUT_VARIABLE GB_MULTIARCH32 OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET)
 if(NOT GB_MULTIARCH32)
   set(GB_MULTIARCH32 i386-linux-gnu)
 endif()
@@ -67,8 +68,9 @@ if(GB_PURE32)
   add_link_options(-Wl,-rpath-link,/usr/lib/${GB_MULTIARCH32}
                    -Wl,-rpath-link,/lib/${GB_MULTIARCH32})
 elseif(NOT GB_HOST_CAN_M32)
-  message(STATUS "gpu-bridge: -m32 not usable on this host; 32-bit targets "
-                 "come from GB_PEER32_BUILD if set")
+  message(STATUS "gpu-bridge: 64-bit build (server and tests). The 32-bit client library "
+                 "is a separate build with an armhf compiler; the \"-m32 ... Failed\" "
+                 "probe above is expected here")
 endif()
 
 # --- libgb-proto -------------------------------------------------------------

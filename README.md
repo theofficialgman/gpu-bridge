@@ -74,7 +74,6 @@ build machine had; it is the set that is known to work:
     ninja -C build64 gbd
     ninja -C build32 gb32_glx
 
-(The first `cmake` run prints a "`-m32`" error: it is a probe for the x86 dev setup and can be ignored.)
 This produces `build64/gbd` and `build32/shim32/libGL.so.1.7.0`. The generator (`python3`) reads the
 Khronos XML under `registry/`; nothing is downloaded. On a 4-core Tegra X1 each target takes about
 one to one and a half minutes.
